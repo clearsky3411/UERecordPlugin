@@ -1,0 +1,98 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "VdjmRecorderCore.h"
+#include "UObject/Object.h"
+#include "VdjmRecoderEncoderImpl.h"
+#include "VdjmAndroidCore.generated.h"
+
+struct ANativeWindow;
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	
+class UVdjmRecordAndroidResource : public UVdjmRecordResource
+*/
+UCLASS(Blueprintable)
+class VDJMRECORDER_API UVdjmRecordAndroidResource : public UVdjmRecordResource
+{
+	GENERATED_BODY()
+
+public:
+	void InitializeTexturePool(FIntPoint textureResolution,EPixelFormat finalPixelFormat, const int32 poolSize);
+	
+	virtual void InitializeResource(AVdjmRecordBridgeActor* ownerBridge) override;
+	virtual void ReleaseResources() override;
+	virtual void ResetResource() override;
+	virtual FTextureRHIRef GetCurrPooledTextureRHI() override;
+	virtual FTextureRHIRef GetNextPooledTextureRHI() override;
+	virtual bool DbcIsValidResource() const override;
+	virtual void BeginDestroy() override;
+
+	const int32 PoolSize = 3;
+private:
+	TArray<FTextureRHIRef> mTexturePoolRHI;
+	int32 mCurrentPoolIndex = 0;
+};
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
+class UVdjmRecordAndroidCSUnit : public UObject
+*/
+UCLASS(Blueprintable)
+class VDJMRECORDER_API UVdjmRecordAndroidCSUnit : public UVdjmRecordUnit
+{
+	GENERATED_BODY()
+
+public:
+	virtual void ExecuteUnit(const FVdjmRecordUnitParamContext& context, FVdjmRecordUnitParamPayload& payload) override;
+	virtual EVdjmRecordPipelineStages GetPipelineStage() const override
+	{
+		return EVdjmRecordPipelineStages::EComputeShader;
+	}
+};
+
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
+class UVdjmRecordAndroidSurfacer : public UVdjmRecordUnit
+*/
+UCLASS(Blueprintable)
+class VDJMRECORDER_API UVdjmRecordAndroidUnit : public UVdjmRecordUnit
+{
+	GENERATED_BODY()
+
+public:
+	BEGIN_SHADER_PARAMETER_STRUCT(FVdjmAndroidSubmitPassParameters, )
+	RDG_TEXTURE_ACCESS(InputTexture, ERHIAccess::CopySrc)
+END_SHADER_PARAMETER_STRUCT()
+	
+	UFUNCTION()
+	void RecordPrevStart(UVdjmRecordResource* res);
+	UFUNCTION()	
+	void PostEndPipelineExecute(const FVdjmRecordUnitParamContext& context, FVdjmRecordUnitParamPayload& payload);
+	
+	virtual bool InitializeUnit(UVdjmRecordResource* recordResource) override;
+	virtual void ExecuteUnit(const FVdjmRecordUnitParamContext& context, FVdjmRecordUnitParamPayload& payload) override;
+	virtual void ReleaseUnit() override;
+	virtual EVdjmRecordPipelineStages GetPipelineStage() const override
+	{
+		return EVdjmRecordPipelineStages::ESurfaceEncodeAndWrite;
+	}
+	
+	virtual bool DbcIsValidUnitInit() const override;
+private:
+	void SubmitFrameToSurfacer(FRDGBuilder& graphBuilder, const FRDGTextureRef& srcTexture, double timeStampSec);
+protected:
+	FDelegateHandle mStartRecordPrepareHandle;
+	FDelegateHandle mPostEndPipelineExecuteHandle;
+	TSharedPtr<FVdjmVideoEncoderBase> mAndroidEncoder;
+};
+
+
+/**
+ * 
+ */
+UCLASS()
+class VDJMRECORDER_API UVdjmAndroidCore : public UObject
+{
+	GENERATED_BODY()
+};

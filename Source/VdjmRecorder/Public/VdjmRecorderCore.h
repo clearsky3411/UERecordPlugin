@@ -1,0 +1,875 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "UObject/Object.h"
+#include "RHIGPUReadback.h"
+#include "ShaderParameterStruct.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "VdjmRecordTypes.h"
+#include "VdjmRecorderCore.generated.h"
+
+//	Dbc 란? Design by Contract 의 약자. 무조건 보증된다는 뜻.
+/*§
+ ↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+	↓					Forward Declares						↓
+	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+*/
+
+class UVdjmRecordUnitPipeline;
+
+class UVdjmRecordPlatform;
+class UVdjmRecordFileSaver;
+
+class UVdjmRecordUnit;
+class UVdjmRecordResource;
+class UVdjmRecordDepreDataAsset;
+class AVdjmRecordBridgeActor;
+class FRHIGPUTextureReadback;
+
+
+/*§		↓			class FVdjmReadBackHelper		begin		↓	 */
+class FVdjmReadBackHelper
+{
+private:
+	/*§		↓			struct FVdjmReadBackTextureWrapper		↓	 */
+	struct FVdjmReadBackTextureWrapper
+	{
+		bool bHasRequest = false;
+		TUniquePtr<FRHIGPUTextureReadback> ReadBackBuffer = nullptr;
+		double TimeStamp = 0.0;
+
+		FVdjmReadBackTextureWrapper();
+		void MakeRHIGPUReadback();
+		
+		
+		void EnqueueCopy(FRHICommandList& RHICmdList, FTextureRHIRef srcTexture, double inTimeStamp);		
+		bool IsValidTexture() const
+		{
+			return ReadBackBuffer != nullptr && ReadBackBuffer.IsValid();
+		}
+		void WhatIsWrong() const
+		{
+			UE_LOG(LogTemp, Warning, TEXT("ReadBackBuffer is %s"), ReadBackBuffer == nullptr ? TEXT("nullptr") : TEXT("not nullptr"));
+			 if (ReadBackBuffer)
+			 {
+				 UE_LOG(LogTemp, Warning, TEXT("ReadBackBuffer is %s"), ReadBackBuffer.IsValid() ? TEXT("valid") : TEXT("invalid"));
+			 	if (ReadBackBuffer->IsReady() )
+			 	{
+			 		UE_LOG(LogTemp, Warning, TEXT("ReadBackBuffer is ready"));
+			 	}
+			 	else
+			 	{
+			 		UE_LOG(LogTemp, Warning, TEXT("ReadBackBuffer is not ready"));
+			 	}
+			 	
+			 }
+			 else
+			 {
+				 UE_LOG(LogTemp, Warning, TEXT("ReadBackBuffer is nullptr, cannot check IsValid()"));
+			 }
+		}
+		bool IsReadReady() const
+		{
+			if (IsValidTexture())
+			{
+				return bHasRequest && ReadBackBuffer->IsReady();
+			}
+			return false;
+		}
+		void DeleteBuffer()
+		{
+			if (ReadBackBuffer)
+			{
+				ReadBackBuffer.Reset();
+			}
+		}
+		void* TextureLock(int32& outWidth, int32& outHeight);
+		void TextureUnLock();
+	};
+	
+public:
+	static constexpr int32 ReadBackBufferCount = 3;
+	
+	FVdjmReadBackHelper();
+	~FVdjmReadBackHelper()
+	{
+		for(int i=0; i<ReadBackBufferCount; i++)
+		{
+			mReadBackWrappers[i].DeleteBuffer();
+		}
+	}
+	
+	void Initialize();
+	
+	bool IsValidReadBacks() const
+	{
+		for(int i=0; i<ReadBackBufferCount; i++)
+		{
+			if (not mReadBackWrappers[i].IsValidTexture())
+			{
+				mReadBackWrappers[i].WhatIsWrong();
+				return false;
+			}
+		}
+		return true;
+	}
+	
+	void* TryLockOldest(int32& outWidth,int32& outHeight,double& outTimeStamp);
+	void UnlockOldest() ;
+	void StopAllReadBacks();
+	void EnqueueFrame(FRHICommandList& RHICmdList, FTextureRHIRef SourceTexture, double TimeStamp);
+	
+	
+private:
+	int32 mCurrentWriteIndex = 0;
+	int32 mCurrentReadIndex = 0;
+	FVdjmReadBackTextureWrapper mReadBackWrappers[ReadBackBufferCount];
+};/*§	↑			class FVdjmReadBackHelper		end		↑	 */
+/*
+ ↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
+struct FVdjmRecordUnitParamContext
+ */
+USTRUCT(Blueprintable)
+struct VDJMRECORDER_API FVdjmRecordUnitParamContext
+{
+	GENERATED_BODY()
+
+	UWorld* WorldContext = nullptr;
+	FRDGBuilder* GraphBuilder = nullptr;
+	TWeakObjectPtr<AVdjmRecordBridgeActor> RecordBridge;
+	TWeakObjectPtr<UVdjmRecordEnvCurrentInfo> RecordCurrentEnv;
+	TWeakObjectPtr<UVdjmRecordResource> RecordResource;
+	
+	double CurrentRecordTimeSec = 0.0;
+	
+	void DbcSetupContext(UWorld* world, AVdjmRecordBridgeActor* bridge, UVdjmRecordEnvCurrentInfo* currentEnv, UVdjmRecordResource* resource, FRDGBuilder* graphBuilder,double currentRecordTimeSec)
+	{
+		WorldContext = world;
+		RecordBridge = bridge;
+		RecordCurrentEnv = currentEnv;
+		RecordResource = resource;
+		GraphBuilder = graphBuilder;
+		CurrentRecordTimeSec = currentRecordTimeSec;
+	}
+	
+	bool DbcIsValidRecordContext() const
+	{
+		return RecordCurrentEnv.IsValid() && RecordResource.IsValid() && GraphBuilder != nullptr;
+	} 
+	
+	bool DbcIsValidUnit() const
+    {
+        return WorldContext != nullptr
+            && RecordBridge.IsValid()
+            && DbcIsValidRecordContext();
+    }
+		
+	FVdjmRecordUnitParamContext& Clear()
+	{
+		WorldContext = nullptr;
+		RecordBridge = nullptr;
+		RecordCurrentEnv = nullptr;
+		RecordResource = nullptr;
+		GraphBuilder = nullptr;
+		return *this;
+	}
+};
+/*
+ ↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
+struct FVdjmRecordUnitParamPayload
+ */
+USTRUCT(Blueprintable)
+struct VDJMRECORDER_API FVdjmRecordUnitParamPayload
+{
+	GENERATED_BODY()
+	
+	TWeakObjectPtr<UVdjmRecordUnit> previousUnit;
+	FRDGTextureRef InputTexture;
+	FTextureRHIRef OutputTexture;
+	//TStringBuilder<512> LogString;
+	bool bSuccess = true;
+
+	FVdjmRecordUnitParamPayload() = default;
+	FVdjmRecordUnitParamPayload(const FVdjmRecordUnitParamPayload& other)
+    {
+        previousUnit = other.previousUnit;
+        InputTexture = other.InputTexture;
+        OutputTexture = other.OutputTexture;
+        //LogString.Append(other.LogString);
+        bSuccess = other.bSuccess;
+    }
+	FVdjmRecordUnitParamPayload( FVdjmRecordUnitParamPayload&& other) noexcept
+    {
+        previousUnit = other.previousUnit;
+        InputTexture = other.InputTexture;
+        OutputTexture = other.OutputTexture;
+        //LogString.Append(other.LogString);
+        bSuccess = other.bSuccess;
+    }
+	
+	FVdjmRecordUnitParamPayload& operator=(const FVdjmRecordUnitParamPayload& other)
+    {
+        previousUnit = other.previousUnit;
+        InputTexture = other.InputTexture;
+        OutputTexture = other.OutputTexture;
+        //LogString.Append(other.LogString);
+        bSuccess = other.bSuccess;
+        return *this;
+    }
+	FVdjmRecordUnitParamPayload& operator=( FVdjmRecordUnitParamPayload&& other) noexcept
+    {
+        previousUnit = other.previousUnit;
+        InputTexture = other.InputTexture;
+        OutputTexture = other.OutputTexture;
+        //LogString.Append(other.LogString);
+        bSuccess = other.bSuccess;
+        return *this;
+    }
+	
+	FVdjmRecordUnitParamPayload& Clear()
+	{
+		previousUnit = nullptr;
+		InputTexture = nullptr;
+		OutputTexture = nullptr;
+		//LogString.Reset();
+		bSuccess = true;
+		return *this;
+	}
+};
+UCLASS(Blueprintable)
+class VDJMRECORDER_API UVdjmRecordUnit : public UObject
+{
+	GENERATED_BODY()
+public:
+	virtual bool InitializeUnit(UVdjmRecordResource* recordResource);
+	
+	virtual void ExecuteUnit(const FVdjmRecordUnitParamContext& context,FVdjmRecordUnitParamPayload& payload)PURE_VIRTUAL(UVdjmRecordUnit::ExecuteUnit, return; )
+
+	virtual void ReleaseUnit()PURE_VIRTUAL(UVdjmRecordUnit::ReleaseUnit, return; )
+	
+	virtual EVdjmRecordPipelineStages GetPipelineStage() const PURE_VIRTUAL(UVdjmRecordUnit::GetPipelineStage, return EVdjmRecordPipelineStages::EUndefined; )
+	
+	virtual int32 GetPipelineStageCustomOrder() const { return 0; }
+
+	virtual bool DbcIsValidUnitInit() const  { return LinkedPipeline.IsValid() && LinkedRecordResource.IsValid();  }
+	
+	TWeakObjectPtr<UVdjmRecordUnitPipeline> LinkedPipeline;
+	TWeakObjectPtr<UVdjmRecordResource> LinkedRecordResource;
+};
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+class UVdjmRecordUnitPipeline : public UObject 		
+	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+*/
+
+DECLARE_MULTICAST_DELEGATE_TwoParams(FVdjmRecordPipelineEvent,const FVdjmRecordUnitParamContext&,FVdjmRecordUnitParamPayload& );
+
+UCLASS(Blueprintable)
+class VDJMRECORDER_API UVdjmRecordUnitPipeline : public UObject
+{
+	GENERATED_BODY()
+public:
+	UVdjmRecordUnit* CreateUnit(TSubclassOf<UVdjmRecordUnit> unitCls);
+	
+	virtual void InitializeRecordPipeline(UVdjmRecordResource* recordResource);
+
+	virtual void ExecuteRecordPipeline(const FVdjmRecordUnitParamContext& context,FVdjmRecordUnitParamPayload& payload)PURE_VIRTUAL(UVdjmRecordUnitPipeline::ExecuteRecordPipeline, return; )
+	virtual void StopRecordPipelineExecution() { /* Optional override for pipelines that support stopping mid-execution */ }
+	virtual void ReleaseRecordPipeline();
+	
+	virtual bool DbcIsValid() const;
+
+	bool DbcUnitCheck() const;
+
+	FVdjmRecordPipelineEvent OnBeginPipelineExecution;
+	FVdjmRecordPipelineEvent OnEndExecuteUnit;
+	FVdjmRecordPipelineEvent OnEndPipelineExecution;
+
+	UPROPERTY()
+	TArray<TObjectPtr<UVdjmRecordUnit>> RecordUnits;
+	UPROPERTY()
+	TWeakObjectPtr<UVdjmRecordResource> LinkedRecordResource;
+	UPROPERTY()
+	TWeakObjectPtr<AVdjmRecordBridgeActor> LinkedBridgeActor;
+protected:
+	void TravelLoopUnits(TFunctionRef<int32(UVdjmRecordUnit* unit)> travelFunc) const;
+};
+
+
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+	↓		class  UVdjmRecordData : public UObject				↓
+	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+*/
+UCLASS()
+class VDJMRECORDER_API UVdjmRecordDescriptor : public UObject
+{
+    GENERATED_BODY()
+public:
+	UPROPERTY(Category = "Config|Video",
+		EditAnywhere)
+	bool bUseWindowResolution = true;
+	UPROPERTY(Category = "Config|Video",
+		EditAnywhere)
+	FIntPoint RecordResolution = FIntPoint(1920,1080);
+	UPROPERTY(Category = "Config|Video",
+		EditAnywhere)
+	int32 FrameRate = 30;
+    UPROPERTY(Category = "Config|Video",
+    	EditAnywhere)
+	TMap<EVdjmRecordBitrateType,int32> BitrateMap;
+	UPROPERTY(Category = "Config|Video",
+			EditAnywhere)
+	EVdjmRecordBitrateType SelectedBitrateType = EVdjmRecordBitrateType::EDefault;
+	/*
+	 *	pc
+	 *		high:		10,000,000	(	10Mbps	)
+	 *		medium:		 7,500,000	(	7.5Mbps	)
+	 *		low:		 5,000,000	(	5Mbps	)
+	 *	mobile
+	 *		Ultra:		 3,000,000	(	3Mbps	)
+	 *		high:		 2,000,000	(	2Mbps	)
+	 *		medium:		 1,000,000	(	1Mbps	)
+	 *		low:		   750,000	(	750Kbps	)
+	 */
+
+	UPROPERTY(Category = "Config|FileIO",
+	 EditAnywhere)
+	FString FilePrefix;
+	UPROPERTY(Category = "Config|FileIO",
+	 EditAnywhere)
+	EVdjmRecordSavePathDirectoryType SavePathDirectoryType;
+	UPROPERTY(Category = "Config|FileIO",
+	 EditAnywhere,meta=(EditCondition="SavePathDirectoryType==EVdjmRecordSavePathDirectoryType::ECustomDir") )
+	FString CustomSaveDirectory;
+	UPROPERTY(Category = "Config|FileIO",
+	 EditAnywhere,meta=(EditCondition="SavePathDirectoryType==EVdjmRecordSavePathDirectoryType::ECustomSaverClass") )
+	TSubclassOf<UVdjmRecordFileSaver> CustomFileSaverClass;
+
+	UPROPERTY(Category = "Config|Rendering",
+	 EditAnywhere)
+	TEnumAsByte<ETextureRenderTargetFormat> RenderTargetFormat;
+	
+	//EPixelFormat
+	void CopyForSnapshot(const UVdjmRecordDescriptor*& sourceData);
+    /*
+	 * GetRecordCachedGroupCount
+	 * GetRecordResolution
+	 * GetRecordFrameRate
+	 * GetRecordBitrate
+	 * GetRecordFilePath
+	 * GetRenderTargetPixelFormat
+	 */
+	FIntVector GetRecordCachedGroupCount(const FVdjmRecordGlobalRules& globalRules) const
+	{
+		return bUseWindowResolution ?
+			globalRules.Numthreads : 
+			FIntVector(
+				FMath::DivideAndRoundUp(RecordResolution.X,globalRules.Numthreads.X),
+				FMath::DivideAndRoundUp(RecordResolution.Y,globalRules.Numthreads.Y),
+				globalRules.Numthreads.Z);
+	}
+	FIntPoint GetRecordResolution() const;
+
+    int32 GetRecordFrameRate() const;
+
+    int32 GetRecordBitrate();
+
+    FString GetRecordFilePrefix();
+
+    FString GetRecordFilePath();
+
+    EPixelFormat GetRenderTargetPixelFormat() const;
+};
+
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+	↓		class  UVdjmRecordFileSaver : public UObject		↓
+	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+*/
+UCLASS(Blueprintable)
+class VDJMRECORDER_API UVdjmRecordFileSaver : public UObject
+{
+	GENERATED_BODY()
+public:
+
+	
+	UPROPERTY(Category = "Config|FileIO",
+		EditAnywhere)
+	FString TargetFilePath;
+};
+
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+							Declare Delegates	
+	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+*/
+
+DECLARE_MULTICAST_DELEGATE_OneParam(FVdjmRecordCallBackEvent,UVdjmRecordResource*);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FVdjmRecordChangeStatusEvent,UVdjmRecordResource* /*self*/,EVdjmResourceStatus/*Prev*/);
+
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
+class UVdjmRecordResource : public UObject
+	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
+*/
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	
+	class  UVdjmRecordFileSaver : public UObject
+	@brief 녹화에 필요한 리소스들을 관리하는 클래스
+	@detail
+	- AVdjmRecordBridgeActor 가 소유하고 관리함.
+	- 녹화에 필요한 텍스처 풀링, 녹화 설정 정보 등을 포함함.
+	- 녹화 유닛들이 녹화 진행 중에 필요한 리소스들을 참조할 수 있도록 함.
+	- dependency in : AVdjmRecordBridgeActor, UVdjmRecordEnvCurrentInfo
+*/
+UCLASS(Blueprintable)
+class VDJMRECORDER_API UVdjmRecordResource : public UObject
+{
+	GENERATED_BODY()
+public:
+	virtual void BeginDestroy() override;
+	
+	virtual void InitializeResource(AVdjmRecordBridgeActor* ownerBridge);
+	virtual void ResetResource();
+	virtual void ReleaseResources();
+	
+	virtual FTextureRHIRef GetCurrPooledTextureRHI()PURE_VIRTUAL(UVdjmRecordResource::GetCurrPooledTextureRHI, return nullptr; );
+	virtual FTextureRHIRef GetNextPooledTextureRHI()PURE_VIRTUAL(UVdjmRecordResource::GetNextPooledTextureRHI, return nullptr; );
+	
+	bool DbcIsValidResourceInit() const
+	{
+		return (OwnerBridgeActor.IsValid());
+	}
+	bool DbcIsDefaultReady() const
+	{
+		return 	DbcIsValidResourceInit() && LinkedCurrentInfo.IsValid();
+	}
+	
+	virtual bool DbcIsValidResource() const
+	{
+		return DbcIsDefaultReady();
+	}
+	/*
+	 * 굳이 안써도됨. 
+	 */
+	void OnStatusChanged(EVdjmResourceStatus newStatus)
+	{
+		EVdjmResourceStatus prevStatus = CurrentResourceStatus;
+		CurrentResourceStatus = newStatus;
+		OnChangeResourceStatusFunc.Broadcast(this,prevStatus);//	현재는 알아서 얻어와라.
+	}
+	void OnStatusChangeNewToReady()
+	{
+		if (not DbcIsValidResourceInit())
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordResource::OnStatusChangeNewToReady - Resource is not valid. Call Initialize() first."));
+			return;
+		}
+		OnStatusChanged(EVdjmResourceStatus::EReady);
+	}
+	void OnStatusChangeReadyToRunning()
+	{
+		if (not DbcIsDefaultReady())
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordResource::DbcIsDefaultReady - Resource is not valid. Call Initialize() first."));
+			return;
+		}
+		OnStatusChanged(EVdjmResourceStatus::ERunning);
+	}
+	void OnStatusChangeRunningToWaiting()
+	{		
+		OnStatusChanged(EVdjmResourceStatus::EWaiting);
+	}
+	void OnStatusChangeWaitingToTerminated()
+	{		
+		OnStatusChanged(EVdjmResourceStatus::ETerminated);
+	}
+	void OnStatusChangeAnyToError()
+	{		
+		OnStatusChanged(EVdjmResourceStatus::EError);
+	}
+	
+	//UPROPERTY(BlueprintAssignable)
+	//FVdjmRecordEvent OnResourceTexturePoolInitialized;
+	FVdjmRecordChangeStatusEvent OnChangeResourceStatusFunc;
+	FVdjmRecordCallBackEvent OnResourceTexturePoolInitializedFunc;
+	
+	FIntVector	CachedGroupCount;
+	FIntPoint	OriginResolution;
+	FIntPoint	TextureResolution;
+	int32		FinalFrameRate = 30;
+	int32		FinalBitrate = 2000000;
+	FString		FinalFilePath;	//	이거는 여기에서 해줄게 아님. platform 마다 달라야함.
+	EPixelFormat FinalPixelFormat = PF_A8R8G8B8;
+	
+	TWeakObjectPtr<UVdjmRecordEnvCurrentInfo> LinkedCurrentInfo;
+	TWeakObjectPtr<AVdjmRecordBridgeActor> OwnerBridgeActor;
+protected:
+	FTextureRHIRef CreateTextureForNV12(FIntPoint resolution,EPixelFormat pixelformat,ETextureCreateFlags createFlags);
+	EVdjmResourceStatus CurrentResourceStatus = EVdjmResourceStatus::ENew;	
+};
+
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	
+	struct FVdjmRecordEnvPlatformInfo 
+
+*/
+USTRUCT(Blueprintable)
+struct VDJMRECORDER_API FVdjmRecordEnvPlatformInfo 
+{
+	GENERATED_BODY()
+
+	UPROPERTY(Category ="Record|Env",EditAnywhere)
+	FIntPoint Resolution = FIntPoint(1920,1080);
+	UPROPERTY(Category ="Record|Env",EditAnywhere)
+	int32 FrameRate = 30;
+	UPROPERTY(Category ="Record|Env",EditAnywhere)
+	TEnumAsByte<EPixelFormat> PixelFormat = EPixelFormat::PF_A8R8G8B8;
+	
+	UPROPERTY(Category ="Record|Env",EditAnywhere,
+		meta=(DisplayName="Bitrate Table (Mbps)", ClampMin="1", UIMin="1"))
+	TMap<EVdjmRecordBitrateType,float> BitrateMap;	//	Default 로 선택을 해놔라.
+	
+    UPROPERTY(Category ="Record|Env",EditAnywhere)
+	TSubclassOf<UVdjmRecordResource> RecordResourceClass;
+	
+	UPROPERTY(Category ="Record|Env|Save",EditAnywhere)
+	FString FilePrefix;
+    UPROPERTY(Category ="Record|Env|Save",EditAnywhere)
+	TSubclassOf<UVdjmRecordFileSaver> CustomFileSaverClass;	//	nullptr 이면 그냥 디폴트로 저장함. 무조건 filePath 는 플렛폼결로 지정된 곳에 저장.
+	UPROPERTY(Category ="Record|Env|Pipeline",EditAnywhere)
+	TSubclassOf<UVdjmRecordUnitPipeline> PipelineClass;
+    UPROPERTY(Category ="Record|Env|Pipeline",EditAnywhere)
+	TMap<EVdjmRecordPipelineStages,TSubclassOf<UVdjmRecordUnit>> PipelineUnitClassMap;
+
+	const TSubclassOf<UVdjmRecordUnit>* GetPipelineState(const EVdjmRecordPipelineStages& stage)
+	{
+		return PipelineUnitClassMap.Find(stage);
+	}
+	
+	bool DbcIsValid() const
+	{
+		return RecordResourceClass != nullptr
+			&& PipelineClass != nullptr
+			&& PipelineUnitClassMap.Num() > 0;
+	}
+};
+
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+	class UVdjmRecordEnvDataAsset :public UPrimaryDataAsset
+	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+*/
+UCLASS()
+class VDJMRECORDER_API UVdjmRecordEnvDataAsset :public UPrimaryDataAsset
+{
+	GENERATED_BODY()
+public:
+	UPROPERTY(EditAnywhere)
+	FVdjmRecordGlobalRules GlobalRules;
+	
+	UPROPERTY(EditAnywhere)
+	TMap<EVdjmRecordEnvPlatform,FVdjmRecordEnvPlatformInfo> PlatformInfoMap;
+
+	FVdjmRecordEnvPlatformInfo* GetPlatformInfo(EVdjmRecordEnvPlatform targetPlatform)
+    {
+        if (FVdjmRecordEnvPlatformInfo* foundInfo = PlatformInfoMap.Find(targetPlatform))
+        {
+        	foundInfo->FrameRate = FMath::Min(foundInfo->FrameRate, GlobalRules.MaxFrameRate);
+            return const_cast<FVdjmRecordEnvPlatformInfo*>(foundInfo);
+        }
+        return nullptr;
+    }
+};
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+@brief class UVdjmRecordEnvCurrentInfo
+@detail
+- 현재 녹화 환경에 대한 정보를 담고 있는 클래스. AVdjmRecordBridgeActor 가 소유하고 관리함.
+- 녹화 환경이란, 현재 플랫폼, 해상도, 프레임레이트, 픽셀 포맷, 비트레이트, 파일 저장 경로 등 녹화에 필요한 모든 정보를 포함함.
+- AVdjmRecordBridgeActor 는 녹화 시작 시점에 UVdjmRecordEnvDataAsset 에서 현재 환경에 맞는 정보를 가져와서 UVdjmRecordEnvCurrentInfo 에 저장함. 그리고 녹화 유닛들이 녹화 진행 중에 현재 환경 정보를 참조할 수 있도록 함.
+- Dependency In : UVdjmRecordEnvDataAsset, AVdjmRecordBridgeActor
+*/
+UCLASS()
+class VDJMRECORDER_API UVdjmRecordEnvCurrentInfo : public UObject
+{
+	GENERATED_BODY()
+public:
+	void InitializeCurrentEnvironment(AVdjmRecordBridgeActor* ownerBridge);
+
+	bool DbcIsValidCurrentInfo() const;
+	bool DbcValidCurrentInfoPipelines() const
+	{
+		return DbcIsValidCurrentInfo() && mCurrentPipelineInstance.IsValid()&& mCurrentPipelineInstance->DbcIsValid();
+	}
+	
+	float GetMaxDurationSecond() const
+	{
+		return mCurrentGlobalRules.MaxRecordDurationSeconds;
+	}
+	FVdjmRecordGlobalRules GetCurrentGlobalRules() const { return mCurrentGlobalRules; }
+	EVdjmRecordEnvPlatform GetCurrentPlatform() const { return mCurrentPlatform; }
+	FIntPoint GetCurrentResolution() const { return mCurrentResolution; }
+    int32 GetCurrentFrameRate() const { return mCurrentFrameRate; }
+	EPixelFormat GetCurrentPixelFormat() const { return mCurrentPixelFormat; }
+    int32 GetCurrentBitrate() const { return mCurrentBitrate; }
+    FString GetCurrentFilePrefix() const { return mCurrentFilePrefix; }
+    FString GetCurrentFilePath() const { return mCurrentFilePath; }
+
+	void SetRecordUnitPipeline(UVdjmRecordUnitPipeline* pipelineInstance) { mCurrentPipelineInstance = pipelineInstance; }
+	UVdjmRecordUnitPipeline* GetRecordUnitPipeline() const { return mCurrentPipelineInstance.Get(); }
+
+	FIntVector GetRecordCachedGroupCount() const
+	{
+		return bUseWindowResolution ?
+			mCurrentGlobalRules.Numthreads : 
+			FIntVector(
+				FMath::DivideAndRoundUp(mCurrentResolution.X,mCurrentGlobalRules.Numthreads.X),
+				FMath::DivideAndRoundUp(mCurrentResolution.Y,mCurrentGlobalRules.Numthreads.Y),
+				mCurrentGlobalRules.Numthreads.Z);
+	}
+	FString MakeFinalFilePath(const FString& customFileName);
+
+private:
+	UPROPERTY()
+	EVdjmRecordEnvPlatform mCurrentPlatform = EVdjmRecordEnvPlatform::EDefault;
+	UPROPERTY()
+	bool bUseWindowResolution = true;
+	UPROPERTY()
+	FVdjmRecordGlobalRules mCurrentGlobalRules;
+	UPROPERTY()
+	FIntPoint mCurrentResolution;
+	UPROPERTY()
+	int32 mCurrentFrameRate = 30;
+	UPROPERTY()
+	TEnumAsByte<EPixelFormat> mCurrentPixelFormat = EPixelFormat::PF_A8R8G8B8;
+	UPROPERTY()
+	TMap<EVdjmRecordBitrateType,float> mAllBitrateMap;
+	UPROPERTY()
+	int32 mCurrentBitrate;	//	Default 로 선택을 해놔라.
+	UPROPERTY()
+	FString mCurrentFilePrefix;
+	UPROPERTY()
+	FString mCurrentFilePath;
+	UPROPERTY()
+	FString mFileName;
+	
+	UPROPERTY()
+	TObjectPtr<UVdjmRecordFileSaver> mCurrentCustomFileSaverInstance;	//	nullptr 이면 그냥 디폴트로 저장함. 무조건 filePath 는 플렛폼결로 지정된 곳에 저장.
+	UPROPERTY()
+	TWeakObjectPtr<UVdjmRecordUnitPipeline> mCurrentPipelineInstance;
+	
+	TWeakObjectPtr<UVdjmRecordEnvDataAsset> mLinkedDataAsset;
+};
+
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+	↓		class  UVdjmRecordFileSaver : public UObject		↓
+	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+*/
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVdjmRecordEvent,UVdjmRecordResource*, recordData);
+DECLARE_MULTICAST_DELEGATE_OneParam(FVdjmRecordInnerEvent,UVdjmRecordResource*);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmRecordTickEvent,UVdjmRecordResource*, recordResource, float, deltaTime);
+
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+						UVdjmRecordEncoderUnit 		
+	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+*/
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmOnEncoderPacketReady, const TArray<uint8>&, PacketData, int64, TimeStamp);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVdjmOnFrameRecorded, int64, CurrentTimeStampMs);
+
+UCLASS(Blueprintable)
+class VDJMRECORDER_API UVdjmRecordEncoderUnit : public UVdjmRecordUnit
+{
+	GENERATED_BODY()
+public:
+	
+	virtual void EncodeFrameRDGPass(FRDGBuilder& graphBuilder,const FTextureRHIRef srcTex,	const double timeStampSec) PURE_VIRTUAL(UVdjmRecordEncoderUnit::EncodeFrameRDGPass, );
+	virtual void StopEncoding() PURE_VIRTUAL(UVdjmRecordEncoderUnit::StopEncoding, );
+
+	UPROPERTY(BlueprintAssignable)
+	FVdjmOnEncoderPacketReady OnEncoderPacketReady;
+	
+protected:
+	TWeakObjectPtr<UVdjmRecordResource> LinkedRecordResource;
+};
+
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+	↓		class  UVdjmRecordFileSaver : public UObject		↓
+	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+*/
+UCLASS(Blueprintable)
+class VDJMRECORDER_API AVdjmRecordBridgeActor : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	
+	//static UVdjmRecordDepreDataAsset* TryGetRecordConfigure();
+
+	static UVdjmRecordEnvDataAsset* TryGetRecordEnvConfigure();
+	static AVdjmRecordBridgeActor* TryGetRecordBridgeActor(UWorld* worldContext = nullptr);
+	
+	AVdjmRecordBridgeActor();
+	virtual void BeginDestroy() override;
+	virtual void Tick(float DeltaSeconds) override;
+	//UVdjmRecordDescriptor* DbcGetCurrentRecordDesc() ;
+	
+	UFUNCTION(BlueprintCallable)
+	void StartRecording();
+	
+	UFUNCTION(BlueprintCallable)
+	void StopRecording();
+
+	UFUNCTION(BlueprintCallable)
+	FString GetCurrentFileName()
+	{
+		return FString();
+	}
+	
+	/**
+	* @param SlateWindow : 녹화 대상이 되는 윈도우. 보통은 게임 뷰포트가 될 것임.
+	* @param  BackBuffer : 녹화 대상 윈도우의 백버퍼 텍스처. 이 텍스처를 기반으로 녹화 유닛들이 필요한 작업들을 수행하게 될 것임. 즉 이게 inputTexture
+	*/
+	void OnBackBufferReady_RenderThread(SWindow& SlateWindow, const FTextureRHIRef& BackBuffer);
+
+	/*	↓↓↓[	Get 	]↓↓↓	*/
+	
+	
+	/*	↓↓↓[	Setters for mCurrentRecordData	]↓↓↓	*/
+	
+	bool DbcValidConfigureDataAsset() const
+	{
+		return mRecordConfigureDataAsset != nullptr;
+	}
+	bool DbcValidCurrentEnvInfo() const
+	{
+		return DbcValidConfigureDataAsset() && mCurrentEnvInfo != nullptr && mCurrentEnvInfo->DbcIsValidCurrentInfo();
+	}
+	bool DbcValidRecordResource() const
+	{
+		return mRecordResource != nullptr && mRecordResource->DbcIsValidResourceInit();
+	}
+	bool DbcValidRecordPipeline() const
+	{
+		return DbcValidRecordResource()&& mRecordPipeline != nullptr && mRecordPipeline->DbcIsValid();
+	}
+	bool DbcRecordingPossible()  const
+	{
+		return DbcValidRecordPipeline() && DbcValidCurrentEnvInfo();
+	}
+	
+	bool DbcRecordStartable() const
+	{
+		return DbcRecordingPossible() && not bIsRecording;
+	}
+
+	bool DbcRecordStartableFull() const;
+	FVdjmRecordGlobalRules GetGlobalRules() const
+    {
+        return mGlobalRules;
+    }
+	
+	void StopRecordingInternal();
+	
+
+	//	Platform Branch Function
+	static EVdjmRecordEnvPlatform GetTargetPlatform();
+	
+	void PostResourceInit(UVdjmRecordResource* resource);
+
+	UVdjmRecordEnvDataAsset* GetRecordEnvConfigureDataAsset()
+	{
+		return mRecordConfigureDataAsset;
+	}
+	UVdjmRecordEnvCurrentInfo* GetCurrentEnvInfo()
+	{
+        return mCurrentEnvInfo;
+    }
+	FVdjmRecordEnvPlatformInfo* GetCurrentPlatformInfo() const
+	{
+		if (DbcValidConfigureDataAsset())
+		{
+			return mRecordConfigureDataAsset->GetPlatformInfo(GetTargetPlatform());
+		}
+		return nullptr;
+	}
+	FVdjmRecordGlobalRules GetCurrentGlobalRules() const
+	{
+		return mCurrentEnvInfo ? mCurrentEnvInfo->GetCurrentGlobalRules() : FVdjmRecordGlobalRules();
+	}
+	
+	/*	↓↓↓[			Delegators			]↓↓↓	*/
+	UPROPERTY(BlueprintAssignable,EditAnywhere)
+	FVdjmRecordEvent OnRecordPrevStart;
+	FVdjmRecordInnerEvent OnRecordPrevStartInner;
+	
+	UPROPERTY(BlueprintAssignable,EditAnywhere)
+	FVdjmRecordEvent OnRecordStarted;
+	FVdjmRecordInnerEvent OnRecordStartedInner;
+	
+	UPROPERTY(BlueprintAssignable,EditAnywhere)
+	FVdjmRecordTickEvent OnRecordTick;
+	
+	UPROPERTY(BlueprintAssignable,EditAnywhere)
+	FVdjmRecordEvent OnRecordStopped;
+	FVdjmRecordInnerEvent OnRecordStoppedInner;
+
+	UPROPERTY(BlueprintAssignable,EditAnywhere)
+	FVdjmRecordEvent OnRecordError;
+	
+	FSceneViewport* mTargetViewport;
+	TWeakObjectPtr<APlayerController> mTargetPlayerController;
+
+	UPROPERTY(EditAnywhere)
+	EVdjmRecordBitrateType SelectedBitrateType = EVdjmRecordBitrateType::EDefault;
+
+
+protected:
+	virtual void BeginPlay() override;
+
+public:
+
+protected:
+	UPROPERTY()
+	FVdjmRecordGlobalRules mGlobalRules;
+	UPROPERTY()
+	TObjectPtr<UVdjmRecordResource> mRecordResource;
+	UPROPERTY()
+	TObjectPtr<UVdjmRecordUnitPipeline> mRecordPipeline;
+
+	FDelegateHandle mBackBufferDelegateHandle;
+	//FVdjmRecordUnitParamContext mRecordUnitContext;
+	//FVdjmRecordUnitParamPayload mRecordUnitPayload;
+	FDelegateHandle mOnResourceTexturePoolInitializedHandle;
+	
+	bool bIsRecording = false;
+
+	UPROPERTY()
+	TObjectPtr<UVdjmRecordEnvDataAsset> mRecordConfigureDataAsset;
+	
+	UPROPERTY()
+	TObjectPtr<UVdjmRecordEnvCurrentInfo> mCurrentEnvInfo;
+
+	UPROPERTY()
+	TObjectPtr<USceneComponent> mRootScene;
+	
+	UPROPERTY()
+	double mRecordEndTime = 0.0;
+	double mNextFrameTime = 0.0;
+	double mFrameInterval = 0.0;
+};
+
+
+UCLASS()
+class VDJMRECORDER_API UVdjmRecorderCore : public UObject
+{
+	GENERATED_BODY()
+};

@@ -1,0 +1,62 @@
+#include "/Engine/Public/Platform.ush"
+
+// 텍스처와 버퍼 파라미터 선언
+Texture2D<float4> InputTexture; // 우리가 읽어올 렌더타겟
+RWTexture2D<float> OutputTexture; // 결과를 쓸 텍스처 (나중에 비디오 인코더로 넘김)
+
+uint OriginWidth;
+uint OriginHeight;
+
+float RGBtoY(float3 c)
+{
+	// BT.709 (HD 표준)
+	float y = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+	return (saturate(y));
+}
+
+float2 RGBtoUV(float3 c)
+{
+	float u = -0.09991 * c.r - 0.33609 * c.g + 0.436 * c.b;
+	float v = 0.615 * c.r - 0.55861 * c.g - 0.05639 * c.b;
+    
+	// 0~255 범위로 정규화 (+128 offset)
+	float u_int = (saturate(u + 0.5f));
+	float v_int = (saturate(v + 0.5f));
+	return float2(u_int, v_int);
+}
+
+float3 LinearToSRGB(float3 Color)
+{
+	return pow(max(Color, 0.0f), 1.0f / 2.2f);
+}
+
+[numthreads(8, 8, 1)] // GPU 스레드 그룹 크기 (일반적인 8x8, 16x16, 32x32 중 선택)
+void MainCS(uint3 ThreadId : SV_DispatchThreadID)
+{
+	uint2 basePos = ThreadId.xy * 2; // 2x2 블록의 왼쪽 위 픽셀 위치
+
+	if (basePos.x >= OriginWidth || basePos.y >= OriginHeight)
+	{
+		return; // 경계 검사
+	}
+	float3 pos00 = InputTexture.Load(int3(basePos + uint2(0, 0), 0)).rgb; // Top-Left
+	float3 pos10 = InputTexture.Load(int3(basePos + uint2(1, 0), 0)).rgb; // Top-Right
+	float3 pos01 = InputTexture.Load(int3(basePos + uint2(0, 1), 0)).rgb; // Bottom-Left
+	float3 pos11 = InputTexture.Load(int3(basePos + uint2(1, 1), 0)).rgb; // Bottom-Right
+	
+	// 4개 픽셀 각각 Y값 쓰고 제자리에 배치
+	OutputTexture[basePos + uint2(0, 0)] = RGBtoY(pos00);
+	OutputTexture[basePos + uint2(1, 0)] = RGBtoY(pos10);
+	OutputTexture[basePos + uint2(0, 1)] = RGBtoY(pos01);
+	OutputTexture[basePos + uint2(1, 1)] = RGBtoY(pos11);
+
+	float3 avgColor = (pos00 + pos10 + pos01 + pos11) * 0.25f;
+	float2 uv = RGBtoUV(avgColor);
+
+	uint2 UVPos;
+	UVPos.x = ThreadId.x * 2;
+	UVPos.y = OriginHeight + ThreadId.y; // UV는 Y 성분 아래에 위치
+
+	OutputTexture[UVPos] = uv.x;
+	OutputTexture[UVPos + uint2(1, 0)] = uv.y;
+}

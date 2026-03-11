@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 1. 앱 권한 설정 -->
+    <androidManifestUpdates>
+        <!-- 녹화된 MP4 파일을 스마트폰 저장소에 쓰기 위한 권한 -->
+        <addPermission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+        <addPermission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+
+        <!-- (선택) 나중에 마이크 소리도 함께 녹음하실 계획이라면 주석을 푸세요 -->
+        <!-- <addPermission android:name="android.permission.RECORD_AUDIO" /> -->
+    </androidManifestUpdates>
+
+    <!-- 2. 선생님이 작성하실 Java 파일을 빌드 폴더로 복사 -->
+    <resourceCopies>
+        <copyDir src="$S(PluginDir)/Android/java" dst="$S(BuildDir)/src/main/java" />
+    </resourceCopies>
+
+    <!-- 3. 언리얼 Shipping 빌드 시 선생님의 Java 클래스가 삭제되지 않도록 보호 (ProGuard) -->
+    <buildGradleAdditions>
+        <insert>
+            <![CDATA[
+            android {
+                buildTypes {
+                    release {
+                        proguardFiles.add(file('proguard-rules.pro'))
+                    }
+                }
+            }
+            ]]>
+        </insert>
+    </buildGradleAdditions>
+
+    <proguardAdditions>
+        <insert>
+            <![CDATA[
+            -keep class com.vdigm.vdjmrecorder.** { *; }
+            ]]>
+        </insert>
+    </proguardAdditions>
+
+</root>
