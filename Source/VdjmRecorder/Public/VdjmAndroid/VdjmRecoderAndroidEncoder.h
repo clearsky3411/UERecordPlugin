@@ -14,6 +14,117 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
+class FVdjmAndroidEncoderImpl;
+class FVdjmAndroidRecordSession;
+
+class FVdjmAndroidFilePathWrapper
+{
+public:
+	
+	FVdjmAndroidFilePathWrapper(): mFinalFilePath(TEXT(""))
+	{}
+	
+	FVdjmAndroidFilePathWrapper(const FString& inFilePath)
+	{
+		mFinalFilePath = inFilePath;
+	}
+	~FVdjmAndroidFilePathWrapper()= default;
+	
+	FString operator=( const FString& inFilePath )
+	{
+		mFinalFilePath = inFilePath;
+		return mFinalFilePath;
+	}
+	
+private:
+	
+	FString mFinalFilePath;
+};
+
+struct VkEncoderContext
+{
+	VkInstance Instance = VK_NULL_HANDLE;
+	VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
+	VkDevice Device = VK_NULL_HANDLE;
+	VkQueue GraphicsQueue = VK_NULL_HANDLE;
+	uint32_t GraphicsQueueFamilyIndex = 0;
+};
+
+struct VkSubmitFrameInfo
+{
+	VkImage SrcImage = VK_NULL_HANDLE;
+	VkFormat SrcFormat = VK_FORMAT_R8G8B8A8_UNORM;
+	uint32_t SrcWidth = 0;
+	uint32_t SrcHeight = 0;
+	VkImageLayout SrcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+};
+
+struct FVdjmAndroidEncoderConfigure
+{
+	int32 VideoWidth = 0;
+	int32 VideoHeight = 0;
+	int32 VideoBitrate = 0;
+	int32 VideoFPS = 0;
+	FString MimeType = "video/avc";
+	FString OutputFilePath = TEXT("");
+};
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
+class FVdjmAndroidEncoderBackend
+*/
+class FVdjmAndroidEncoderBackend : public TSharedFromThis<FVdjmAndroidEncoderBackend, ESPMode::ThreadSafe>
+{
+public:
+	FVdjmAndroidEncoderBackend();
+	virtual ~FVdjmAndroidEncoderBackend();
+	
+	virtual bool Init(const FVdjmAndroidEncoderConfigure& config) = 0;
+	virtual bool Start() = 0;
+	
+	virtual bool Running(FVdjmAndroidEncoderBackend* graphicImpl) = 0;
+	
+	virtual void Pause(){ Stop();  }
+	virtual void Resume(){Start(); }
+	
+	virtual void Stop() = 0;
+	virtual void Terminate() = 0;
+	
+private:
+	TWeakPtr<FVdjmAndroidRecordSession> mOwenrRecordSession;
+	TWeakPtr<FVdjmAndroidEncoderImpl> mOwnerEncoderImpl;
+};
+
+class FVdjmAndroidRecordSession
+{
+public:	
+	FVdjmAndroidRecordSession();
+	~FVdjmAndroidRecordSession();
+	
+	bool Initialize(const FVdjmAndroidEncoderConfigure& configurer);
+	bool Start();
+	void Drain(bool bEndOfStream);
+	void Stop();
+	void Terminate();
+	
+	ANativeWindow* GetInputSurfaceWindow() const { return mInputSurfaceWindow; }
+protected:
+	FVdjmAndroidEncoderConfigure mConfig;
+	AMediaCodec* mCodec = nullptr;
+	AMediaMuxer* mMuxer = nullptr;
+	ANativeWindow* mInputSurfaceWindow = nullptr;
+	int32 mOutputFd = -1;
+	
+	int32 mTrackIndex = -1;
+	bool mInitialized = false;
+	bool mRunning = false;
+	bool mCodecStarted = false;
+	bool mMuxerStarted = false;
+	bool mEosSent = false;
+	
+	TWeakPtr<FVdjmAndroidEncoderImpl> mOwnerEncoderImpl;
+	TUniquePtr<FVdjmAndroidEncoderBackend> mGraphicBackend;
+};
+
 
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
@@ -22,7 +133,6 @@ class FVdjmAndroidEncoderImpl : public FVdjmVideoEncoderBase
 class FVdjmAndroidEncoderImpl : public FVdjmVideoEncoderBase
 {
 public:
-	
 	FVdjmAndroidEncoderImpl();
 	virtual ~FVdjmAndroidEncoderImpl() override;
 	
@@ -32,38 +142,19 @@ public:
 	virtual void StopEncoder() override;
 	virtual void TerminateEncoder() override;
 	
-	virtual bool SubmitSurfaceFrame(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,
-		double timeStampSec) override;
+	virtual bool SubmitSurfaceFrame(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec) override;
 
-private:
-	bool StartBackend();
-	void StopBackend();
-	void ResetBackend();
-	bool DrainEncoder(bool bEndOfStream);
-	
-	bool SubmitFrameVulkan(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec);
-	bool SubmitFrameOpenGL(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec);
-	
 	bool IsOpenGLRHI() const;
 	bool IsVulkanRHI() const;
 	
-	
-	FEncoderImplPropertyData mEncoderVariables;
-	int32 mIFrameIntervalSec = 1;
-	int32 mVideoTrackIndex = -1;
-	int mOutputFd = -1;
+private:
+	TUniquePtr<FVdjmAndroidRecordSession> mRecordSession;
+};
 
-	
-	bool mSessionStarted = false;
-	FTextureRHIRef mEncoderInputTexture;
-	
-
-	AMediaCodec* mCodec = nullptr;
-	AMediaMuxer* mMuxer = nullptr;
-	ANativeWindow* mInputSurfaceWindow = nullptr;
-
-	bool mBackendStarted = false;
-	bool mMuxerStarted = false;
-
+class FVdjmAndroidEncoderBackendVulkan : public FVdjmAndroidEncoderBackend
+{
+};
+class FVdjmAndroidEncoderBackendOpenGL : public FVdjmAndroidEncoderBackend
+{
 };
 #endif
