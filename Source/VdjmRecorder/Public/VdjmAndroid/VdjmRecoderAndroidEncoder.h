@@ -49,8 +49,14 @@ struct FVdjmAndroidEncoderConfigure
 	int32 VideoHeight = 0;
 	int32 VideoBitrate = 0;
 	int32 VideoFPS = 0;
+	int32 VideoIntervalSec = 0;
 	FString MimeType = "video/avc";
 	FString OutputFilePath = TEXT("");
+	
+	FVdjmAndroidEncoderConfigure() = default;
+	FVdjmAndroidEncoderConfigure(int32 width, int32 height, int32 bitrate, int32 fps, const FString& outputFilePath)
+		: VideoWidth(width), VideoHeight(height), VideoBitrate(bitrate), VideoFPS(fps), OutputFilePath(outputFilePath)
+	{}
 };
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
@@ -90,12 +96,14 @@ public:
 	void Stop();
 	void Terminate();
 	
-	ANativeWindow* GetInputSurfaceWindow() const { return mInputSurfaceWindow; }
+	ANativeWindow* GetInputSurfaceWindow() const { return mInputWindow; }
+	const FVdjmAndroidEncoderConfigure& getConfig() const { return mConfig; }
+	bool IsRunning() const { return mRunning; }
 protected:
 	FVdjmAndroidEncoderConfigure mConfig;
 	AMediaCodec* mCodec = nullptr;
 	AMediaMuxer* mMuxer = nullptr;
-	ANativeWindow* mInputSurfaceWindow = nullptr;
+	ANativeWindow* mInputWindow = nullptr;
 	int32 mOutputFd = -1;
 	
 	int32 mTrackIndex = -1;
