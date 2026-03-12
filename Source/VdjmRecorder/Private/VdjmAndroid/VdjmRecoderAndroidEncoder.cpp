@@ -191,20 +191,28 @@ bool FVdjmAndroidRecordSession::Start()
 		return false;
 	}
 	
-	switch (mConfig.GraphicBackend)
+	mOutputFd = open(TCHAR_TO_UTF8(*mConfig.OutputFilePath), O_RDWR | O_CREAT | O_TRUNC, 0644);
+	if (not mGraphicBackend.IsValid())
 	{
-		mOutputFd = open(TCHAR_TO_UTF8(*mConfig.OutputFilePath), O_RDWR | O_CREAT | O_TRUNC, 0644);
-	case EVdjmAndroidGraphicBackend::EUnknown:
-		return false;
-	case EVdjmAndroidGraphicBackend::EOpenGL:
-		mGraphicBackend = MakeUnique<FVdjmAndroidEncoderBackendOpenGL>();
-		break;
-	case EVdjmAndroidGraphicBackend::EVulkan:
-		mGraphicBackend = MakeUnique<FVdjmAndroidEncoderBackendVulkan>();
-		break;
+		switch (mConfig.GraphicBackend)
+		{
+		case EVdjmAndroidGraphicBackend::EUnknown:
+			return false;
+		case EVdjmAndroidGraphicBackend::EOpenGL:
+			mGraphicBackend = MakeUnique<FVdjmAndroidEncoderBackendOpenGL>();
+			break;
+		case EVdjmAndroidGraphicBackend::EVulkan:
+			mGraphicBackend = MakeUnique<FVdjmAndroidEncoderBackendVulkan>();
+			break;
+		}
 	}
 	
-
+	if (not mGraphicBackend->Init(mConfig))
+	{
+		Terminate(); 
+		return false;
+	}
+	
 	if (mOutputFd < 0)
 	{
 		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::Start - Failed to open output file: %s"), *mConfig.OutputFilePath);
@@ -274,7 +282,12 @@ bool FVdjmAndroidRecordSession::Start()
 	mMuxerStarted = false;
 	mTrackIndex = -1;
 	mEosSent = false;
-	return mGraphicBackend->Start();
+	if (not mGraphicBackend->Start())
+	{
+		Terminate();
+		return false;
+	}
+	return true;
 }
 
 void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
