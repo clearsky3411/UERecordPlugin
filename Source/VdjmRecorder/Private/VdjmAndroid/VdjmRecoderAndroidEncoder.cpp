@@ -174,7 +174,8 @@ bool FVdjmAndroidRecordSession::Start()
 	{
 		return false;
 	}
-	mOutputFd = open(*mConfig.OutputFilePath, O_RDWR | O_CREAT | O_TRUNC, 0644);
+	
+	mOutputFd = open(TCHAR_TO_UTF8(*mConfig.OutputFilePath), O_RDWR | O_CREAT | O_TRUNC, 0644);
 	if (mOutputFd < 0)
 	{
 		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::Start - Failed to open output file: %s"), *mConfig.OutputFilePath);
@@ -193,7 +194,8 @@ bool FVdjmAndroidRecordSession::Start()
 		Terminate();
 		return false;
 	}
-	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, *mConfig.MimeType);
+	
+	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, TCHAR_TO_UTF8(*mConfig.MimeType));
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_WIDTH, mConfig.VideoWidth);
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_HEIGHT, mConfig.VideoHeight);
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_BIT_RATE, mConfig.VideoBitrate);
@@ -421,11 +423,33 @@ bool FVdjmAndroidEncoderImpl::SubmitSurfaceFrame(FRHICommandList& RHICmdList, co
 
 void FVdjmAndroidEncoderImpl::StopEncoder()
 {
-	
+	if (not mRecordSession.IsValid() || mRecordSession == nullptr)
+	{
+		return;
+	}
+
+	if (not mRecordSession->IsRunning())
+	{
+		return;
+	}
+
+	mRecordSession->Stop();
 }
 
 void FVdjmAndroidEncoderImpl::TerminateEncoder()
 {
+	if (!mRecordSession.IsValid() || mRecordSession == nullptr)
+	{
+		return;
+	}
+
+	if (mRecordSession->IsRunning())
+	{
+		mRecordSession->Stop();
+	}
+
+	mRecordSession->Terminate();
+	mRecordSession.Reset();
 }
 
 bool FVdjmAndroidEncoderImpl::IsOpenGLRHI() const
