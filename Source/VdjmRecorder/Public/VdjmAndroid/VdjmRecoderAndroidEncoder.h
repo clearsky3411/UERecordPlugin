@@ -17,6 +17,13 @@
 class FVdjmAndroidEncoderImpl;
 class FVdjmAndroidRecordSession;
 
+enum class EVdjmAndroidGraphicBackend : uint8
+{
+	EUnknown,
+	EOpenGL,
+	EVulkan
+};
+
 class FVdjmAndroidFilePathWrapper
 {
 public:
@@ -35,13 +42,9 @@ public:
 		mFinalFilePath = inFilePath;
 		return mFinalFilePath;
 	}
-	
 private:
-	
 	FString mFinalFilePath;
 };
-
-
 
 struct FVdjmAndroidEncoderConfigure
 {
@@ -52,6 +55,8 @@ struct FVdjmAndroidEncoderConfigure
 	int32 VideoIntervalSec = 0;
 	FString MimeType = "video/avc";
 	FString OutputFilePath = TEXT("");
+	EVdjmAndroidGraphicBackend GraphicBackend = EVdjmAndroidGraphicBackend::EUnknown;
+	
 	
 	FVdjmAndroidEncoderConfigure() = default;
 	FVdjmAndroidEncoderConfigure(int32 width, int32 height, int32 bitrate, int32 fps, const FString& outputFilePath)
@@ -119,9 +124,10 @@ public:
 	FVdjmAndroidRecordSession();
 	virtual ~FVdjmAndroidRecordSession();
 	
-	bool Initialize(const FVdjmAndroidEncoderConfigure& configurer);
+	bool Initialize(const FVdjmAndroidEncoderConfigure& configurer,TSharedPtr<FVdjmAndroidEncoderImpl> sharedPtr);
 	bool Start();
 	void Drain(bool bEndOfStream);
+	bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec);
 	void Stop();
 	void Terminate();
 	
@@ -131,11 +137,11 @@ public:
 	bool IsCodecStarted() const { return mCodecStarted; }
 	bool IsMuxerStarted() const { return mMuxerStarted; }
 	
-	bool IsStartable() const { return mInitialized && !mRunning; }
-	
+	bool IsStartable() const;
 	
 	ANativeWindow* GetInputSurfaceWindow() const { return mInputWindow; }
 	const FVdjmAndroidEncoderConfigure& getConfig() const { return mConfig; }
+	
 protected:
 	FVdjmAndroidEncoderConfigure mConfig;
 	AMediaCodec* mCodec = nullptr;

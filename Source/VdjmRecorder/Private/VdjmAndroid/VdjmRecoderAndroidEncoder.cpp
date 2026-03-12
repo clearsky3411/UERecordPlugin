@@ -14,6 +14,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "VdjmAndroid/VdjmAndroidEncoderBackendOpenGL.h"
+#include "VdjmAndroid/VdjmAndroidEncoderBackendVulkan.h"
+
 namespace 
 {
 	static constexpr const char* VdjmMimeAvc = "video/avc";
@@ -134,6 +137,18 @@ bool FVdjmAndroidEncoderConfigure::IsValidateEncoderArguments() const
 		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - VideoIntervalSec is 0. This may create too many keyframes depending on codec behavior."));
 	}
 
+	if (VideoIntervalSec > 10)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - VideoIntervalSec is quite high. This may create very long GOPs depending on codec behavior."));
+		return false;
+	}
+	
+	if (GraphicBackend == EVdjmAndroidGraphicBackend::EUnknown)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - GraphicBackend is unknown. Make sure to set it correctly for optimal performance."));
+		return false;
+	}
+	
 	return true;
 }
 
@@ -152,9 +167,9 @@ FVdjmAndroidRecordSession::~FVdjmAndroidRecordSession()
 {
 }
 
-bool FVdjmAndroidRecordSession::Initialize(const FVdjmAndroidEncoderConfigure& configure)
+bool FVdjmAndroidRecordSession::Initialize(const FVdjmAndroidEncoderConfigure& configure,TSharedPtr<FVdjmAndroidEncoderImpl> sharedPtr )
 {
-	if (mInitialized)
+	if (mInitialized || sharedPtr == nullptr)
 	{
 		return false;
 	}
@@ -165,6 +180,7 @@ bool FVdjmAndroidRecordSession::Initialize(const FVdjmAndroidEncoderConfigure& c
 	}
 	mConfig = configure;
 	mInitialized = true;
+	mOwnerEncoderImpl = sharedPtr;
 	return true;
 }
 
@@ -175,7 +191,20 @@ bool FVdjmAndroidRecordSession::Start()
 		return false;
 	}
 	
-	mOutputFd = open(TCHAR_TO_UTF8(*mConfig.OutputFilePath), O_RDWR | O_CREAT | O_TRUNC, 0644);
+	switch (mConfig.GraphicBackend)
+	{
+		mOutputFd = open(TCHAR_TO_UTF8(*mConfig.OutputFilePath), O_RDWR | O_CREAT | O_TRUNC, 0644);
+	case EVdjmAndroidGraphicBackend::EUnknown:
+		return false;
+	case EVdjmAndroidGraphicBackend::EOpenGL:
+		mGraphicBackend = MakeUnique<FVdjmAndroidEncoderBackendOpenGL>();
+		break;
+	case EVdjmAndroidGraphicBackend::EVulkan:
+		mGraphicBackend = MakeUnique<FVdjmAndroidEncoderBackendVulkan>();
+		break;
+	}
+	
+
 	if (mOutputFd < 0)
 	{
 		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::Start - Failed to open output file: %s"), *mConfig.OutputFilePath);
@@ -245,7 +274,7 @@ bool FVdjmAndroidRecordSession::Start()
 	mMuxerStarted = false;
 	mTrackIndex = -1;
 	mEosSent = false;
-	return true;
+	return mGraphicBackend->Start();
 }
 
 void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
@@ -306,6 +335,12 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 	}
 }
 
+bool FVdjmAndroidRecordSession::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,
+	double timeStampSec)
+{
+	
+}
+
 void FVdjmAndroidRecordSession::Stop()
 {
 	if (!mRunning)
@@ -364,6 +399,50 @@ void FVdjmAndroidRecordSession::Terminate()
 
 bool FVdjmAndroidRecordSession::IsValidSession() const
 {
+	// 1. 초기화 안 된 상태인데 네이티브 자원이 남아 있으면 이상함
+	if (not mInitialized)
+	{
+		const bool bHasNativeResources =
+			(mCodec != nullptr) ||
+			(mMuxer != nullptr) ||
+			(mInputWindow != nullptr) ||
+			(mOutputFd >= 0) ||
+			mCodecStarted ||
+			mMuxerStarted ||
+			mRunning ||
+			(mTrackIndex != -1) ||
+			mEosSent;
+
+		return !bHasNativeResources;
+	}
+
+	// 2. initialized 상태면 config는 최소한 유효해야 함
+	if (!mConfig.IsValidateEncoderArguments())
+	{
+		return false;
+	}
+
+	// 3. running 상태면 실제 런타임 리소스가 반드시 있어야 함
+	if (mRunning)
+	{
+		if (mCodec == nullptr) return false;
+		if (mMuxer == nullptr) return false;
+		if (mInputWindow == nullptr) return false;
+		if (mOutputFd < 0) return false;
+		if (!mCodecStarted) return false;
+		
+		return true;
+	}
+	return true;
+}
+
+bool FVdjmAndroidRecordSession::IsStartable() const
+{
+	if (not mInitialized) return false;
+	if (mRunning) return false;
+	if (not mConfig.IsValidateEncoderArguments()) return false;
+	if (not IsValidSession()) return false;
+	return true;
 }
 
 /*
@@ -385,7 +464,6 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, i
 	//	생성을 위한곳
 	if (not mRecordSession.IsValid() || mRecordSession == nullptr)
 	{
-		mRecordSession.Reset();
 		mRecordSession = MakeShared<FVdjmAndroidRecordSession>();
 	}
 	//	멱등성을 위한거임.
@@ -397,8 +475,10 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, i
 	//	검증을 위해 분리
 	FVdjmAndroidEncoderConfigure config = FVdjmAndroidEncoderConfigure(width, height, bitrate, framerate,outputFilePath);
 	config.MimeType = VdjmMimeAvc;
+	config.VideoIntervalSec = 1;
+	config.GraphicBackend = IsVulkanRHI() ? EVdjmAndroidGraphicBackend::EVulkan : (IsOpenGLRHI() ? EVdjmAndroidGraphicBackend::EOpenGL : EVdjmAndroidGraphicBackend::EUnknown);
 	
-	return mRecordSession->Initialize(config);
+	return mRecordSession->Initialize(config, SharedThis(this));
 }
 
 VdjmResult FVdjmAndroidEncoderImpl::StartEncoder()
