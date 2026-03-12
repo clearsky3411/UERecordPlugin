@@ -137,6 +137,21 @@ bool FVdjmAndroidEncoderConfigure::IsValidateEncoderArguments() const
 	return true;
 }
 
+FVdjmAndroidRecordSession::FVdjmAndroidRecordSession()
+	: mInitialized(false)
+	, mRunning(false)
+	, mCodec(nullptr)
+	, mInputWindow(nullptr)
+	, mMuxer(nullptr)
+	, mTrackIndex(-1)
+	, mEosSent(false)
+{
+}
+
+FVdjmAndroidRecordSession::~FVdjmAndroidRecordSession()
+{
+}
+
 bool FVdjmAndroidRecordSession::Initialize(const FVdjmAndroidEncoderConfigure& configure)
 {
 	if (mInitialized)
@@ -345,6 +360,10 @@ void FVdjmAndroidRecordSession::Terminate()
 	mRunning = false;
 }
 
+bool FVdjmAndroidRecordSession::IsValidSession() const
+{
+}
+
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
 class FVdjmAndroidEncoderImpl : public FVdjmVideoEncoderBase
@@ -361,15 +380,19 @@ FVdjmAndroidEncoderImpl::~FVdjmAndroidEncoderImpl()
 
 bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, int32 width, int32 height, int32 bitrate,int32 framerate)
 {
+	//	생성을 위한곳
 	if (not mRecordSession.IsValid() || mRecordSession == nullptr)
 	{
+		mRecordSession.Reset();
 		mRecordSession = MakeShared<FVdjmAndroidRecordSession>();
 	}
+	//	멱등성을 위한거임.
 	if (mRecordSession->IsRunning())
 	{
 		mRecordSession->Stop();
 		mRecordSession->Terminate();
 	}
+	//	검증을 위해 분리
 	FVdjmAndroidEncoderConfigure config = FVdjmAndroidEncoderConfigure(width, height, bitrate, framerate,outputFilePath);
 	config.MimeType = VdjmMimeAvc;
 	
@@ -378,11 +401,27 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, i
 
 VdjmResult FVdjmAndroidEncoderImpl::StartEncoder()
 {
+	if (not mRecordSession.IsValid())
+	{
+		return VdjmResults::Fail;
+	}
+	if (not mRecordSession->IsStartable())
+	{
+		return VdjmResults::Fail;
+	}
 	
+	return mRecordSession->Start() ? VdjmResults::Ok : VdjmResults::Fail;
+}
+
+bool FVdjmAndroidEncoderImpl::SubmitSurfaceFrame(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,
+	double timeStampSec)
+{
+	return FVdjmVideoEncoderBase::SubmitSurfaceFrame(RHICmdList, srcTexture, timeStampSec);
 }
 
 void FVdjmAndroidEncoderImpl::StopEncoder()
 {
+	
 }
 
 void FVdjmAndroidEncoderImpl::TerminateEncoder()

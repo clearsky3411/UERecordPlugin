@@ -109,12 +109,15 @@ private:
 	TWeakPtr<FVdjmAndroidRecordSession> mOwenrRecordSession;
 	
 };
-
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
+class FVdjmAndroidRecordSession 
+*/
 class FVdjmAndroidRecordSession : public TSharedFromThis<FVdjmAndroidRecordSession, ESPMode::ThreadSafe>
 {
 public:	
 	FVdjmAndroidRecordSession();
-	~FVdjmAndroidRecordSession();
+	virtual ~FVdjmAndroidRecordSession();
 	
 	bool Initialize(const FVdjmAndroidEncoderConfigure& configurer);
 	bool Start();
@@ -122,9 +125,17 @@ public:
 	void Stop();
 	void Terminate();
 	
+	bool IsValidSession() const;
+	bool IsInitialized() const { return mInitialized; }
+	bool IsRunning() const { return mRunning; }
+	bool IsCodecStarted() const { return mCodecStarted; }
+	bool IsMuxerStarted() const { return mMuxerStarted; }
+	
+	bool IsStartable() const { return mInitialized && !mRunning; }
+	
+	
 	ANativeWindow* GetInputSurfaceWindow() const { return mInputWindow; }
 	const FVdjmAndroidEncoderConfigure& getConfig() const { return mConfig; }
-	bool IsRunning() const { return mRunning; }
 protected:
 	FVdjmAndroidEncoderConfigure mConfig;
 	AMediaCodec* mCodec = nullptr;
@@ -158,26 +169,17 @@ public:
 	
 	virtual VdjmResult StartEncoder() override;
 
+	virtual bool SubmitSurfaceFrame(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec) override;
+	
 	virtual void StopEncoder() override;
+	
 	virtual void TerminateEncoder() override;
 	
-	virtual bool SubmitSurfaceFrame(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec) override;
-
 	bool IsOpenGLRHI() const;
 	bool IsVulkanRHI() const;
 	
 	FString DefaultMimeType = "video/avc";
-	/*
-	 * GLuint srcTexture, int64_t ptsNs)
-struct VkSubmitFrameInfo
-{
-VkImage SrcImage = VK_NULL_HANDLE;
-VkFormat SrcFormat = VK_FORMAT_R8G8B8A8_UNORM;
-uint32_t SrcWidth = 0;
-uint32_t SrcHeight = 0;
-VkImageLayout SrcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-};
-	 */
+
 private:
 	TSharedPtr<FVdjmAndroidRecordSession> mRecordSession;
 };
