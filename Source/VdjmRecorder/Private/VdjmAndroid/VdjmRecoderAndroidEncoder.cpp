@@ -21,6 +21,10 @@ namespace
 	static constexpr int64 VdjmDrainTimeoutUs = 10000;
 }
 
+bool FVdjmAndroidEncoderConfigure::ValidateEncoderArguments() const
+{
+	
+}
 
 bool FVdjmAndroidRecordSession::Initialize(const FVdjmAndroidEncoderConfigure& configure)
 {
@@ -39,7 +43,7 @@ bool FVdjmAndroidRecordSession::Start()
 	{
 		return false;
 	}
-	mOutputFd = open(mConfig.OutputFilePath.GetData(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+	mOutputFd = open(*mConfig.OutputFilePath, O_RDWR | O_CREAT | O_TRUNC, 0644);
 	if (mOutputFd < 0)
 	{
 		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::Start - Failed to open output file: %s"), *mConfig.OutputFilePath);
@@ -58,7 +62,7 @@ bool FVdjmAndroidRecordSession::Start()
 		Terminate();
 		return false;
 	}
-	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, mConfig.MimeType);
+	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, *mConfig.MimeType);
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_WIDTH, mConfig.VideoWidth);
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_HEIGHT, mConfig.VideoHeight);
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_BIT_RATE, mConfig.VideoBitrate);
@@ -115,7 +119,7 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 {
 	if (!mCodec)
 		return;
-	if (endOfStream && !mEosSent)
+	if (bEndOfStream && !mEosSent)
 	{
 		AMediaCodec_signalEndOfInputStream(mCodec);
 		mEosSent = true;
@@ -250,7 +254,10 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, i
 		mRecordSession->Stop();
 		mRecordSession->Terminate();
 	}
-	return mRecordSession->Initialize(FVdjmAndroidEncoderConfigure( width, height, bitrate, framerate,outputFilePath));
+	FVdjmAndroidEncoderConfigure config = FVdjmAndroidEncoderConfigure(width, height, bitrate, framerate,outputFilePath);
+	config.MimeType = VdjmMimeAvc;
+	
+	return mRecordSession->Initialize(config);
 }
 
 VdjmResult FVdjmAndroidEncoderImpl::StartEncoder()

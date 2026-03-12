@@ -57,6 +57,32 @@ struct FVdjmAndroidEncoderConfigure
 	FVdjmAndroidEncoderConfigure(int32 width, int32 height, int32 bitrate, int32 fps, const FString& outputFilePath)
 		: VideoWidth(width), VideoHeight(height), VideoBitrate(bitrate), VideoFPS(fps), OutputFilePath(outputFilePath)
 	{}
+	FVdjmAndroidEncoderConfigure(const FVdjmAndroidEncoderConfigure& other)
+		: VideoWidth(other.VideoWidth), VideoHeight(other.VideoHeight), VideoBitrate(other.VideoBitrate), VideoFPS(other.VideoFPS), OutputFilePath(other.OutputFilePath)
+	{}
+	FVdjmAndroidEncoderConfigure(FVdjmAndroidEncoderConfigure&& other) noexcept
+		: VideoWidth(other.VideoWidth), VideoHeight(other.VideoHeight), VideoBitrate(other.VideoBitrate), VideoFPS(other.VideoFPS), OutputFilePath(other.OutputFilePath)
+	{}
+	FVdjmAndroidEncoderConfigure& operator=(const FVdjmAndroidEncoderConfigure& other)
+	{
+		this->VideoWidth = other.VideoWidth;
+		this->VideoHeight = other.VideoHeight;
+		this->VideoBitrate = other.VideoBitrate;
+		this->VideoFPS = other.VideoFPS;
+		this->OutputFilePath = other.OutputFilePath;
+		return *this;
+	}
+	FVdjmAndroidEncoderConfigure& operator=(FVdjmAndroidEncoderConfigure&& other) noexcept
+	{
+		this->VideoWidth = other.VideoWidth;
+		this->VideoHeight = other.VideoHeight;
+		this->VideoBitrate = other.VideoBitrate;
+		this->VideoFPS = other.VideoFPS;
+		this->OutputFilePath = other.OutputFilePath;
+		return *this;
+	}
+	
+	bool ValidateEncoderArguments() const;
 };
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
@@ -129,6 +155,7 @@ public:
 	virtual ~FVdjmAndroidEncoderImpl() override;
 	
 	virtual bool InitializeEncoder(const FString& outputFilePath, int32 width, int32 height, int32 bitrate,	int32 framerate) override;
+	
 	virtual VdjmResult StartEncoder() override;
 
 	virtual void StopEncoder() override;
@@ -138,6 +165,8 @@ public:
 
 	bool IsOpenGLRHI() const;
 	bool IsVulkanRHI() const;
+	
+	FString DefaultMimeType = "video/avc";
 	/*
 	 * GLuint srcTexture, int64_t ptsNs)
 struct VkSubmitFrameInfo
