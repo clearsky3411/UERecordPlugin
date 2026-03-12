@@ -81,7 +81,6 @@ public:
 	virtual bool Init(const FVdjmAndroidEncoderConfigure& config) = 0;
 	virtual bool Start() = 0;
 	
-	virtual bool Running(FVdjmAndroidEncoderBackend* graphicImpl);
 	virtual bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec);
 	
 	virtual void Pause(){ Stop();  }
@@ -159,13 +158,8 @@ VkImageLayout SrcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 };
 	 */
 private:
-	TUniquePtr<FVdjmAndroidRecordSession> mRecordSession;
+	TSharedPtr<FVdjmAndroidRecordSession> mRecordSession;
 };
 
-class FVdjmAndroidEncoderBackendVulkan : public FVdjmAndroidEncoderBackend
-{
-};
-class FVdjmAndroidEncoderBackendOpenGL : public FVdjmAndroidEncoderBackend
-{
-};
+
 #endif
