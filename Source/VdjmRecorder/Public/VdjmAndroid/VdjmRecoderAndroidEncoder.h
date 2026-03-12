@@ -92,10 +92,10 @@ public:
 	
 private:
 	TWeakPtr<FVdjmAndroidRecordSession> mOwenrRecordSession;
-	TWeakPtr<FVdjmAndroidEncoderImpl> mOwnerEncoderImpl;
+	
 };
 
-class FVdjmAndroidRecordSession
+class FVdjmAndroidRecordSession : public TSharedFromThis<FVdjmAndroidRecordSession, ESPMode::ThreadSafe>
 {
 public:	
 	FVdjmAndroidRecordSession();
