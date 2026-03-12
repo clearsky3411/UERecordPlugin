@@ -81,7 +81,8 @@ public:
 	virtual bool Init(const FVdjmAndroidEncoderConfigure& config) = 0;
 	virtual bool Start() = 0;
 	
-	virtual bool Running(FVdjmAndroidEncoderBackend* graphicImpl) = 0;
+	virtual bool Running(FVdjmAndroidEncoderBackend* graphicImpl);
+	virtual bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec);
 	
 	virtual void Pause(){ Stop();  }
 	virtual void Resume(){Start(); }
@@ -146,7 +147,17 @@ public:
 
 	bool IsOpenGLRHI() const;
 	bool IsVulkanRHI() const;
-	
+	/*
+	 * GLuint srcTexture, int64_t ptsNs)
+struct VkSubmitFrameInfo
+{
+VkImage SrcImage = VK_NULL_HANDLE;
+VkFormat SrcFormat = VK_FORMAT_R8G8B8A8_UNORM;
+uint32_t SrcWidth = 0;
+uint32_t SrcHeight = 0;
+VkImageLayout SrcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+};
+	 */
 private:
 	TUniquePtr<FVdjmAndroidRecordSession> mRecordSession;
 };
