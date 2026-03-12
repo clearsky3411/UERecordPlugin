@@ -21,15 +21,131 @@ namespace
 	static constexpr int64 VdjmDrainTimeoutUs = 10000;
 }
 
-bool FVdjmAndroidEncoderConfigure::ValidateEncoderArguments() const
+bool FVdjmAndroidEncoderConfigure::IsValidateEncoderArguments() const
 {
-	
+		// 1. 출력 경로
+	if (OutputFilePath.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - OutputFilePath is empty."));
+		return false;
+	}
+
+	const FString NormalizedPath = FPaths::ConvertRelativePathToFull(OutputFilePath);
+	const FString DirectoryPath = FPaths::GetPath(NormalizedPath);
+	const FString Extension = FPaths::GetExtension(NormalizedPath, false);
+
+	if (DirectoryPath.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Directory path is empty. Path: %s"), *NormalizedPath);
+		return false;
+	}
+
+	if (!IFileManager::Get().DirectoryExists(*DirectoryPath))
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Directory does not exist. Directory: %s"), *DirectoryPath);
+		return false;
+	}
+
+	if (Extension.IsEmpty() || !Extension.Equals(TEXT("mp4"), ESearchCase::IgnoreCase))
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Output file extension must be mp4. Path: %s"), *NormalizedPath);
+		return false;
+	}
+
+	// 2. MIME
+	// 오늘 목표 기준으로 H.264 AVC만 허용하는 편이 가장 안전함
+	if (MimeType.IsEmpty() || !MimeType.Equals(TEXT("video/avc"), ESearchCase::IgnoreCase))
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Unsupported MimeType: %s (Only video/avc is supported for now)"), *MimeType);
+		return false;
+	}
+
+	// 3. 해상도
+	if (VideoWidth <= 0 || VideoHeight <= 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Invalid resolution. Width=%d Height=%d"), VideoWidth, VideoHeight);
+		return false;
+	}
+
+	// H.264 / Surface 인코더 호환성 관점에서 짝수 강제 권장
+	if ((VideoWidth % 2) != 0 || (VideoHeight % 2) != 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Width and Height must be even. Width=%d Height=%d"), VideoWidth, VideoHeight);
+		return false;
+	}
+
+	// 너무 작은 값 방지
+	if (VideoWidth < 16 || VideoHeight < 16)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Resolution is too small. Width=%d Height=%d"), VideoWidth, VideoHeight);
+		return false;
+	}
+
+	// 너무 큰 값 방지
+	// 오늘 안에 끝내는 목적이면 보수적으로 8K 정도 상한선
+	if (VideoWidth > 7680 || VideoHeight > 4320)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Resolution is too large. Width=%d Height=%d"), VideoWidth, VideoHeight);
+		return false;
+	}
+
+	// 4. 비트레이트
+	if (VideoBitrate <= 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Bitrate must be > 0. Bitrate=%d"), VideoBitrate);
+		return false;
+	}
+
+	// 너무 비정상적인 값 방지
+	if (VideoBitrate < 100000)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Bitrate looks too low. Bitrate=%d"), VideoBitrate);
+	}
+
+	if (VideoBitrate > 100000000)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Bitrate is too high. Bitrate=%d"), VideoBitrate);
+		return false;
+	}
+
+	// 5. FPS
+	if (VideoFPS <= 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - FrameRate must be > 0. FrameRate=%d"), VideoFPS);
+		return false;
+	}
+
+	if (VideoFPS > 120)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - FrameRate is too high. FrameRate=%d"), VideoFPS);
+		return false;
+	}
+
+	// 6. I-Frame interval
+	if (VideoIntervalSec < 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - VideoIntervalSec must be >= 0. VideoIntervalSec=%d"), VideoIntervalSec);
+		return false;
+	}
+
+	// 0은 허용할 수는 있지만 보통 1이 더 무난함
+	if (VideoIntervalSec == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - VideoIntervalSec is 0. This may create too many keyframes depending on codec behavior."));
+	}
+
+	return true;
 }
 
 bool FVdjmAndroidRecordSession::Initialize(const FVdjmAndroidEncoderConfigure& configure)
 {
 	if (mInitialized)
 	{
+		return false;
+	}
+	if (not configure.IsValidateEncoderArguments() )
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::Initialize - Invalid encoder configuration."));
 		return false;
 	}
 	mConfig = configure;

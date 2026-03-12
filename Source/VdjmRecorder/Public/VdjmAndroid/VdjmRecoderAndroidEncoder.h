@@ -82,7 +82,7 @@ struct FVdjmAndroidEncoderConfigure
 		return *this;
 	}
 	
-	bool ValidateEncoderArguments() const;
+	bool IsValidateEncoderArguments() const;
 };
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
