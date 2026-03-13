@@ -7,7 +7,9 @@
 #include "VdjmRecoderAndroidEncoder.h"
 #include "vulkan_core.h"
 
-struct FVkEncoderContext
+class FVdjmAndroidEncoderBackendVulkan;
+
+struct FVdjmVkEncoderContext
 {
 	VkInstance Instance = VK_NULL_HANDLE;
 	VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
@@ -16,7 +18,7 @@ struct FVkEncoderContext
 	uint32_t GraphicsQueueFamilyIndex = 0;
 };
 
-struct FVkSubmitFrameInfo
+struct FVdjmVkSubmitFrameInfo
 {
 	VkImage SrcImage = VK_NULL_HANDLE;
 	VkFormat SrcFormat = VK_FORMAT_R8G8B8A8_UNORM;
@@ -39,6 +41,7 @@ class FVdjmVKInputAnalyzer
 	* - 자원 생성, command submit, 동기화 완료 처리
 	*/
 public:
+	bool Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) const;
 	
 };
 class FVdjmVkIntermediateStage
@@ -58,7 +61,9 @@ class FVdjmVkIntermediateStage
  	* - 최종 제출 완료 관리
  	*/
 public:
-	
+	bool NeedRecreate(const FVdjmVkSubmitFrameInfo& frameInfo,uint32 curWid,uint32 curhei,VkFormat  curFormat) const;
+	bool EnsureResource(FVdjmAndroidEncoderBackendVulkan& backend, const FVdjmVkSubmitFrameInfo& frameInfo);
+	bool RecordPrepareAndCopy(FVdjmAndroidEncoderBackendVulkan& owner, const FVdjmVkSubmitFrameInfo& frameInfo);
 };
 class FVdjmVkSurfaceSubmitter
 {
@@ -76,7 +81,7 @@ class FVdjmVkSurfaceSubmitter
 	 * - intermediate 생성 정책 판단
 	 */
 public:
-	
+	bool Submit(FVdjmAndroidEncoderBackendVulkan& owner, double timeStampSec);
 };
 
 class FVdjmAndroidEncoderBackendVulkan : public FVdjmAndroidEncoderBackend
@@ -104,6 +109,22 @@ private:
 	bool mStarted = false;
 	bool mPaused = false;
 	bool mRuntimeReady = false;
+	
+	VkImage mIntermediateImage = VK_NULL_HANDLE;
+	VkDeviceMemory mIntermediateMemory = VK_NULL_HANDLE;
+	VkImageView mIntermediateView = VK_NULL_HANDLE;
+
+	VkCommandPool mCommandPool = VK_NULL_HANDLE;
+	VkCommandBuffer mCommandBuffer = VK_NULL_HANDLE;
+	VkFence mSubmitFence = VK_NULL_HANDLE;
+
+	uint32 mIntermediateWidth = 0;
+	uint32 mIntermediateHeight = 0;
+	VkFormat mIntermediateFormat = VK_FORMAT_UNDEFINED;
+
+	FVdjmVKInputAnalyzer mAnalyzer;
+	FVdjmVkIntermediateStage mIntermediateStage;
+	FVdjmVkSurfaceSubmitter mSubmitter;
 };
 
 #endif

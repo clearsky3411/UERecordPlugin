@@ -101,13 +101,28 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderBackendVulkan::Running - runtime is not ready"));
 		return false;
 	}
-	VkImage srcImage = VK_NULL_HANDLE;
-	if (not TryExtractNativeVkImage(srcTexture, srcImage))
+	FVdjmVkSubmitFrameInfo frameInfo;
+	if (not mAnalyzer.Analyze(srcTexture, frameInfo))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderBackendVulkan::Running - Failed to extract native VkImage"));
+		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderBackendVulkan::Running - Failed to analyze source texture"));
 		return false;
 	}
-	return SubmitTextureToCodecSurface(RHICmdList, srcTexture, srcImage, timeStampSec);
+	if ( not mIntermediateStage.EnsureResource(*this, frameInfo))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderBackendVulkan::Running - Failed to ensure intermediate resource"));
+		return false;
+	}
+	
+	if (not mIntermediateStage.RecordPrepareAndCopy(*this, frameInfo))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderBackendVulkan::Running - Failed to prepare and copy to intermediate resource"));
+		return false;
+	}
+	if (!mSubmitter.Submit(*this, timeStampSec))
+	{
+		return false;
+	}
+	return true;
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::EnsureRuntimeReady()
