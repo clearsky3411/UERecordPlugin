@@ -169,7 +169,7 @@ FVdjmAndroidRecordSession::~FVdjmAndroidRecordSession()
 
 bool FVdjmAndroidRecordSession::Initialize(const FVdjmAndroidEncoderConfigure& configure )
 {
-	if (mInitialized || inputWindow == nullptr)
+	if (mInitialized )
 	{
 		return false;
 	}
@@ -201,6 +201,7 @@ bool FVdjmAndroidRecordSession::Start()
 	if (mCodec == nullptr)
 	{
 		UE_LOG(LogTemp, Error, TEXT("StartBackend - AMediaCodec_createEncoderByType failed"));
+		Terminate();
 		return false;
 	}
 	AMediaFormat* format = AMediaFormat_new();
@@ -272,7 +273,7 @@ bool FVdjmAndroidRecordSession::Start()
 		}
 	}
 	
-	if (not mGraphicBackend->Init(mConfig, SharedThis(this)) )
+	if (not mGraphicBackend->Init(mConfig, mInputWindow) )
 	{
 		Terminate(); 
 		return false;
@@ -379,8 +380,15 @@ bool FVdjmAndroidRecordSession::Running(FRHICommandList& RHICmdList, const FText
 void FVdjmAndroidRecordSession::Stop()
 {
 	if (!mRunning)
+	{
 		return;
-
+	}
+	
+	if (mGraphicBackend.IsValid())
+	{
+		mGraphicBackend->Stop();
+	}
+	
 	Drain(true);
 
 	if (mCodec && mCodecStarted)
@@ -401,6 +409,13 @@ void FVdjmAndroidRecordSession::Stop()
 void FVdjmAndroidRecordSession::Terminate()
 {
 	Stop();
+	
+	if (mGraphicBackend.IsValid())
+	{
+		mGraphicBackend->Terminate();
+		mGraphicBackend.Reset();
+	}
+	
 	if (mInputWindow)
 	{
 		ANativeWindow_release(mInputWindow);
@@ -430,6 +445,7 @@ void FVdjmAndroidRecordSession::Terminate()
 	mCodecStarted = false;
 	mEosSent = false;
 	mRunning = false;
+	mInitialized = false;
 }
 
 bool FVdjmAndroidRecordSession::IsValidSession() const
