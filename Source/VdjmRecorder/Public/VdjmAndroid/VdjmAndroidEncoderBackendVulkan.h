@@ -35,5 +35,20 @@ public:
 	virtual void Stop() override;
 	virtual void Terminate() override;
 	virtual bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec) override;
+	
+	bool IsRunnable();
+private:
+	
+	bool EnsureRuntimeReady();
+	bool TryExtractNativeVkImage(const FTextureRHIRef& srcTexture, VkImage& outImage) const;
+	bool SubmitTextureToCodecSurface(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, VkImage srcImage, double timeStampSec);
+
+	FVdjmAndroidEncoderConfigure mConfig;
+	
+	bool mInitialized = false;
+	bool mStarted = false;
+	bool mPaused = false;
+	bool mRuntimeReady = false;
 };
+
 #endif

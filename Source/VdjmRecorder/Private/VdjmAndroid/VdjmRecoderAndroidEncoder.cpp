@@ -498,6 +498,21 @@ bool FVdjmAndroidRecordSession::IsStartable() const
 
 bool FVdjmAndroidRecordSession::IsRunnable(const FTextureRHIRef& srcTexture) const
 {
+	if (!mRunning)
+	{
+		return false;
+	}
+
+	if (!mGraphicBackend.IsValid())
+	{
+		return false;
+	}
+
+	if (!srcTexture.IsValid())
+	{
+		return false;
+	}
+
 	return true;
 }
 
@@ -554,7 +569,7 @@ VdjmResult FVdjmAndroidEncoderImpl::StartEncoder()
 bool FVdjmAndroidEncoderImpl::SubmitSurfaceFrame(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,
 	double timeStampSec)
 {
-	if (mRecordSession.IsValid() /*&& mRecordSession->IsRunnable(srcTexture)*/)
+	if (mRecordSession.IsValid() && mRecordSession->IsRunnable(srcTexture))
 	{
 		return mRecordSession->Running(RHICmdList, srcTexture, timeStampSec);
 	}
