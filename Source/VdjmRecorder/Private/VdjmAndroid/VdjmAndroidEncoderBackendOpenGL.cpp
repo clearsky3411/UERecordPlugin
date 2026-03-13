@@ -182,9 +182,36 @@ bool FVdjmAndroidEncoderBackendOpenGL::CreateFullScreenPipeline()
 
 void FVdjmAndroidEncoderBackendOpenGL::DestroyFullScreenPipeline()
 {
+	if (mVbo)
+	{
+		glDeleteBuffers(1, &mVbo);
+		mVbo = 0;
+	}
+    if (mVao)
+    {
+	    glDeleteVertexArrays(1, &mVao);
+    	mVao = 0;
+    }
+    if (mProgram)
+    {
+        glDeleteProgram(mProgram);
+        mProgram = 0;
+    }
 }
 
 GLuint FVdjmAndroidEncoderBackendOpenGL::CompileShader(GLenum shaderType, const char* shaderSource)
 {
+	GLuint shader = glCreateShader(type);
+	glShaderSource(shader, 1, &src, nullptr);
+	glCompileShader(shader);
+	
+	GLint compiled = 0;
+	glGetShaderiv(shader, GL_COMPILE_STATUS, &compiled);
+	if (!compiled)
+	{
+		glDeleteShader(shader);
+		return 0;
+	}
+	return shader;
 }
 #endif
