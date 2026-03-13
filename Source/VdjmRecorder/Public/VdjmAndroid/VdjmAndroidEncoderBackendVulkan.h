@@ -7,7 +7,7 @@
 #include "VdjmRecoderAndroidEncoder.h"
 #include "vulkan_core.h"
 
-struct VkEncoderContext
+struct FVkEncoderContext
 {
 	VkInstance Instance = VK_NULL_HANDLE;
 	VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
@@ -16,7 +16,7 @@ struct VkEncoderContext
 	uint32_t GraphicsQueueFamilyIndex = 0;
 };
 
-struct VkSubmitFrameInfo
+struct FVkSubmitFrameInfo
 {
 	VkImage SrcImage = VK_NULL_HANDLE;
 	VkFormat SrcFormat = VK_FORMAT_R8G8B8A8_UNORM;
