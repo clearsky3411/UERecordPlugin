@@ -3,11 +3,15 @@
 
 #include "VdjmAndroid/VdjmAndroidEncoderBackendOpenGL.h"
 #if PLATFORM_ANDROID || defined(__RESHARPER__)
-bool FVdjmAndroidEncoderBackendOpenGL::Init(const FVdjmAndroidEncoderConfigure& config,TSharedPtr<FVdjmAndroidRecordSession> ownerSession)
+bool FVdjmAndroidEncoderBackendOpenGL::Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow)
 {
-	mConfig = config;
-	mOwnerSession = ownerSession;
-	return true;
+	if (config.IsValidateEncoderArguments() && ANativeWindow != nullptr)
+	{
+		mConfig = config;
+		mInputWindow = inputWindow;
+		return true;
+	}
+	return false;
 }
 
 bool FVdjmAndroidEncoderBackendOpenGL::Start()
@@ -16,7 +20,7 @@ bool FVdjmAndroidEncoderBackendOpenGL::Start()
 		return false;
 	FVdjmAndroidRecordSession* pinnedSession = mOwnerSession.Pin().Get();
 	
-	ANativeWindow* window = pinnedSession->GetInputSurfaceWindow();
+	ANativeWindow* window = mInputWindow;
 	
 	if (window==nullptr)
 	{
@@ -128,8 +132,8 @@ bool FVdjmAndroidEncoderBackendOpenGL::CreateFullScreenPipeline()
             }
         )";
 
-        const GLuint vs = compileShader(GL_VERTEX_SHADER, vsSrc);
-        const GLuint fs = compileShader(GL_FRAGMENT_SHADER, fsSrc);
+        const GLuint vs = CompileShader(GL_VERTEX_SHADER, vsSrc);
+        const GLuint fs = CompileShader(GL_FRAGMENT_SHADER, fsSrc);
         if (!vs || !fs)
             return false;
 

@@ -167,9 +167,9 @@ FVdjmAndroidRecordSession::~FVdjmAndroidRecordSession()
 {
 }
 
-bool FVdjmAndroidRecordSession::Initialize(const FVdjmAndroidEncoderConfigure& configure,TSharedPtr<FVdjmAndroidEncoderImpl> sharedPtr )
+bool FVdjmAndroidRecordSession::Initialize(const FVdjmAndroidEncoderConfigure& configure )
 {
-	if (mInitialized || sharedPtr == nullptr)
+	if (mInitialized || inputWindow == nullptr)
 	{
 		return false;
 	}
@@ -180,7 +180,7 @@ bool FVdjmAndroidRecordSession::Initialize(const FVdjmAndroidEncoderConfigure& c
 	}
 	mConfig = configure;
 	mInitialized = true;
-	mOwnerEncoderImpl = sharedPtr;
+	
 	return true;
 }
 
@@ -272,7 +272,7 @@ bool FVdjmAndroidRecordSession::Start()
 		}
 	}
 	
-	if (not mGraphicBackend->Init(mConfig))
+	if (not mGraphicBackend->Init(mConfig, SharedThis(this)) )
 	{
 		Terminate(); 
 		return false;
@@ -352,7 +352,28 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 bool FVdjmAndroidRecordSession::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,
 	double timeStampSec)
 {
-	
+	if (!mRunning)
+	{
+		return false;
+	}
+
+	if (!mGraphicBackend.IsValid())
+	{
+		return false;
+	}
+
+	if (!srcTexture.IsValid())
+	{
+		return false;
+	}
+
+	if (not mGraphicBackend->Running(RHICmdList, srcTexture, timeStampSec))
+	{
+		return false;
+	}
+
+	Drain(false);
+	return true;
 }
 
 void FVdjmAndroidRecordSession::Stop()
@@ -459,6 +480,11 @@ bool FVdjmAndroidRecordSession::IsStartable() const
 	return true;
 }
 
+bool FVdjmAndroidRecordSession::IsRunnable(const FTextureRHIRef& srcTexture) const
+{
+	return true;
+}
+
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
 class FVdjmAndroidEncoderImpl : public FVdjmVideoEncoderBase
@@ -492,7 +518,7 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, i
 	config.VideoIntervalSec = 1;
 	config.GraphicBackend = IsVulkanRHI() ? EVdjmAndroidGraphicBackend::EVulkan : (IsOpenGLRHI() ? EVdjmAndroidGraphicBackend::EOpenGL : EVdjmAndroidGraphicBackend::EUnknown);
 	
-	return mRecordSession->Initialize(config, SharedThis(this));
+	return mRecordSession->Initialize(config);
 }
 
 VdjmResult FVdjmAndroidEncoderImpl::StartEncoder()
@@ -512,7 +538,12 @@ VdjmResult FVdjmAndroidEncoderImpl::StartEncoder()
 bool FVdjmAndroidEncoderImpl::SubmitSurfaceFrame(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,
 	double timeStampSec)
 {
-	return FVdjmVideoEncoderBase::SubmitSurfaceFrame(RHICmdList, srcTexture, timeStampSec);
+	if (mRecordSession.IsValid() /*&& mRecordSession->IsRunnable(srcTexture)*/)
+	{
+		return mRecordSession->Running(RHICmdList, srcTexture, timeStampSec);
+	}
+	
+	return false;
 }
 
 void FVdjmAndroidEncoderImpl::StopEncoder()

@@ -7,7 +7,6 @@
 #include "VdjmRecoderAndroidEncoder.h"
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GL/gl.h>
 #include <GLES3/gl3.h>
 
 class FVdjmAndroidEncoderBackendOpenGL : public FVdjmAndroidEncoderBackend

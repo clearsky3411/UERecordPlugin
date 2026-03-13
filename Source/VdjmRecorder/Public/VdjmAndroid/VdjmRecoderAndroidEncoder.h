@@ -109,7 +109,7 @@ public:
 	FVdjmAndroidEncoderBackend();
 	virtual ~FVdjmAndroidEncoderBackend();
 	
-	virtual bool Init(const FVdjmAndroidEncoderConfigure& config,TSharedPtr<FVdjmAndroidRecordSession> ownerSession) = 0;
+	virtual bool Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow) = 0;
 	virtual bool Start() = 0;
 	
 	virtual bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec);
@@ -120,9 +120,8 @@ public:
 	virtual void Stop() = 0;
 	virtual void Terminate() = 0;
 	
-private:
-	TWeakPtr<FVdjmAndroidRecordSession> mOwenrRecordSession;
-	
+protected:
+	ANativeWindow* mInputWindow = nullptr;
 };
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
@@ -134,7 +133,7 @@ public:
 	FVdjmAndroidRecordSession();
 	virtual ~FVdjmAndroidRecordSession();
 	
-	bool Initialize(const FVdjmAndroidEncoderConfigure& configurer,TSharedPtr<FVdjmAndroidEncoderImpl> sharedPtr);
+	bool Initialize(const FVdjmAndroidEncoderConfigure& configurer);
 	bool Start();
 	void Drain(bool bEndOfStream);
 	bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec);
@@ -148,6 +147,7 @@ public:
 	bool IsMuxerStarted() const { return mMuxerStarted; }
 	
 	bool IsStartable() const;
+	bool IsRunnable(const FTextureRHIRef& srcTexture) const;
 	
 	ANativeWindow* GetInputSurfaceWindow() { return mInputWindow; }
 	AMediaMuxer* GetMediaMuxer() { return mMuxer; }
