@@ -2153,7 +2153,21 @@ struct VDJMMOBILEUI_API FTVdjmVcardMotionInfo
 	UPROPERTY(EditAnywhere)
 	float PausedPositionInSec = 0.0f;
 	
-	
+	FTVdjmVcardMotionInfo(): 
+		TargetSkeletalMeshComp(nullptr),
+		PrevAnimMode(EAnimationMode::AnimationBlueprint),
+		PrevAnimPlayData(),
+		PrevAnimInstanceClass(nullptr),
+		bHasPrevAnimPlayData(false),
+		bHasPrevAnimInstance(false),
+		CurrentMotionAnimation(nullptr),
+		PrevPositionInSec(0.0f),
+		PrevPlayRate(1.0f),
+		PrevLooping(false),
+		bPaused(false),
+		PausePlayRate(1.0f),
+		PausedPositionInSec(0.0f)
+	{}
 	void Clear()
     {
         TargetSkeletalMeshComp = nullptr;

@@ -2,6 +2,35 @@
 
 
 #include "VdjmAndroid/VdjmAndroidEncoderBackendVulkan.h"
+#if PLATFORM_ANDROID || defined(__RESHARPER__)
+bool FVdjmVKInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) const
+{
+	return false;
+}
+
+bool FVdjmVkIntermediateStage::NeedRecreate(const FVdjmVkSubmitFrameInfo& frameInfo, uint32 curWid, uint32 curhei,
+                                            VkFormat curFormat) const
+{
+	return false;
+}
+
+bool FVdjmVkIntermediateStage::EnsureResource(FVdjmAndroidEncoderBackendVulkan& backend,
+	const FVdjmVkSubmitFrameInfo& frameInfo)
+{
+	return false;
+}
+
+bool FVdjmVkIntermediateStage::RecordPrepareAndCopy(FVdjmAndroidEncoderBackendVulkan& owner,
+	const FVdjmVkSubmitFrameInfo& frameInfo)
+{
+	return false;
+}
+
+bool FVdjmVkSurfaceSubmitter::Submit(FVdjmAndroidEncoderBackendVulkan& owner, double timeStampSec)
+{
+	return false;
+}
+
 bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow)
 {
 	if (not config.IsValidateEncoderArguments() )
@@ -179,3 +208,4 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(FRHICommandLi
 
 	return false;
 }
+#endif
