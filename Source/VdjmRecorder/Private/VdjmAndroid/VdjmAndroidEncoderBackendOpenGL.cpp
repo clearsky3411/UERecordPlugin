@@ -5,7 +5,7 @@
 #if PLATFORM_ANDROID || defined(__RESHARPER__)
 bool FVdjmAndroidEncoderBackendOpenGL::Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow)
 {
-	if (config.IsValidateEncoderArguments() && ANativeWindow != nullptr)
+	if (config.IsValidateEncoderArguments() && inputWindow != nullptr)
 	{
 		mConfig = config;
 		mInputWindow = inputWindow;
@@ -16,12 +16,7 @@ bool FVdjmAndroidEncoderBackendOpenGL::Init(const FVdjmAndroidEncoderConfigure& 
 
 bool FVdjmAndroidEncoderBackendOpenGL::Start()
 {
-	if (not mOwnerSession.IsValid())
-		return false;
-	FVdjmAndroidRecordSession* pinnedSession = mOwnerSession.Pin().Get();
-	
 	ANativeWindow* window = mInputWindow;
-	
 	if (window==nullptr)
 	{
 		return false;
@@ -93,17 +88,53 @@ bool FVdjmAndroidEncoderBackendOpenGL::Start()
 
 void FVdjmAndroidEncoderBackendOpenGL::Stop()
 {
-	
+	mStarted = false;
+	mPaused = false;
 }
 
 void FVdjmAndroidEncoderBackendOpenGL::Terminate()
 {
+	DestroyFullScreenPipeline();
+	if (mDisplay != EGL_NO_DISPLAY)
+	{
+		eglMakeCurrent(mDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+
+		if (mSurface != EGL_NO_SURFACE)
+		{
+			eglDestroySurface(mDisplay, mSurface);
+			mSurface = EGL_NO_SURFACE;
+		}
+
+		if (mContext != EGL_NO_CONTEXT)
+		{
+			eglDestroyContext(mDisplay, mContext);
+			mContext = EGL_NO_CONTEXT;
+		}
+
+		eglTerminate(mDisplay);
+		mDisplay = EGL_NO_DISPLAY;
+	}
+
+	mInputWindow = nullptr;
+	mStarted = false;
+	mPaused = false;
 }
 
 bool FVdjmAndroidEncoderBackendOpenGL::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,
 	double timeStampSec)
 {
-	return FVdjmAndroidEncoderBackend::Running(RHICmdList, srcTexture, timeStampSec);
+	if (!mStarted || mPaused)
+	{
+		return false;
+	}
+
+	if (!srcTexture.IsValid())
+	{
+		return false;
+	}
+
+	// TODO: Unreal texture -> GL texture handle 연결 후 실제 draw
+	return false;
 }
 
 bool FVdjmAndroidEncoderBackendOpenGL::CreateFullScreenPipeline()
@@ -201,8 +232,8 @@ void FVdjmAndroidEncoderBackendOpenGL::DestroyFullScreenPipeline()
 
 GLuint FVdjmAndroidEncoderBackendOpenGL::CompileShader(GLenum shaderType, const char* shaderSource)
 {
-	GLuint shader = glCreateShader(type);
-	glShaderSource(shader, 1, &src, nullptr);
+	GLuint shader = glCreateShader(shaderType);
+	glShaderSource(shader, 1, &shaderSource, nullptr);
 	glCompileShader(shader);
 	
 	GLint compiled = 0;

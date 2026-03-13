@@ -12,7 +12,7 @@
 class FVdjmAndroidEncoderBackendOpenGL : public FVdjmAndroidEncoderBackend
 {
 public:
-	virtual bool Init(const FVdjmAndroidEncoderConfigure& config,TSharedPtr<FVdjmAndroidRecordSession> ownerSession) override;
+	virtual bool Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow) override;
 	virtual bool Start() override;
 	virtual void Stop() override;
 	virtual void Terminate() override;

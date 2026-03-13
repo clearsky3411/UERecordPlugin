@@ -4,7 +4,7 @@
 #include "VdjmAndroid/VdjmAndroidEncoderBackendVulkan.h"
 bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow)
 {
-	if (config.IsValidateEncoderArguments() && ANativeWindow != nullptr)
+	if (config.IsValidateEncoderArguments() && inputWindow != nullptr)
 	{
 		//mConfig = config;
 		mInputWindow = inputWindow;
