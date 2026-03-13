@@ -27,16 +27,54 @@ struct FVkSubmitFrameInfo
 
 class FVdjmVKInputAnalyzer
 {
+	/**
+	* @brief Vulkan 이미지에서 필요한 정보를 추출하는 유틸리티 클래스
+	* ### 목적:
+	* - Vulkan 에 넣는 이미지가 바로 적합하지 않으니 VKImage에서 필요한 정보를 추출하는 역할
+	* - native Resource 추출
+	* ### Result:
+	* - width, height, format, layout 등 Vulkan 이미지로 제출하기 위해 필요한 정보를 추출
+	* - FVKSubmitFrameInfo 구조체로 결과 반환
+	* ### 한계:
+	* - 자원 생성, command submit, 동기화 완료 처리
+	*/
 public:
 	
 };
 class FVdjmVkIntermediateStage
 {
+	/**
+ 	* @brief 불칸 내부 이미지 제출 과정에서 필요한 중간 단계 처리 클래스
+ 	* ### 목적:
+ 	* - intermediate image 필요 판단
+ 	* - intermediate image / view / memory 생성/재생성
+ 	* - 입력 이미지 → intermediate 로 copy / blit / render
+ 	* - layout transition 규칙 적용
+ 	* ### Result:
+ 	* - 가공된 Vulkan 이미지 생성
+ 	* - 제출 가능한 상태로 Vulkan 이미지 준비
+ 	* ### 한계:
+ 	* - 입력 텍스처 해석
+ 	* - 최종 제출 완료 관리
+ 	*/
 public:
 	
 };
 class FVdjmVkSurfaceSubmitter
 {
+	/**
+	 * @brief Vulkan 이미지 제출 담당 클래스
+	 * ### 목적:
+	 * - 제출 command buffer / queue submit
+	 * - semaphore / fence 관리
+	 * - 제출 완료 대기 또는 상태 확인
+	 * - stop / terminate 시 남은 작업 정리
+	 * ### Result:
+	 * - 최종 제출 + 완료 추적기
+	 * ### 한계:
+	 * - 입력 텍스처 분석
+	 * - intermediate 생성 정책 판단
+	 */
 public:
 	
 };
