@@ -9,6 +9,10 @@
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
 
+#ifndef EGL_OPENGL_ES3_BIT_KHR
+#define EGL_OPENGL_ES3_BIT_KHR 0x00000040
+#endif
+
 class FVdjmAndroidEncoderBackendOpenGL : public FVdjmAndroidEncoderBackend
 {
 public:

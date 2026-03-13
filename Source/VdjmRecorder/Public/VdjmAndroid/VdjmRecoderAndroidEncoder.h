@@ -106,8 +106,8 @@ class FVdjmAndroidEncoderBackend
 class FVdjmAndroidEncoderBackend : public TSharedFromThis<FVdjmAndroidEncoderBackend, ESPMode::ThreadSafe>
 {
 public:
-	FVdjmAndroidEncoderBackend();
-	virtual ~FVdjmAndroidEncoderBackend();
+	FVdjmAndroidEncoderBackend() = default;
+	virtual ~FVdjmAndroidEncoderBackend() = default;
 	
 	virtual bool Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow) = 0;
 	virtual bool Start() = 0;

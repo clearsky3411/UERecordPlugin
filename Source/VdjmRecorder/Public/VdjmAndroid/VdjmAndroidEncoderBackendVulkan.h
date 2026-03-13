@@ -27,6 +27,9 @@ struct VkSubmitFrameInfo
 class FVdjmAndroidEncoderBackendVulkan : public FVdjmAndroidEncoderBackend
 {
 public:
+	FVdjmAndroidEncoderBackendVulkan() = default;
+	virtual ~FVdjmAndroidEncoderBackendVulkan() override = default;
+	
 	virtual bool Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow) override;
 	virtual bool Start() override;
 	virtual void Stop() override;

@@ -28,5 +28,5 @@ void FVdjmAndroidEncoderBackendVulkan::Terminate()
 bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,
 	double timeStampSec)
 {
-	return FVdjmAndroidEncoderBackend::Running(RHICmdList, srcTexture, timeStampSec);
+	return false;
 }
