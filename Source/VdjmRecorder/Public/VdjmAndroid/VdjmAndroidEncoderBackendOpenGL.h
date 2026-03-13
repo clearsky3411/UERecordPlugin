@@ -39,10 +39,10 @@ private:
 	bool mStarted = false;
 	bool mPaused = false;
 	
-	constexpr int32 VertexSize = 4; // x, y, u, v
-	constexpr int32 VertexCount = 4; // 4 vertices for a quad
+	static constexpr int32 VertexSize = 4; // x, y, u, v
+	static constexpr int32 VertexCount = 4; // 4 vertices for a quad
 	
-	constexpr float QuadVertices[] = {
+	static constexpr float QuadVertices[VertexSize*VertexCount] = {
 		-1.0f, -1.0f, 0.0f, 0.0f,
 		 1.0f, -1.0f, 1.0f, 0.0f,
 		-1.0f,  1.0f, 0.0f, 1.0f,
