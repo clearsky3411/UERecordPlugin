@@ -88,6 +88,16 @@ struct FVdjmAndroidEncoderConfigure
 	}
 	
 	bool IsValidateEncoderArguments() const;
+	void Clear()
+	{
+		VideoWidth = 0;
+		VideoHeight = 0;
+		VideoBitrate = 0;
+		VideoFPS = 0;
+		OutputFilePath.Empty();
+		MimeType = "video/avc";
+		GraphicBackend = EVdjmAndroidGraphicBackend::EUnknown;
+	}
 };
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
@@ -99,7 +109,7 @@ public:
 	FVdjmAndroidEncoderBackend();
 	virtual ~FVdjmAndroidEncoderBackend();
 	
-	virtual bool Init(const FVdjmAndroidEncoderConfigure& config) = 0;
+	virtual bool Init(const FVdjmAndroidEncoderConfigure& config,TSharedPtr<FVdjmAndroidRecordSession> ownerSession) = 0;
 	virtual bool Start() = 0;
 	
 	virtual bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec);
@@ -139,7 +149,10 @@ public:
 	
 	bool IsStartable() const;
 	
-	ANativeWindow* GetInputSurfaceWindow() const { return mInputWindow; }
+	ANativeWindow* GetInputSurfaceWindow() { return mInputWindow; }
+	AMediaMuxer* GetMediaMuxer() { return mMuxer; }
+	AMediaCodec* GetMediaCodec() { return mCodec; }
+	
 	const FVdjmAndroidEncoderConfigure& getConfig() const { return mConfig; }
 	
 protected:

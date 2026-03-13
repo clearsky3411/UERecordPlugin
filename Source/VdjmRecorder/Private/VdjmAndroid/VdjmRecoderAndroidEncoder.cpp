@@ -192,27 +192,6 @@ bool FVdjmAndroidRecordSession::Start()
 	}
 	
 	mOutputFd = open(TCHAR_TO_UTF8(*mConfig.OutputFilePath), O_RDWR | O_CREAT | O_TRUNC, 0644);
-	if (not mGraphicBackend.IsValid())
-	{
-		switch (mConfig.GraphicBackend)
-		{
-		case EVdjmAndroidGraphicBackend::EUnknown:
-			return false;
-		case EVdjmAndroidGraphicBackend::EOpenGL:
-			mGraphicBackend = MakeUnique<FVdjmAndroidEncoderBackendOpenGL>();
-			break;
-		case EVdjmAndroidGraphicBackend::EVulkan:
-			mGraphicBackend = MakeUnique<FVdjmAndroidEncoderBackendVulkan>();
-			break;
-		}
-	}
-	
-	if (not mGraphicBackend->Init(mConfig))
-	{
-		Terminate(); 
-		return false;
-	}
-	
 	if (mOutputFd < 0)
 	{
 		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::Start - Failed to open output file: %s"), *mConfig.OutputFilePath);
@@ -276,9 +255,30 @@ bool FVdjmAndroidRecordSession::Start()
 		Terminate();
 		return false;
 	}
-
+	
+	if (not mGraphicBackend.IsValid())
+	{
+		switch (mConfig.GraphicBackend)
+		{
+		case EVdjmAndroidGraphicBackend::EUnknown:
+			Terminate();
+			return false;
+		case EVdjmAndroidGraphicBackend::EOpenGL:
+			mGraphicBackend = MakeUnique<FVdjmAndroidEncoderBackendOpenGL>();
+			break;
+		case EVdjmAndroidGraphicBackend::EVulkan:
+			mGraphicBackend = MakeUnique<FVdjmAndroidEncoderBackendVulkan>();
+			break;
+		}
+	}
+	
+	if (not mGraphicBackend->Init(mConfig))
+	{
+		Terminate(); 
+		return false;
+	}
+	
 	mCodecStarted = true;
-	mRunning = true;
 	mMuxerStarted = false;
 	mTrackIndex = -1;
 	mEosSent = false;
@@ -287,6 +287,7 @@ bool FVdjmAndroidRecordSession::Start()
 		Terminate();
 		return false;
 	}
+	mRunning = true;
 	return true;
 }
 
