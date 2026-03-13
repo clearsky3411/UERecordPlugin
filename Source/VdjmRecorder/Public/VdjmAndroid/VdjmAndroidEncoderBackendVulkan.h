@@ -24,6 +24,23 @@ struct FVkSubmitFrameInfo
 	uint32_t SrcHeight = 0;
 	VkImageLayout SrcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 };
+
+class FVdjmVKInputAnalyzer
+{
+public:
+	
+};
+class FVdjmVkIntermediateStage
+{
+public:
+	
+};
+class FVdjmVkSurfaceSubmitter
+{
+public:
+	
+};
+
 class FVdjmAndroidEncoderBackendVulkan : public FVdjmAndroidEncoderBackend
 {
 public:
