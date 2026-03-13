@@ -22,13 +22,12 @@ public:
 	virtual void Terminate() override;
 	virtual bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec) override;
 private:
+	bool EnsureEGLContextReady();
 	bool CreateFullScreenPipeline();
 	void DestroyFullScreenPipeline();
 	static GLuint CompileShader(GLenum shaderType, const char* shaderSource);
 	
-	
 	FVdjmAndroidEncoderConfigure mConfig;
-	TWeakPtr<FVdjmAndroidRecordSession> mOwnerSession;
 	
 	EGLDisplay mDisplay = EGL_NO_DISPLAY;
 	EGLContext mContext = EGL_NO_CONTEXT;
