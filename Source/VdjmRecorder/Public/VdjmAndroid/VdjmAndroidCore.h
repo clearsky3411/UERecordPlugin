@@ -19,8 +19,6 @@ class VDJMRECORDER_API UVdjmRecordAndroidResource : public UVdjmRecordResource
 	GENERATED_BODY()
 
 public:
-	void InitializeTexturePool(FIntPoint textureResolution,EPixelFormat finalPixelFormat, const int32 poolSize);
-	
 	virtual void InitializeResource(AVdjmRecordBridgeActor* ownerBridge) override;
 	virtual void ReleaseResources() override;
 	virtual void ResetResource() override;
@@ -28,28 +26,9 @@ public:
 	virtual FTextureRHIRef GetNextPooledTextureRHI() override;
 	virtual bool DbcIsValidResource() const override;
 	virtual void BeginDestroy() override;
-
-	const int32 PoolSize = 3;
-private:
-	TArray<FTextureRHIRef> mTexturePoolRHI;
-	int32 mCurrentPoolIndex = 0;
+	
 };
-/*
-§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
-class UVdjmRecordAndroidCSUnit : public UObject
-*/
-UCLASS(Blueprintable)
-class VDJMRECORDER_API UVdjmRecordAndroidCSUnit : public UVdjmRecordUnit
-{
-	GENERATED_BODY()
 
-public:
-	virtual void ExecuteUnit(const FVdjmRecordUnitParamContext& context, FVdjmRecordUnitParamPayload& payload) override;
-	virtual EVdjmRecordPipelineStages GetPipelineStage() const override
-	{
-		return EVdjmRecordPipelineStages::EComputeShader;
-	}
-};
 
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	

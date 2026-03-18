@@ -17,163 +17,41 @@
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	
 class UVdjmRecordAndroidResource : public UVdjmRecordResource
 */
-void UVdjmRecordAndroidResource::InitializeTexturePool(FIntPoint textureResolution, EPixelFormat finalPixelFormat,
-	const int32 poolSize)
-{
-	if (IsInRenderingThread())
-	{
-		mTexturePoolRHI.Empty();
-		mTexturePoolRHI.Reserve(poolSize);
 
-		for (int32 i = 0; i < poolSize; ++i)
-		{
-			mTexturePoolRHI.Add(CreateTextureForNV12(
-				textureResolution,	//	어차피 수정
-				finalPixelFormat,	//	어차피 고정
-				ETextureCreateFlags::UAV | ETextureCreateFlags::ShaderResource | ETextureCreateFlags::Shared));
-		}
-		mCurrentPoolIndex  = 0;
-		
-		FVdjmEncoderStatus::DbcGameThreadTask([weakThis = TWeakObjectPtr<UVdjmRecordResource>(this)]()
-		{
-			if (weakThis.IsValid())
-			{
-				weakThis->OnResourceTexturePoolInitializedFunc.Broadcast(weakThis.Get());
-			}
-		});
-	}
-}
 void UVdjmRecordAndroidResource::InitializeResource(AVdjmRecordBridgeActor* ownerBridge)
 {
 	Super::InitializeResource(ownerBridge);
-	
-	FVdjmEncoderStatus::DbcRenderThreadTask(
-		[
-			textureResolution = TextureResolution,
-			finalPixelFormat = FinalPixelFormat,
-			poolSize = PoolSize,
-			weakThis = TWeakObjectPtr<UVdjmRecordAndroidResource>(this) ]()->void{
-			if (weakThis.IsValid())
-			{
-				UE_LOG(LogTemp, Warning, TEXT("UVdjmRecordAndroidResource ::InitializeResource - Initializing Texture Pool on Render Thread"));
-
-				weakThis->InitializeTexturePool(textureResolution, finalPixelFormat, poolSize);
-			}
-		});
 }
 
 void UVdjmRecordAndroidResource::ReleaseResources()
 {
 	Super::ReleaseResources();
-	for(int i=0; i<mTexturePoolRHI.Num(); i++)
-	{
-		mTexturePoolRHI[i].SafeRelease();
-	}
-	mTexturePoolRHI.Empty();
-	mCurrentPoolIndex = 0;
 }
 
 void UVdjmRecordAndroidResource::ResetResource()
 {
 	Super::ResetResource();
-	mCurrentPoolIndex = 0;
 }
 
 FTextureRHIRef UVdjmRecordAndroidResource::GetCurrPooledTextureRHI()
 {
-	if (not DbcIsValidResourceInit())
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordResource::GetCurrentPooledTextureRHI - Resource is not valid. Call Initialize() first."));
-		return nullptr;
-	}
-	return mTexturePoolRHI[mCurrentPoolIndex];
+	return nullptr;
 }
 
 FTextureRHIRef UVdjmRecordAndroidResource::GetNextPooledTextureRHI()
 {
-	if (not DbcIsValidResourceInit())
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordResource::GetNextPooledTextureRHI - Resource is not valid. Call Initialize() first."));
-		return nullptr;
-	}
-	
-	FTextureRHIRef ret = mTexturePoolRHI[mCurrentPoolIndex];
-	mCurrentPoolIndex = (mCurrentPoolIndex + 1) % PoolSize;
-	
-	return ret;
+	return nullptr;
 }
 
 bool UVdjmRecordAndroidResource::DbcIsValidResource() const
 {
-	return DbcIsDefaultReady() && mTexturePoolRHI.Num() > 0 && mTexturePoolRHI[0] != nullptr;
+	return true;
 }
 
 void UVdjmRecordAndroidResource::BeginDestroy()
 {
 	Super::BeginDestroy();
-	ReleaseResources();
 }
-
-/*
-§	↓	↓	↓	↓	↓	↓	↓	↓	↓	
-class UVdjmRecordAndroidCSUnit : public UObject
-*/
-
-void UVdjmRecordAndroidCSUnit::ExecuteUnit(const FVdjmRecordUnitParamContext& context,
-	FVdjmRecordUnitParamPayload& payload)
-{
-	if (context.DbcIsValidUnit())
-	{
-		const TCHAR* NameIfUnregistered = TEXT("UVdjmRecordAndroidCSUnit_ExecuteUnit");
-		
-		if (not DbcIsValidUnitInit())
-		{
-			payload.bSuccess = false;
-			//inPayload.LogString.Appendf( TEXT("UVdjmRecordCSUnit::DispatchRecordPass - Error - Dbc Is not Valid \n"));
-			return;
-		}
-		payload.OutputTexture = LinkedRecordResource->GetNextPooledTextureRHI();
-		if (not payload.OutputTexture.IsValid())
-		{
-			payload.bSuccess = false;
-			//inPayload.LogString.Appendf(TEXT("UVdjmRecordCSUnit::DispatchRecordPass - Error - OutputTexture is not valid \n"));
-			return;
-		}
-		FRDGBuilder& graphBuilder = *context.GraphBuilder;
-		//	여기에서 Param 입력
-		FVdjmRecordNV12CSShader::FParameters* passParams = graphBuilder.AllocParameters<FVdjmRecordNV12CSShader::FParameters>();
-	
-		passParams->InputTexture = payload.InputTexture;
-		passParams->OutputTexture =
-			graphBuilder.CreateUAV(
-				RegisterExternalTexture(
-				graphBuilder,
-				payload.OutputTexture,
-				NameIfUnregistered)
-				);
-		passParams->OriginWidth = LinkedRecordResource->OriginResolution.X;
-		passParams->OriginHeight = LinkedRecordResource->OriginResolution.Y;
-
-		TShaderMapRef<FVdjmRecordNV12CSShader> recordCsShaderObj(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-
-		FRDGPassRef rdgPass = FComputeShaderUtils::AddPass(
-			graphBuilder,
-			RDG_EVENT_NAME("UVdjmRecordAndroidCSUnit_ExecuteUnit"),
-			ERDGPassFlags::Compute,
-			recordCsShaderObj,
-			passParams,
-			LinkedRecordResource->CachedGroupCount);
-		
-		payload.bSuccess = true;
-	}
-	else
-	{
-		payload.bSuccess = false;
-		//payload.LogString.Appendf(TEXT("UVdjmRecordCSUnit::ExecuteUnit - Error - Context is not valid \n"));
-	}
-}
-
-
 
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
@@ -214,7 +92,10 @@ void UVdjmRecordAndroidUnit::PostEndPipelineExecute(const FVdjmRecordUnitParamCo
 
 void UVdjmRecordAndroidUnit::StopRecord()
 {
-	
+	if (mAndroidEncoder.IsValid())
+	{
+		mAndroidEncoder->StopEncoder();
+	}
 }
 
 bool UVdjmRecordAndroidUnit::InitializeUnit(UVdjmRecordResource* recordResource)
