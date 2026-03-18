@@ -53,6 +53,18 @@ void UVdjmRecordAndroidResource::BeginDestroy()
 	Super::BeginDestroy();
 }
 
+void UVdjmRecordAndroidUnit::RemoveRecordPrevStartDelegate()
+{
+	if (AVdjmRecordBridgeActor* bridge = AVdjmRecordBridgeActor::TryGetRecordBridgeActor())
+	{
+		if (mStartRecordPrepareHandle.IsValid())
+		{
+			bridge->OnRecordPrevStartInner.Remove(mStartRecordPrepareHandle);
+		}
+		mStartRecordPrepareHandle.Reset();
+	}
+}
+
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
 class UVdjmRecordAndroidSurfacer : public UVdjmRecordUnit
@@ -66,14 +78,7 @@ void UVdjmRecordAndroidUnit::RecordPrevStart(UVdjmRecordResource* res)
 			if (not InitializeUnit(res))
 			{
 				UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidSurfacer::RecordPrevStart - Failed to initialize unit with provided resource."));
-				if (AVdjmRecordBridgeActor* bridge = AVdjmRecordBridgeActor::TryGetRecordBridgeActor())
-				{
-					if (mStartRecordPrepareHandle.IsValid())
-					{
-						bridge->OnRecordPrevStartInner.Remove(mStartRecordPrepareHandle);
-					}
-					mStartRecordPrepareHandle.Reset();
-				}
+				RemoveRecordPrevStartDelegate();
 				return;
 			}
 		}
@@ -81,7 +86,13 @@ void UVdjmRecordAndroidUnit::RecordPrevStart(UVdjmRecordResource* res)
 	
 	if (LinkedRecordResource.IsValid() && mAndroidEncoder.IsValid())
 	{
-		mAndroidEncoder->StartEncoder();
+		VdjmResult result = mAndroidEncoder->StartEncoder();
+		if (VdjmFailed(result))
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidSurfacer::RecordPrevStart - Failed to start Android Encoder. Result code: 0x%08X"), result);
+			mAndroidEncoder->TerminateEncoder();
+			RemoveRecordPrevStartDelegate();
+		}
 	}
 }
 
@@ -168,6 +179,12 @@ void UVdjmRecordAndroidUnit::ExecuteUnit(const FVdjmRecordUnitParamContext& cont
 void UVdjmRecordAndroidUnit::ReleaseUnit()
 {
 	Super::ReleaseUnit();
+	if (mAndroidEncoder.IsValid())
+	{
+		mAndroidEncoder->TerminateEncoder();
+		mAndroidEncoder.Reset();
+	}
+	RemoveRecordPrevStartDelegate();
 }
 
 bool UVdjmRecordAndroidUnit::DbcIsValidUnitInit() const

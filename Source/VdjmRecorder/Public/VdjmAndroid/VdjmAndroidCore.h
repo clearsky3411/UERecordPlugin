@@ -43,7 +43,8 @@ public:
 	BEGIN_SHADER_PARAMETER_STRUCT(FVdjmAndroidSubmitPassParameters, )
 	RDG_TEXTURE_ACCESS(InputTexture, ERHIAccess::CopySrc)
 END_SHADER_PARAMETER_STRUCT()
-	
+
+	void RemoveRecordPrevStartDelegate();
 	UFUNCTION()
 	void RecordPrevStart(UVdjmRecordResource* res);
 	UFUNCTION()	

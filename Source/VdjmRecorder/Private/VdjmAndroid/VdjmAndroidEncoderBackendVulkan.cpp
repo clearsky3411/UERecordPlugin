@@ -93,24 +93,21 @@ void FVdjmAndroidEncoderBackendVulkan::Terminate()
 
 bool FVdjmAndroidEncoderBackendVulkan::IsRunnable()
 {
-	if (not mInitialized)
+	if (!mInitialized)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderBackendVulkan::Running - Not initialized"));
-		
-		return true;
+		UE_LOG(LogTemp, Warning, TEXT("... Not initialized"));
+		return false;
 	}
-
-	if (not mStarted || mPaused)
+	if (!mStarted || mPaused)
 	{
-		return true;
+		return false;
 	}
-
 	if (mInputWindow == nullptr)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderBackendVulkan::Running - inputWindow is null"));
-		return true;
+		UE_LOG(LogTemp, Warning, TEXT("... inputWindow is null"));
+		return false;
 	}
-	return false;
+	return true;
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec)
