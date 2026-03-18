@@ -212,6 +212,11 @@ void UVdjmRecordAndroidUnit::PostEndPipelineExecute(const FVdjmRecordUnitParamCo
 {
 }
 
+void UVdjmRecordAndroidUnit::StopRecord()
+{
+	
+}
+
 bool UVdjmRecordAndroidUnit::InitializeUnit(UVdjmRecordResource* recordResource)
 {
 	//	멱등성 유지, RecordPrevStart 여기에서 리소스가 에러시에 무조건 호출
@@ -332,5 +337,87 @@ void UVdjmRecordAndroidUnit::SubmitFrameToSurfacer(FRDGBuilder& graphBuilder, co
 				TimeStampSec
 			);
 		});
+}
+
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	
+class UVdjmRecordAndroidResource : public UVdjmRecordResource
+*/
+void UVdjmAndroidRecordPipeline::InitializeRecordPipeline(UVdjmRecordResource* recordResource)
+{
+	Super::InitializeRecordPipeline(recordResource);
+	if (recordResource == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - recordResource is null."));
+		return;
+	}
+	LinkedBridgeActor = recordResource->OwnerBridgeActor;
+	if (LinkedBridgeActor.IsValid() && LinkedBridgeActor->DbcValidRecordResource())
+	{
+		FVdjmRecordEnvPlatformInfo* platformInfo =
+			LinkedBridgeActor->GetRecordEnvConfigureDataAsset()
+				->GetPlatformInfo( AVdjmRecordBridgeActor::GetTargetPlatform());
+		
+		
+		if (const TSubclassOf<UVdjmRecordUnit>* foundState = platformInfo->GetPipelineState(EVdjmRecordPipelineStages::ESurfaceEncodeAndWrite))
+		{
+			CreateUnit(*foundState);
+		}
+	}
+}
+
+void UVdjmAndroidRecordPipeline::ExecuteRecordPipeline(const FVdjmRecordUnitParamContext& context,
+	FVdjmRecordUnitParamPayload& payload)
+{
+	payload.previousUnit = nullptr;
+	OnBeginPipelineExecution.Broadcast(context, payload);
+	
+	for (TObjectPtr<UVdjmRecordUnit>& recordUnit :RecordUnits)
+	{
+		if (IsValid(recordUnit))
+		{
+			OnBeginExecuteUnit.Broadcast(context, payload);
+			recordUnit->ExecuteUnit(context,payload);
+			if (!payload.bSuccess)
+			{
+				//	Log and break on failure
+				OnErrorExecuteUnit.Broadcast(context, payload);
+				break;
+			}
+			OnEndExecuteUnit.Broadcast(context, payload);
+			payload.previousUnit = recordUnit;
+		}
+		else
+		{
+			OnErrorExecuteUnit.Broadcast(context, payload);
+		}
+	}
+	OnEndPipelineExecution.Broadcast(context, payload);
+}
+
+void UVdjmAndroidRecordPipeline::StopRecordPipelineExecution()
+{
+	TravelLoopUnits([](UVdjmRecordUnit* unit)->int32
+	{
+		if (UVdjmRecordAndroidUnit* androidUnit = Cast<UVdjmRecordAndroidUnit>(unit))
+		{
+			androidUnit->StopRecord();
+			return 1;
+		}
+		else
+		{
+			return 0;
+		}
+	});
+}
+
+void UVdjmAndroidRecordPipeline::ReleaseRecordPipeline()
+{
+	Super::ReleaseRecordPipeline();
+}
+
+bool UVdjmAndroidRecordPipeline::DbcIsValid() const
+{
+	return Super::DbcIsValid();
 }
 

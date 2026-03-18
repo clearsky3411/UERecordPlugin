@@ -284,7 +284,9 @@ public:
 	bool DbcUnitCheck() const;
 
 	FVdjmRecordPipelineEvent OnBeginPipelineExecution;
+	FVdjmRecordPipelineEvent OnBeginExecuteUnit;
 	FVdjmRecordPipelineEvent OnEndExecuteUnit;
+	FVdjmRecordPipelineEvent OnErrorExecuteUnit;
 	FVdjmRecordPipelineEvent OnEndPipelineExecution;
 
 	UPROPERTY()

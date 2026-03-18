@@ -69,6 +69,9 @@ END_SHADER_PARAMETER_STRUCT()
 	void RecordPrevStart(UVdjmRecordResource* res);
 	UFUNCTION()	
 	void PostEndPipelineExecute(const FVdjmRecordUnitParamContext& context, FVdjmRecordUnitParamPayload& payload);
+	UFUNCTION()
+	void StopRecord();
+	
 	
 	virtual bool InitializeUnit(UVdjmRecordResource* recordResource) override;
 	virtual void ExecuteUnit(const FVdjmRecordUnitParamContext& context, FVdjmRecordUnitParamPayload& payload) override;
@@ -86,11 +89,25 @@ protected:
 	FDelegateHandle mPostEndPipelineExecuteHandle;
 	TSharedPtr<FVdjmVideoEncoderBase> mAndroidEncoder;
 };
+/*
+§	↓	↓	↓	↓	↓	↓	↓	↓	↓	
+class UVdjmRecordAndroidResource : public UVdjmRecordResource
+*/
+UCLASS()
+class VDJMRECORDER_API UVdjmAndroidRecordPipeline : public UVdjmRecordUnitPipeline
+{
+	GENERATED_BODY()
+
+public:
+	virtual void InitializeRecordPipeline(UVdjmRecordResource* recordResource) override;
+	virtual void ExecuteRecordPipeline(const FVdjmRecordUnitParamContext& context,
+		FVdjmRecordUnitParamPayload& payload) override;
+	virtual void StopRecordPipelineExecution() override;
+	virtual void ReleaseRecordPipeline() override;
+	virtual bool DbcIsValid() const override;
+};
 
 
-/**
- * 
- */
 UCLASS()
 class VDJMRECORDER_API UVdjmAndroidCore : public UObject
 {
