@@ -189,20 +189,27 @@ bool FVdjmAndroidEncoderBackendVulkan::TryExtractNativeVkImage(const FTextureRHI
 bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(FRHICommandList& RHICmdList,
 	const FTextureRHIRef& srcTexture, VkImage srcImage, double timeStampSec)
 {
-	if (srcImage == VK_NULL_HANDLE)
+	FVdjmVkSubmitFrameInfo frameInfo;
+	if (!mAnalyzer.Analyze(srcTexture, frameInfo))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface - srcImage is null"));
 		return false;
 	}
 
-	UE_LOG(
-		LogTemp,
-		Warning,
-		TEXT("FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface - Vulkan submit path is not implemented yet. Width=%d Height=%d Time=%f"),
-		mConfig.VideoWidth,
-		mConfig.VideoHeight,
-		timeStampSec);
+	if (!mIntermediateStage.EnsureResource(*this, frameInfo))
+	{
+		return false;
+	}
 
-	return false;
+	if (!mIntermediateStage.RecordPrepareAndCopy(*this, frameInfo))
+	{
+		return false;
+	}
+
+	if (!mSubmitter.Submit(*this, timeStampSec))
+	{
+		return false;
+	}
+
+	return true;
 }
 #endif

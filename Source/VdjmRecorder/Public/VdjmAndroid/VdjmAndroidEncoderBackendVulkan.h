@@ -21,10 +21,34 @@ struct FVdjmVkEncoderContext
 struct FVdjmVkSubmitFrameInfo
 {
 	VkImage SrcImage = VK_NULL_HANDLE;
-	VkFormat SrcFormat = VK_FORMAT_R8G8B8A8_UNORM;
-	uint32_t SrcWidth = 0;
-	uint32_t SrcHeight = 0;
-	VkImageLayout SrcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	VkFormat SrcFormat = VK_FORMAT_UNDEFINED;
+	uint32 SrcWidth = 0;
+	uint32 SrcHeight = 0;
+	VkImageLayout SrcLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+	bool bFormatMatchesSwapchain = false;
+	bool bExtentMatchesSwapchain = false;
+	bool bNeedsIntermediate = false;
+	
+	FVdjmVkSubmitFrameInfo() = default;
+	FVdjmVkSubmitFrameInfo(const FVdjmVkSubmitFrameInfo& other) = default;
+	FVdjmVkSubmitFrameInfo(FVdjmVkSubmitFrameInfo&& other) = default;
+	
+	FVdjmVkSubmitFrameInfo& operator=(const FVdjmVkSubmitFrameInfo& other) = default;
+	FVdjmVkSubmitFrameInfo& operator=(FVdjmVkSubmitFrameInfo&& other) = default;
+	
+	void Clear()
+	{
+		SrcImage = VK_NULL_HANDLE;
+		SrcFormat = VK_FORMAT_UNDEFINED;
+		SrcWidth = 0;
+		SrcHeight = 0;
+		SrcLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		
+		bFormatMatchesSwapchain = false;
+		bExtentMatchesSwapchain = false;
+		bNeedsIntermediate = false;
+	}
 };
 
 class FVdjmVKInputAnalyzer
@@ -125,6 +149,22 @@ private:
 	FVdjmVKInputAnalyzer mAnalyzer;
 	FVdjmVkIntermediateStage mIntermediateStage;
 	FVdjmVkSurfaceSubmitter mSubmitter;
+	
+//	----	
+	
+	VkSurfaceKHR mCodecSurface = VK_NULL_HANDLE;
+	VkSwapchainKHR mCodecSwapchain = VK_NULL_HANDLE;
+
+	TArray<VkImage> mSwapchainImages;
+	TArray<VkImageView> mSwapchainImageViews;
+
+	VkSemaphore mAcquireSemaphore = VK_NULL_HANDLE;
+	VkSemaphore mRenderCompleteSemaphore = VK_NULL_HANDLE;
+
+	uint32 mCurrentSwapchainImageIndex = 0;
+	VkFormat mSwapchainFormat = VK_FORMAT_UNDEFINED;
+	uint32 mSwapchainWidth = 0;
+	uint32 mSwapchainHeight = 0;
 };
 
 #endif
