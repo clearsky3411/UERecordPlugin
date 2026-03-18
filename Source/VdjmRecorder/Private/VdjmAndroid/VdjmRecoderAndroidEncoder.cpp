@@ -152,6 +152,20 @@ bool FVdjmAndroidEncoderConfigure::IsValidateEncoderArguments() const
 	return true;
 }
 
+FVdjmAndroidEncoderBackend::FVdjmAndroidEncoderBackend()
+{
+}
+
+FVdjmAndroidEncoderBackend::~FVdjmAndroidEncoderBackend()
+{
+}
+
+bool FVdjmAndroidEncoderBackend::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,
+	double timeStampSec)
+{
+	return false;
+}
+
 FVdjmAndroidRecordSession::FVdjmAndroidRecordSession()
 	: mInitialized(false)
 	, mRunning(false)

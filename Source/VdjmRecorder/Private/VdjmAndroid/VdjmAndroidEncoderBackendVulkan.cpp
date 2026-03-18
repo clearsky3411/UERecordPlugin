@@ -165,7 +165,7 @@ bool FVdjmAndroidEncoderBackendVulkan::EnsureRuntimeReady()
 	{
 		return false;
 	}
-
+	//AHardwareBuffer_isSupported
 	mRuntimeReady = true;
 	return true;
 }

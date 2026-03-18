@@ -14,8 +14,10 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 
+struct ANativeWindow;
 class FVdjmAndroidEncoderImpl;
 class FVdjmAndroidRecordSession;
+
 
 enum class EVdjmAndroidGraphicBackend : uint8
 {
@@ -106,8 +108,8 @@ class FVdjmAndroidEncoderBackend
 class FVdjmAndroidEncoderBackend : public TSharedFromThis<FVdjmAndroidEncoderBackend, ESPMode::ThreadSafe>
 {
 public:
-	FVdjmAndroidEncoderBackend() = default;
-	virtual ~FVdjmAndroidEncoderBackend() = default;
+	FVdjmAndroidEncoderBackend();
+	virtual ~FVdjmAndroidEncoderBackend();
 	
 	virtual bool Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow) = 0;
 	virtual bool Start() = 0;
