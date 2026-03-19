@@ -36,10 +36,10 @@ bool FVdjmVkInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubm
 		return false;
 	}
 
-	outInfo.bFormatMatchesSwapchain = (outInfo.SrcFormat == OwnerBackend->GetSwapchainFormat());
+	outInfo.bFormatMatchesSwapchain = (outInfo.SrcFormat == mOwnerBackend->GetSwapchainFormat());
 	outInfo.bExtentMatchesSwapchain =
-		(outInfo.SrcWidth == OwnerBackend->GetSwapchainWidth() &&
-		 outInfo.SrcHeight == OwnerBackend->GetSwapchainHeight());
+		(outInfo.SrcWidth == mOwnerBackend->GetSwapchainWidth() &&
+		 outInfo.SrcHeight == mOwnerBackend->GetSwapchainHeight());
 
 	outInfo.bCanDirectCopy = outInfo.bFormatMatchesSwapchain && outInfo.bExtentMatchesSwapchain;
 	outInfo.bNeedsIntermediate = !outInfo.bCanDirectCopy;
@@ -49,7 +49,13 @@ bool FVdjmVkInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubm
 
 bool FVdjmVkIntermediateStage::NeedRecreate(const FVdjmVkSubmitFrameInfo& frameInfo, uint32 curWid, uint32 curhei, VkFormat curFormat) const
 {
-	if (mIntermediateImage == VK_NULL_HANDLE)
+	if (mOwnerBackend == nullptr)
+	{
+		return true;
+	}
+	FVdjmAndroidEncoderBackendVulkan& Owner = *mOwnerBackend;
+	
+	if (Owner.IsValidIntermediateImage())
 	{
 		return true;
 	}
@@ -174,53 +180,54 @@ bool FVdjmVkSurfaceSubmitter::Submit(FVdjmAndroidEncoderBackendVulkan& owner, do
 	VkPipelineStageFlags WaitStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
 
 	VkSubmitInfo SubmitInfo{};
+	if (mOwnerBackend == nullptr)
+	{
+		return false;
+	}
+	FVdjmAndroidEncoderBackendVulkan& Owner = *mOwnerBackend;
 	SubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 	SubmitInfo.waitSemaphoreCount = 1;
-	SubmitInfo.pWaitSemaphores = &Owner.mAcquireSemaphore;
+	
+	SubmitInfo.pWaitSemaphores = Owner.GetAcquireSemaphoreConst();
 	SubmitInfo.pWaitDstStageMask = &WaitStage;
 	SubmitInfo.commandBufferCount = 1;
-	SubmitInfo.pCommandBuffers = &Owner.mCommandBuffer;
+	
+	SubmitInfo.pCommandBuffers = Owner.GetCommandBufferConst();
 	SubmitInfo.signalSemaphoreCount = 1;
-	SubmitInfo.pSignalSemaphores = &Owner.mRenderCompleteSemaphore;
-
-	vkResetFences(Owner.mDevice, 1, &Owner.mSubmitFence);
-
-	VkResult Result = vkQueueSubmit(Owner.mQueue, 1, &SubmitInfo, Owner.mSubmitFence);
+	SubmitInfo.pSignalSemaphores = Owner.GetRenderCompleteSemaphoreConst();
+	
+	vkResetFences(Owner.GetVkDevice(), 1, Owner.GetSubmitFenceConst());
+	
+	VkResult Result = vkQueueSubmit(Owner.GetGraphicsQueue(), 1, &SubmitInfo, Owner.GetSubmitFence());
+	
 	if (Result != VK_SUCCESS)
 	{
 		return false;
 	}
 
-	Result = vkWaitForFences(Owner.mDevice, 1, &Owner.mSubmitFence, VK_TRUE, UINT64_MAX);
+	Result = vkWaitForFences(Owner.GetVkDevice(), 1, Owner.GetSubmitFenceConst(), VK_TRUE, UINT64_MAX);
 	if (Result != VK_SUCCESS)
 	{
 		return false;
 	}
-
+	
 	VkPresentInfoKHR PresentInfo{};
 	PresentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 	PresentInfo.waitSemaphoreCount = 1;
-	PresentInfo.pWaitSemaphores = &Owner.mRenderCompleteSemaphore;
+	PresentInfo.pWaitSemaphores = Owner.GetRenderCompleteSemaphoreConst();
 	PresentInfo.swapchainCount = 1;
-	PresentInfo.pSwapchains = &Owner.mCodecSwapchain;
-	PresentInfo.pImageIndices = &Owner.mCurrentSwapchainImageIndex;
+	PresentInfo.pSwapchains = Owner.GetCodecSwapchainConst();
+	PresentInfo.pImageIndices = Owner.GetCurrentSwapchainImageIndexConst();
 
-	Result = vkQueuePresentKHR(Owner.mQueue, &PresentInfo);
+	Result = vkQueuePresentKHR(Owner.GetGraphicsQueue(), &PresentInfo);
 	return (Result == VK_SUCCESS);
 }
 
 
 FVdjmAndroidEncoderBackendVulkan::FVdjmAndroidEncoderBackendVulkan()
-	: mAnalyzer(this), mIntermediateStage(this), mSubmitter(this),
-	mInitialized(false), mStarted(false), mPaused(false), mRuntimeReady(false),
-	mIntermediateImage(VK_NULL_HANDLE),
-	mIntermediateMemory(VK_NULL_HANDLE),
-	mIntermediateView(VK_NULL_HANDLE),
-	mCommandPool(VK_NULL_HANDLE),
-	mCommandBuffer(VK_NULL_HANDLE),
-	mSubmitFence(VK_NULL_HANDLE),
-	mIntermediateWidth(0), mIntermediateHeight(0), 
-	mIntermediateFormat(VK_FORMAT_UNDEFINED)
+	: mAnalyzer(this), mIntermediateStage(this), mSurfaceSubmitter(this),
+	mInitialized(false), mStarted(false), mPaused(false), mRuntimeReady(false)
+
 {
 }
 
@@ -240,6 +247,7 @@ bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& 
 	mConfig = config;
 	mInputWindow = inputWindow;
 	
+	
 	mInitialized = true;
 	mStarted = false;
 	mPaused = false;
@@ -249,211 +257,47 @@ bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& 
 }
 bool FVdjmAndroidEncoderBackendVulkan::Start()
 {
-	if (not mInitialized)
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderBackendVulkan::Start - Encoder backend is not initialized."));
-		return false;
-	}
-	if (mInputWindow == nullptr)
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderBackendVulkan::Start - inputWindow is null."));
-		return false;
-	}
-	if (mStarted)
-	{
-		return true;
-	}
 	
-	mPaused = false;
-	mStarted = true;
-	return true;
 }
 
 void FVdjmAndroidEncoderBackendVulkan::Stop()
 {
-	mStarted = false;
-	mPaused = false;
+	
 }
 
 void FVdjmAndroidEncoderBackendVulkan::Terminate()
 {
-	mRuntimeReady = false;
-	mStarted = false;
-	mPaused = false;
-	mInitialized = false;
-	mInputWindow = nullptr;
+	
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::IsRunnable()
 {
-	if (!mInitialized)
-	{
-		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("... Not initialized"));
-		return false;
-	}
-	if (!mStarted || mPaused)
-	{
-		return false;
-	}
-	if (mInputWindow == nullptr)
-	{
-		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("... inputWindow is null"));
-		return false;
-	}
-	return true;
+	
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec)
 {
-	if (!IsRunnable())
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Vulkan backend is not runnable"));
-		return false;
-	}
-
-	if (!EnsureRuntimeReady())
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("EnsureRuntimeReady failed"));
-		return false;
-	}
-
-	FVdjmVkSubmitFrameInfo FrameInfo;
-	if (!mAnalyzer.Analyze(srcTexture, FrameInfo))
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Analyze failed"));
-		return false;
-	}
-
-	if (FrameInfo.bNeedsIntermediate)
-	{
-		if (!mIntermediateStage.EnsureResource(*this, FrameInfo))
-		{
-			UE_LOG(LogVdjmRecorderCore, Error, TEXT("EnsureResource failed"));
-			return false;
-		}
-
-		if (!mIntermediateStage.RecordPrepareAndCopy(*this, FrameInfo))
-		{
-			UE_LOG(LogVdjmRecorderCore, Error, TEXT("RecordPrepareAndCopy failed"));
-			return false;
-		}
-	}
-
-	if (!SubmitTextureToCodecSurface(RHICmdList, srcTexture, FrameInfo.SrcImage, timeStampSec))
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("SubmitTextureToCodecSurface failed"));
-		return false;
-	}
-
-	return true;
+	
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::InitVkRuntimeContext()
 {
-	if (mVkRuntime.bInitialized)
-	{
-		return true;
-	}
-
-	if (GDynamicRHI == nullptr || GDynamicRHI->GetInterfaceType() != ERHIInterfaceType::Vulkan)
-	{
-		return false;
-	}
-
-	IVulkanDynamicRHI* VulkanRHI = static_cast<IVulkanDynamicRHI*>(GDynamicRHI);
-	if (VulkanRHI == nullptr)
-	{
-		return false;
-	}
-
-	mVkRuntime.VulkanRHI = VulkanRHI;
-	mVkRuntime.VkInstance = VulkanRHI->RHIGetVkInstance();
-	mVkRuntime.VkPhysicalDevice = VulkanRHI->RHIGetVkPhysicalDevice();
-	mVkRuntime.VkDevice = VulkanRHI->RHIGetVkDevice();
-	mVkRuntime.GraphicsQueue = VulkanRHI->RHIGetGraphicsVkQueue();
-	mVkRuntime.GraphicsQueueFamilyIndex = VulkanRHI->RHIGetGraphicsQueueFamilyIndex();
-
-	const bool bOk =
-		(mVkRuntime.VkInstance != VK_NULL_HANDLE) &&
-		(mVkRuntime.VkPhysicalDevice != VK_NULL_HANDLE) &&
-		(mVkRuntime.VkDevice != VK_NULL_HANDLE) &&
-		(mVkRuntime.GraphicsQueue != VK_NULL_HANDLE) &&
-		(mVkRuntime.GraphicsQueueFamilyIndex != UINT32_MAX);
-
-	mVkRuntime.bInitialized = bOk;
-	return bOk;
+	
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::EnsureRuntimeReady()
 {
-	if (mRuntimeReady)
-	{
-		return true;
-	}
-
-	if (mInputWindow == nullptr)
-	{
-		return false;
-	}
-	//AHardwareBuffer_isSupported
-	mRuntimeReady = true;
-	return true;
+	
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::TryExtractNativeVkImage(const FTextureRHIRef& srcTexture,VkImage& outImage) const
 {
-	outImage = VK_NULL_HANDLE;
-
-	if (!srcTexture.IsValid())
-	{
-		return false;
-	}
-
-	void* nativeResource = srcTexture->GetNativeResource();
-	if (nativeResource == nullptr)
-	{
-		return false;
-	}
-
-	outImage = reinterpret_cast<VkImage>(nativeResource);
-	return outImage != VK_NULL_HANDLE;
+	
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(FRHICommandList& RHICmdList,
 	const FTextureRHIRef& srcTexture, VkImage srcImage, double timeStampSec)
 {
-	VkResult Result = vkAcquireNextImageKHR(
-		mDevice,
-		mCodecSwapchain,
-		UINT64_MAX,
-		mAcquireSemaphore,
-		VK_NULL_HANDLE,
-		&mCurrentSwapchainImageIndex);
 
-	if (Result != VK_SUCCESS)
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("vkAcquireNextImageKHR failed: %d"), (int32)Result);
-		return false;
-	}
-
-	VkImage DstImage = mSwapchainImages[mCurrentSwapchainImageIndex];
-	VkCommandBuffer Cmd = mCommandBuffer;
-
-	// begin cmd
-	// source or intermediate -> dst swapchain image
-	// dst -> PRESENT_SRC_KHR
-
-	VkImage FinalSrc = mIntermediateStage.HasIntermediateImage()
-		? mIntermediateStage.GetImage()
-		: srcImage;
-
-	// barrier / copy / barrier 기록
-
-	if (!mSubmitter.Submit(*this, timeStampSec))
-	{
-		return false;
-	}
-
-	return true;
 }
 #endif

@@ -60,10 +60,10 @@ struct FVdjmVkSubmitFrameInfo
 class FVdjmVkSubProcessContext
 {
 public:
-	FVdjmVkSubProcessContext(FVdjmAndroidEncoderBackendVulkan* owner) : OwnerBackend(owner) {}
+	FVdjmVkSubProcessContext(FVdjmAndroidEncoderBackendVulkan* owner) : mOwnerBackend(owner) {}
 	virtual ~FVdjmVkSubProcessContext() = default;
 protected:
-	class FVdjmAndroidEncoderBackendVulkan* OwnerBackend = nullptr;
+	class FVdjmAndroidEncoderBackendVulkan* mOwnerBackend = nullptr;
 };
 
 class FVdjmVkInputAnalyzer : public FVdjmVkSubProcessContext
@@ -231,39 +231,47 @@ public:
 	VkQueue GetGraphicsQueue() const { return mVkRuntime.GraphicsQueue; }
 	uint32 GetGraphicsQueueFamilyIndex() const { return mVkRuntime.GraphicsQueueFamilyIndex; }
 
-	VkCommandPool GetCommandPool() const { return mCommandPool; }
-	VkCommandBuffer GetCommandBuffer() const { return mCommandBuffer; }
-	VkFence GetSubmitFence() const { return mSubmitFence; }
+	VkCommandPool GetCommandPool() const { return mRecordSessionState.CommandPool; }
+	VkCommandBuffer GetCommandBuffer() const { return mRecordSessionState.CommandBuffer; }
+	const VkCommandBuffer* GetCommandBufferConst() const { return &mRecordSessionState.CommandBuffer; }
+	VkFence GetSubmitFence() const { return mRecordSessionState.SubmitFence; }
+	const VkFence* GetSubmitFenceConst() const { return &mRecordSessionState.SubmitFence; }
+	
+	VkSurfaceKHR GetCodecSurface() const { return mRecordSessionState.CodecSurface; }
+	VkSwapchainKHR GetCodecSwapchain() const { return mRecordSessionState.CodecSwapchain; }
+	const VkSwapchainKHR* GetCodecSwapchainConst() const { return &mRecordSessionState.CodecSwapchain; }
 
-	VkSurfaceKHR GetCodecSurface() const { return mCodecSurface; }
-	VkSwapchainKHR GetCodecSwapchain() const { return mCodecSwapchain; }
+	const TArray<VkImage>& GetSwapchainImages() const { return mRecordSessionState.SwapchainImages; }
+	const TArray<VkImageView>& GetSwapchainImageViews() const { return mRecordSessionState.SwapchainImageViews; }
 
-	const TArray<VkImage>& GetSwapchainImages() const { return mSwapchainImages; }
-	const TArray<VkImageView>& GetSwapchainImageViews() const { return mSwapchainImageViews; }
+	VkSemaphore GetAcquireSemaphore() const { return mRecordSessionState.AcquireSemaphore; }
+	const VkSemaphore* GetAcquireSemaphoreConst() const { return &mRecordSessionState.AcquireSemaphore; }
+	VkSemaphore GetRenderCompleteSemaphore() const { return mRecordSessionState.RenderCompleteSemaphore; }
+	const VkSemaphore* GetRenderCompleteSemaphoreConst() const { return &mRecordSessionState.RenderCompleteSemaphore; }
 
-	VkSemaphore GetAcquireSemaphore() const { return mAcquireSemaphore; }
-	VkSemaphore GetRenderCompleteSemaphore() const { return mRenderCompleteSemaphore; }
+	uint32 GetCurrentSwapchainImageIndex() const { return mCurrentSwapchainImageIndex32; }
+	const uint32_t* GetCurrentSwapchainImageIndexConst() const { return &mCurrentSwapchainImageIndex32; }
+	void SetCurrentSwapchainImageIndex(uint32 InIndex) { mCurrentSwapchainImageIndex32 = InIndex; }
 
-	uint32 GetCurrentSwapchainImageIndex() const { return mCurrentSwapchainImageIndex; }
-	void SetCurrentSwapchainImageIndex(uint32 InIndex) { mCurrentSwapchainImageIndex = InIndex; }
+	VkFormat GetSwapchainFormat() const { return mRecordSessionState.SwapchainFormat; }
+	uint32 GetSwapchainWidth() const { return mRecordSessionState.SwapchainWidth; }
+	uint32 GetSwapchainHeight() const { return mRecordSessionState.SwapchainHeight; }
 
-	VkFormat GetSwapchainFormat() const { return mSwapchainFormat; }
-	uint32 GetSwapchainWidth() const { return mSwapchainWidth; }
-	uint32 GetSwapchainHeight() const { return mSwapchainHeight; }
+	VkImage GetIntermediateImage() const { return mRecordSessionState.IntermediateImage; }
+	VkImageView GetIntermediateView() const { return mRecordSessionState.IntermediateView; }
+	VkFormat GetIntermediateFormat() const { return mRecordSessionState.IntermediateFormat; }
+	uint32 GetIntermediateWidth() const { return mRecordSessionState.IntermediateWidth; }
+	uint32 GetIntermediateHeight() const { return mRecordSessionState.IntermediateHeight; }
 
-	VkImage GetIntermediateImage() const { return mIntermediateImage; }
-	VkImageView GetIntermediateView() const { return mIntermediateView; }
-	VkFormat GetIntermediateFormat() const { return mIntermediateFormat; }
-	uint32 GetIntermediateWidth() const { return mIntermediateWidth; }
-	uint32 GetIntermediateHeight() const { return mIntermediateHeight; }
+	void SetIntermediateImage(VkImage InImage) { mRecordSessionState.IntermediateImage = InImage; }
+	void SetIntermediateView(VkImageView InView) { mRecordSessionState.IntermediateView = InView; }
+	void SetIntermediateMemory(VkDeviceMemory InMemory) { mRecordSessionState.IntermediateMemory = InMemory; }
+	void SetIntermediateFormat(VkFormat InFormat) { mRecordSessionState.IntermediateFormat = InFormat; }
+	void SetIntermediateWidth(uint32 InWidth) { mRecordSessionState.IntermediateWidth = InWidth; }
+	void SetIntermediateHeight(uint32 InHeight) { mRecordSessionState.IntermediateHeight = InHeight; }
 
-	void SetIntermediateImage(VkImage InImage) { mIntermediateImage = InImage; }
-	void SetIntermediateView(VkImageView InView) { mIntermediateView = InView; }
-	void SetIntermediateMemory(VkDeviceMemory InMemory) { mIntermediateMemory = InMemory; }
-	void SetIntermediateFormat(VkFormat InFormat) { mIntermediateFormat = InFormat; }
-	void SetIntermediateWidth(uint32 InWidth) { mIntermediateWidth = InWidth; }
-	void SetIntermediateHeight(uint32 InHeight) { mIntermediateHeight = InHeight; }
-
+	bool IsValidIntermediateImage() const { return mRecordSessionState.IntermediateImage != VK_NULL_HANDLE; }
+	
 private:
 	
 	bool InitVkRuntimeContext();
@@ -280,40 +288,16 @@ private:
 	bool mPaused = false;
 	bool mRuntimeReady = false;
 	
+	uint32_t mCurrentSwapchainImageIndex32;
+	
 	FVdjmVkRuntimeContext mVkRuntime;
 	FVdjmVkRecordSessionState mRecordSessionState;
 	
-	VkImage mIntermediateImage = VK_NULL_HANDLE;
-	VkDeviceMemory mIntermediateMemory = VK_NULL_HANDLE;
-	VkImageView mIntermediateView = VK_NULL_HANDLE;
-
-	VkCommandPool mCommandPool = VK_NULL_HANDLE;
-	VkCommandBuffer mCommandBuffer = VK_NULL_HANDLE;
-	VkFence mSubmitFence = VK_NULL_HANDLE;
-
-	uint32 mIntermediateWidth = 0;
-	uint32 mIntermediateHeight = 0;
-	VkFormat mIntermediateFormat = VK_FORMAT_UNDEFINED;
-
 	FVdjmVkInputAnalyzer mAnalyzer;
 	FVdjmVkIntermediateStage mIntermediateStage;
-	FVdjmVkSurfaceSubmitter mSubmitter;
+	FVdjmVkSurfaceSubmitter mSurfaceSubmitter;
 	
-//	----	
-	
-	VkSurfaceKHR mCodecSurface = VK_NULL_HANDLE;
-	VkSwapchainKHR mCodecSwapchain = VK_NULL_HANDLE;
-
-	TArray<VkImage> mSwapchainImages;
-	TArray<VkImageView> mSwapchainImageViews;
-
-	VkSemaphore mAcquireSemaphore = VK_NULL_HANDLE;
-	VkSemaphore mRenderCompleteSemaphore = VK_NULL_HANDLE;
-
-	uint32 mCurrentSwapchainImageIndex = 0;
-	VkFormat mSwapchainFormat = VK_FORMAT_UNDEFINED;
-	uint32 mSwapchainWidth = 0;
-	uint32 mSwapchainHeight = 0;
 };
+
 
 #endif
