@@ -148,6 +148,15 @@ public:
 	bool Submit(FVdjmAndroidEncoderBackendVulkan& owner, double timeStampSec);
 };
 
+struct FVdjmVkRuntimeContext
+{
+	VkInstance VkInstance = VK_NULL_HANDLE;
+	VkDevice VkDevice = VK_NULL_HANDLE;
+	VkPhysicalDevice VkPhysicalDevice = VK_NULL_HANDLE;
+	VkQueue GraphicsQueue = VK_NULL_HANDLE;
+	uint32 GraphicsQueueFamilyIndex = 0;
+};
+
 /**	
  *	@brief Vulkan 기반 Android 인코더 백엔드 구현 클래스
  *	@class FVdjmAndroidEncoderBackendVulkan
@@ -166,9 +175,43 @@ public:
 	virtual bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec) override;
 	
 	bool IsRunnable();
-	VkFormat GetSwapchainFormat();
-	uint32 GetSwapchainWidth();
-	uint32 GetSwapchainHeight();
+	VkDevice GetVkDevice() const { return mVkContext.VkDevice; }
+	VkPhysicalDevice GetVkPhysicalDevice() const { return mVkContext.VkPhysicalDevice; }
+	VkQueue GetGraphicsQueue() const { return mVkContext.GraphicsQueue; }
+	uint32 GetGraphicsQueueFamilyIndex() const { return mVkContext.GraphicsQueueFamilyIndex; }
+
+	VkCommandPool GetCommandPool() const { return mCommandPool; }
+	VkCommandBuffer GetCommandBuffer() const { return mCommandBuffer; }
+	VkFence GetSubmitFence() const { return mSubmitFence; }
+
+	VkSurfaceKHR GetCodecSurface() const { return mCodecSurface; }
+	VkSwapchainKHR GetCodecSwapchain() const { return mCodecSwapchain; }
+
+	const TArray<VkImage>& GetSwapchainImages() const { return mSwapchainImages; }
+	const TArray<VkImageView>& GetSwapchainImageViews() const { return mSwapchainImageViews; }
+
+	VkSemaphore GetAcquireSemaphore() const { return mAcquireSemaphore; }
+	VkSemaphore GetRenderCompleteSemaphore() const { return mRenderCompleteSemaphore; }
+
+	uint32 GetCurrentSwapchainImageIndex() const { return mCurrentSwapchainImageIndex; }
+	void SetCurrentSwapchainImageIndex(uint32 InIndex) { mCurrentSwapchainImageIndex = InIndex; }
+
+	VkFormat GetSwapchainFormat() const { return mSwapchainFormat; }
+	uint32 GetSwapchainWidth() const { return mSwapchainWidth; }
+	uint32 GetSwapchainHeight() const { return mSwapchainHeight; }
+
+	VkImage GetIntermediateImage() const { return mIntermediateImage; }
+	VkImageView GetIntermediateView() const { return mIntermediateView; }
+	VkFormat GetIntermediateFormat() const { return mIntermediateFormat; }
+	uint32 GetIntermediateWidth() const { return mIntermediateWidth; }
+	uint32 GetIntermediateHeight() const { return mIntermediateHeight; }
+
+	void SetIntermediateImage(VkImage InImage) { mIntermediateImage = InImage; }
+	void SetIntermediateView(VkImageView InView) { mIntermediateView = InView; }
+	void SetIntermediateMemory(VkDeviceMemory InMemory) { mIntermediateMemory = InMemory; }
+	void SetIntermediateFormat(VkFormat InFormat) { mIntermediateFormat = InFormat; }
+	void SetIntermediateWidth(uint32 InWidth) { mIntermediateWidth = InWidth; }
+	void SetIntermediateHeight(uint32 InHeight) { mIntermediateHeight = InHeight; }
 
 private:
 	
@@ -182,6 +225,8 @@ private:
 	bool mStarted = false;
 	bool mPaused = false;
 	bool mRuntimeReady = false;
+	
+	FVdjmVkRuntimeContext mVkContext;
 	
 	VkImage mIntermediateImage = VK_NULL_HANDLE;
 	VkDeviceMemory mIntermediateMemory = VK_NULL_HANDLE;
