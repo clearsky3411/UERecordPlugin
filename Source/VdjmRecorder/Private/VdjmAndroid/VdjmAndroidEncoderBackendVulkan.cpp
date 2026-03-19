@@ -2,6 +2,8 @@
 
 
 #include "VdjmAndroid/VdjmAndroidEncoderBackendVulkan.h"
+
+#include "Runtime/VulkanRHI/Public/IVulkanDynamicRHI.h"
 #if PLATFORM_ANDROID || defined(__RESHARPER__)
 bool FVdjmVkInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) const
 {
@@ -96,7 +98,7 @@ bool FVdjmVkIntermediateStage::EnsureResource(FVdjmAndroidEncoderBackendVulkan& 
 	VkResult Result = vkCreateImage(Owner.GetVkDevice(), &ImageInfo, nullptr, &mIntermediateImage);
 	if (Result != VK_SUCCESS)
 	{
-		UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("EnsureResource: vkCreateImage failed"));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("EnsureResource: vkCreateImage failed"));
 		return false;
 	}
 
@@ -226,12 +228,12 @@ bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& 
 {
 	if (not config.IsValidateEncoderArguments() )
 	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderBackendVulkan::Init - Invalid encoder configuration."));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderBackendVulkan::Init - Invalid encoder configuration."));
 		return false;
 	}
 	if (inputWindow == nullptr)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderBackendVulkan::Init - inputWindow is null."));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderBackendVulkan::Init - inputWindow is null."));
 		return false;
 	}
 	
@@ -249,12 +251,12 @@ bool FVdjmAndroidEncoderBackendVulkan::Start()
 {
 	if (not mInitialized)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderBackendVulkan::Start - Encoder backend is not initialized."));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderBackendVulkan::Start - Encoder backend is not initialized."));
 		return false;
 	}
 	if (mInputWindow == nullptr)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderBackendVulkan::Start - inputWindow is null."));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderBackendVulkan::Start - inputWindow is null."));
 		return false;
 	}
 	if (mStarted)
@@ -286,7 +288,7 @@ bool FVdjmAndroidEncoderBackendVulkan::IsRunnable()
 {
 	if (!mInitialized)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("... Not initialized"));
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("... Not initialized"));
 		return false;
 	}
 	if (!mStarted || mPaused)
@@ -295,7 +297,7 @@ bool FVdjmAndroidEncoderBackendVulkan::IsRunnable()
 	}
 	if (mInputWindow == nullptr)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("... inputWindow is null"));
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("... inputWindow is null"));
 		return false;
 	}
 	return true;
@@ -305,20 +307,20 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 {
 	if (!IsRunnable())
 	{
-		//UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("Vulkan backend is not runnable"));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Vulkan backend is not runnable"));
 		return false;
 	}
 
 	if (!EnsureRuntimeReady())
 	{
-		//UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("EnsureRuntimeReady failed"));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("EnsureRuntimeReady failed"));
 		return false;
 	}
 
 	FVdjmVkSubmitFrameInfo FrameInfo;
 	if (!mAnalyzer.Analyze(srcTexture, FrameInfo))
 	{
-		//UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("Analyze failed"));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Analyze failed"));
 		return false;
 	}
 
@@ -326,24 +328,60 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 	{
 		if (!mIntermediateStage.EnsureResource(*this, FrameInfo))
 		{
-			//UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("EnsureResource failed"));
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("EnsureResource failed"));
 			return false;
 		}
 
 		if (!mIntermediateStage.RecordPrepareAndCopy(*this, FrameInfo))
 		{
-			//UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("RecordPrepareAndCopy failed"));
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("RecordPrepareAndCopy failed"));
 			return false;
 		}
 	}
 
 	if (!SubmitTextureToCodecSurface(RHICmdList, srcTexture, FrameInfo.SrcImage, timeStampSec))
 	{
-		//UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("SubmitTextureToCodecSurface failed"));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("SubmitTextureToCodecSurface failed"));
 		return false;
 	}
 
 	return true;
+}
+
+bool FVdjmAndroidEncoderBackendVulkan::InitVkRuntimeContext()
+{
+	if (mVkRuntime.bInitialized)
+	{
+		return true;
+	}
+
+	if (GDynamicRHI == nullptr || GDynamicRHI->GetInterfaceType() != ERHIInterfaceType::Vulkan)
+	{
+		return false;
+	}
+
+	IVulkanDynamicRHI* VulkanRHI = static_cast<IVulkanDynamicRHI*>(GDynamicRHI);
+	if (VulkanRHI == nullptr)
+	{
+		return false;
+	}
+
+	mVkRuntime.VulkanRHI = VulkanRHI;
+	mVkRuntime.VkInstance = VulkanRHI->RHIGetVkInstance();
+	mVkRuntime.VkPhysicalDevice = VulkanRHI->RHIGetVkPhysicalDevice();
+	mVkRuntime.VkDevice = VulkanRHI->RHIGetVkDevice();
+	mVkRuntime.GraphicsQueue = VulkanRHI->RHIGetGraphicsVkQueue();
+	mVkRuntime.GraphicsQueueFamilyIndex = VulkanRHI->RHIGetGraphicsQueueFamilyIndex();
+
+	const bool bOk =
+		(mVkRuntime.VkInstance != VK_NULL_HANDLE) &&
+		(mVkRuntime.VkPhysicalDevice != VK_NULL_HANDLE) &&
+		(mVkRuntime.VkDevice != VK_NULL_HANDLE) &&
+		(mVkRuntime.GraphicsQueue != VK_NULL_HANDLE) &&
+		(mVkRuntime.GraphicsQueueFamilyIndex != UINT32_MAX);
+
+	mVkRuntime.bInitialized = bOk;
+	return bOk;
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::EnsureRuntimeReady()
@@ -394,7 +432,7 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(FRHICommandLi
 
 	if (Result != VK_SUCCESS)
 	{
-		UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("vkAcquireNextImageKHR failed: %d"), (int32)Result);
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("vkAcquireNextImageKHR failed: %d"), (int32)Result);
 		return false;
 	}
 

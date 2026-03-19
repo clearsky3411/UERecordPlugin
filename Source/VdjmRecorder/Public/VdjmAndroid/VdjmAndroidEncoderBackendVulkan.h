@@ -7,6 +7,7 @@
 #include "VdjmRecoderAndroidEncoder.h"
 #include "vulkan_core.h"
 
+struct IVulkanDynamicRHI;
 class FVdjmAndroidEncoderBackendVulkan;
 
 struct FVdjmVkEncoderContext
@@ -150,11 +151,61 @@ public:
 
 struct FVdjmVkRuntimeContext
 {
+	bool bInitialized = false;
+	
+	IVulkanDynamicRHI* VulkanRHI = nullptr;
+	
 	VkInstance VkInstance = VK_NULL_HANDLE;
 	VkDevice VkDevice = VK_NULL_HANDLE;
 	VkPhysicalDevice VkPhysicalDevice = VK_NULL_HANDLE;
 	VkQueue GraphicsQueue = VK_NULL_HANDLE;
 	uint32 GraphicsQueueFamilyIndex = 0;
+};
+
+struct FVdjmVkRecordSessionState
+{
+	bool bReady = false;
+
+	VkSurfaceKHR CodecSurface = VK_NULL_HANDLE;
+	VkSwapchainKHR CodecSwapchain = VK_NULL_HANDLE;
+
+	VkFormat SwapchainFormat = VK_FORMAT_UNDEFINED;
+	uint32 SwapchainWidth = 0;
+	uint32 SwapchainHeight = 0;
+
+	TArray<VkImage> SwapchainImages;
+	TArray<VkImageView> SwapchainImageViews;
+
+	VkCommandPool CommandPool = VK_NULL_HANDLE;
+	VkCommandBuffer CommandBuffer = VK_NULL_HANDLE;
+
+	VkFence SubmitFence = VK_NULL_HANDLE;
+	VkSemaphore AcquireSemaphore = VK_NULL_HANDLE;
+	VkSemaphore RenderCompleteSemaphore = VK_NULL_HANDLE;
+
+	// optional but same lifetime
+	VkImage IntermediateImage = VK_NULL_HANDLE;
+	VkDeviceMemory IntermediateMemory = VK_NULL_HANDLE;
+	VkImageView IntermediateView = VK_NULL_HANDLE;
+	VkFormat IntermediateFormat = VK_FORMAT_UNDEFINED;
+	uint32 IntermediateWidth = 0;
+	uint32 IntermediateHeight = 0;
+};
+
+struct FVdjmVkFrameSubmitState
+{
+	VkImage SrcImage = VK_NULL_HANDLE;
+	VkFormat SrcFormat = VK_FORMAT_UNDEFINED;
+	uint32 SrcWidth = 0;
+	uint32 SrcHeight = 0;
+	VkImageLayout SrcLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+	bool bCanDirectCopy = false;
+	bool bNeedsIntermediate = false;
+
+	uint32 AcquiredImageIndex = UINT32_MAX;
+	VkImage DstSwapchainImage = VK_NULL_HANDLE;
+	VkImage FinalSrcImage = VK_NULL_HANDLE;
 };
 
 /**	
@@ -175,10 +226,10 @@ public:
 	virtual bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec) override;
 	
 	bool IsRunnable();
-	VkDevice GetVkDevice() const { return mVkContext.VkDevice; }
-	VkPhysicalDevice GetVkPhysicalDevice() const { return mVkContext.VkPhysicalDevice; }
-	VkQueue GetGraphicsQueue() const { return mVkContext.GraphicsQueue; }
-	uint32 GetGraphicsQueueFamilyIndex() const { return mVkContext.GraphicsQueueFamilyIndex; }
+	VkDevice GetVkDevice() const { return mVkRuntime.VkDevice; }
+	VkPhysicalDevice GetVkPhysicalDevice() const { return mVkRuntime.VkPhysicalDevice; }
+	VkQueue GetGraphicsQueue() const { return mVkRuntime.GraphicsQueue; }
+	uint32 GetGraphicsQueueFamilyIndex() const { return mVkRuntime.GraphicsQueueFamilyIndex; }
 
 	VkCommandPool GetCommandPool() const { return mCommandPool; }
 	VkCommandBuffer GetCommandBuffer() const { return mCommandBuffer; }
@@ -215,6 +266,9 @@ public:
 
 private:
 	
+	bool InitVkRuntimeContext();
+	
+	
 	bool EnsureRuntimeReady();
 	bool TryExtractNativeVkImage(const FTextureRHIRef& srcTexture, VkImage& outImage) const;
 	bool SubmitTextureToCodecSurface(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, VkImage srcImage, double timeStampSec);
@@ -226,7 +280,8 @@ private:
 	bool mPaused = false;
 	bool mRuntimeReady = false;
 	
-	FVdjmVkRuntimeContext mVkContext;
+	FVdjmVkRuntimeContext mVkRuntime;
+	FVdjmVkRecordSessionState mRecordSessionState;
 	
 	VkImage mIntermediateImage = VK_NULL_HANDLE;
 	VkDeviceMemory mIntermediateMemory = VK_NULL_HANDLE;
