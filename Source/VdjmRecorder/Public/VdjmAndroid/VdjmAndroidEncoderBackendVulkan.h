@@ -52,8 +52,14 @@ struct FVdjmVkSubmitFrameInfo
 		bNeedsIntermediate = false;
 	}
 };
+
+/**
+ * @brief Vulkan 관련 리소스와 상태를 관리하는 런타임 컨텍스트 구조체
+ * @note life time : FVdjmAndroidEncoderBackendVulkan 인스턴스 생성부터 소멸까지
+ */
 struct FVdjmVkRuntimeContext
 {
+	
 	bool bInitialized = false;
 	
 	IVulkanDynamicRHI* VulkanRHI = nullptr;
@@ -65,6 +71,10 @@ struct FVdjmVkRuntimeContext
 	uint32 GraphicsQueueFamilyIndex = 0;
 };
 
+/**
+ * @brief Vulkan 이미지 제출 과정에서 필요한 세션 상태와 리소스를 관리하는 구조체
+ * @note life time : FVdjmAndroidRecordSession이 시작되고 종료될 때까지, 즉, 실제 인코딩 세션이 활성화된 동안
+ */
 struct FVdjmVkRecordSessionState
 {
 	bool bReady = false;
@@ -86,6 +96,11 @@ struct FVdjmVkRecordSessionState
 	VkSemaphore AcquireSemaphore = VK_NULL_HANDLE;
 	VkSemaphore RenderCompleteSemaphore = VK_NULL_HANDLE;
 };
+
+/**
+ * @brief Vulkan 이미지 제출 과정에서 필요한 중간 이미지 상태와 리소스를 관리하는 구조체
+ * @note life time : 분석을 한후에 필요하면 생성하고 FVdjmVkRecordSessionState 와 같은 주기
+ */
 struct FVdjmVkIntermediateImageState
 {
 	VkImage IntermediateImage = VK_NULL_HANDLE;
@@ -96,6 +111,11 @@ struct FVdjmVkIntermediateImageState
 	uint32 IntermediateWidth = 0;
 	uint32 IntermediateHeight = 0;
 };
+
+/**
+ * @brief Vulkan 이미지 제출 과정에서 각 프레임 제출 시점에 필요한 정보와 상태를 관리하는 구조체
+ * @note life time : 각 프레임 제출 시점에 생성되고 제출이 완료되면 소멸, 즉, 일시적인 프레임 제출 컨텍스트
+ */
 struct FVdjmVkFrameSubmitState
 {
 	VkImage SrcImage = VK_NULL_HANDLE;
@@ -290,7 +310,6 @@ public:
 private:
 	
 	bool InitVkRuntimeContext();
-	
 	
 	bool EnsureRuntimeReady();
 	bool TryExtractNativeVkImage(const FTextureRHIRef& srcTexture, VkImage& outImage) const;

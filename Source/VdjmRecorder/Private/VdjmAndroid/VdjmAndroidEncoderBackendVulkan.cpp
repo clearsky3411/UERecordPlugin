@@ -255,13 +255,13 @@ bool FVdjmVkSurfaceSubmitter::Submit(FVdjmAndroidEncoderBackendVulkan& owner, do
 	return (Result == VK_SUCCESS);
 }
 
-
+/*
+ *	class FVdjmAndroidEncoderBackendVulkan : public FVdjmAndroidEncoderBackend
+ */
 FVdjmAndroidEncoderBackendVulkan::FVdjmAndroidEncoderBackendVulkan()
 	: mAnalyzer(this), mIntermediateStage(this), mSurfaceSubmitter(this),
 	mInitialized(false), mStarted(false), mPaused(false), mRuntimeReady(false)
-
-{
-}
+{}
 
 bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow)
 {
@@ -278,7 +278,7 @@ bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& 
 	
 	mConfig = config;
 	mInputWindow = inputWindow;
-	
+	InitVkRuntimeContext();
 	
 	mInitialized = true;
 	mStarted = false;
