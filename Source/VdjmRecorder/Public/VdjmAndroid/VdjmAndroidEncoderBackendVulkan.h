@@ -52,103 +52,6 @@ struct FVdjmVkSubmitFrameInfo
 		bNeedsIntermediate = false;
 	}
 };
-
-/**	
- *	@brief Vulkan 이미지 제출 과정에서 필요한 분석과 중간 단계 처리 담당 클래스들의 공통 기반 클래스
- *	@class FVdjmVkSubProcessContext
- */
-class FVdjmVkSubProcessContext
-{
-public:
-	FVdjmVkSubProcessContext(FVdjmAndroidEncoderBackendVulkan* owner) : mOwnerBackend(owner) {}
-	virtual ~FVdjmVkSubProcessContext() = default;
-protected:
-	class FVdjmAndroidEncoderBackendVulkan* mOwnerBackend = nullptr;
-};
-
-class FVdjmVkInputAnalyzer : public FVdjmVkSubProcessContext
-{
-	/**
-	* @brief Vulkan 이미지에서 필요한 정보를 추출하는 유틸리티 클래스
-	* ### 목적:
-	* - Vulkan 에 넣는 이미지가 바로 적합하지 않으니 VKImage에서 필요한 정보를 추출하는 역할
-	* - native Resource 추출
-	* ### Result:
-	* - width, height, format, layout 등 Vulkan 이미지로 제출하기 위해 필요한 정보를 추출
-	* - FVKSubmitFrameInfo 구조체로 결과 반환
-	* ### 한계:
-	* - 자원 생성, command submit, 동기화 완료 처리
-	*/
-public:
-	explicit FVdjmVkInputAnalyzer(FVdjmAndroidEncoderBackendVulkan* const owner)
-		: FVdjmVkSubProcessContext(owner)
-	{
-	}
-
-	bool Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) const;
-	
-};
-
-/**	
- *	@brief Vulkan 이미지 제출 과정에서 필요한 중간 단계 처리 담당 클래스
- *	@class FVdjmVkIntermediateStage
- */
-class FVdjmVkIntermediateStage: public FVdjmVkSubProcessContext
-{
-	/**
- 	* @brief 불칸 내부 이미지 제출 과정에서 필요한 중간 단계 처리 클래스
- 	* ### 목적:
- 	* - intermediate image 필요 판단
- 	* - intermediate image / view / memory 생성/재생성
- 	* - 입력 이미지 → intermediate 로 copy / blit / render
- 	* - layout transition 규칙 적용
- 	* - 포멧이 다를때나, 해상도가 다를때나, 레이아웃, 색공간 변환이나 scale이 필요한 경우에 intermediate image를 만들어서 제출하는 과정 담당
- 	* ### Result:
- 	* - 가공된 Vulkan 이미지 생성
- 	* - 제출 가능한 상태로 Vulkan 이미지 준비
- 	* ### 한계:
- 	* - 입력 텍스처 해석
- 	* - 최종 제출 완료 관리
- 	*/
-public:
-	explicit FVdjmVkIntermediateStage(FVdjmAndroidEncoderBackendVulkan* const owner)
-		: FVdjmVkSubProcessContext(owner)
-	{
-	}
-
-	bool NeedRecreate(const FVdjmVkSubmitFrameInfo& frameInfo,uint32 curWid,uint32 curhei,VkFormat  curFormat) const;
-	bool EnsureResource(FVdjmAndroidEncoderBackendVulkan& backend, const FVdjmVkSubmitFrameInfo& frameInfo);
-	bool RecordPrepareAndCopy(FVdjmAndroidEncoderBackendVulkan& owner, const FVdjmVkSubmitFrameInfo& frameInfo);
-};
-
-/**	
- *	@brief Vulkan 이미지 제출 과정에서 필요한 최종 제출 담당 클래스
- *	@class FVdjmVkSurfaceSubmitter
- */
-class FVdjmVkSurfaceSubmitter : public FVdjmVkSubProcessContext
-{
-	/**
-	 * @brief Vulkan 이미지 제출 담당 클래스
-	 * ### 목적:
-	 * - 제출 command buffer / queue submit
-	 * - semaphore / fence 관리
-	 * - 제출 완료 대기 또는 상태 확인
-	 * - stop / terminate 시 남은 작업 정리
-	 * ### Result:
-	 * - 최종 제출 + 완료 추적기
-	 * ### 한계:
-	 * - 입력 텍스처 분석
-	 * - intermediate 생성 정책 판단
-	 */
-public:
-	explicit FVdjmVkSurfaceSubmitter(FVdjmAndroidEncoderBackendVulkan* const owner)
-		: FVdjmVkSubProcessContext(owner)
-	{
-	}
-
-	bool Submit(FVdjmAndroidEncoderBackendVulkan& owner, double timeStampSec);
-};
-
 struct FVdjmVkRuntimeContext
 {
 	bool bInitialized = false;
@@ -182,16 +85,17 @@ struct FVdjmVkRecordSessionState
 	VkFence SubmitFence = VK_NULL_HANDLE;
 	VkSemaphore AcquireSemaphore = VK_NULL_HANDLE;
 	VkSemaphore RenderCompleteSemaphore = VK_NULL_HANDLE;
-
-	// optional but same lifetime
+};
+struct FVdjmVkIntermediateImageState
+{
 	VkImage IntermediateImage = VK_NULL_HANDLE;
 	VkDeviceMemory IntermediateMemory = VK_NULL_HANDLE;
 	VkImageView IntermediateView = VK_NULL_HANDLE;
+	
 	VkFormat IntermediateFormat = VK_FORMAT_UNDEFINED;
 	uint32 IntermediateWidth = 0;
 	uint32 IntermediateHeight = 0;
 };
-
 struct FVdjmVkFrameSubmitState
 {
 	VkImage SrcImage = VK_NULL_HANDLE;
@@ -207,6 +111,117 @@ struct FVdjmVkFrameSubmitState
 	VkImage DstSwapchainImage = VK_NULL_HANDLE;
 	VkImage FinalSrcImage = VK_NULL_HANDLE;
 };
+
+/**	
+ *	@brief Vulkan 이미지 제출 과정에서 필요한 분석과 중간 단계 처리 담당 클래스들의 공통 기반 클래스
+ *	@class FVdjmVkSubProcessContext
+ */
+class FVdjmVkSubProcessContext
+{
+	friend class FVdjmAndroidEncoderBackendVulkan;
+public:
+	FVdjmVkSubProcessContext(FVdjmAndroidEncoderBackendVulkan* owner) : mOwnerBackend(owner) {}
+	virtual ~FVdjmVkSubProcessContext() = default;
+protected:
+	class FVdjmAndroidEncoderBackendVulkan* mOwnerBackend = nullptr;
+};
+
+class FVdjmVkInputAnalyzer : public FVdjmVkSubProcessContext
+{
+	friend class FVdjmAndroidEncoderBackendVulkan;
+	/**
+	* @brief Vulkan 이미지에서 필요한 정보를 추출하는 유틸리티 클래스
+	* ### 목적:
+	* - Vulkan 에 넣는 이미지가 바로 적합하지 않으니 VKImage에서 필요한 정보를 추출하는 역할
+	* - native Resource 추출
+	* ### Result:
+	* - width, height, format, layout 등 Vulkan 이미지로 제출하기 위해 필요한 정보를 추출
+	* - FVKSubmitFrameInfo 구조체로 결과 반환
+	* ### 한계:
+	* - 자원 생성, command submit, 동기화 완료 처리
+	*/
+public:
+	explicit FVdjmVkInputAnalyzer(FVdjmAndroidEncoderBackendVulkan* const owner)
+		: FVdjmVkSubProcessContext(owner)
+	{
+	}
+
+	bool Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) const;
+	
+};
+
+/**	
+ *	@brief Vulkan 이미지 제출 과정에서 필요한 중간 단계 처리 담당 클래스
+ *	@class FVdjmVkIntermediateStage
+ */
+class FVdjmVkIntermediateStage: public FVdjmVkSubProcessContext
+{
+	friend class FVdjmAndroidEncoderBackendVulkan;
+	/**
+ 	* @brief 불칸 내부 이미지 제출 과정에서 필요한 중간 단계 처리 클래스
+ 	* ### 목적:
+ 	* - intermediate image 필요 판단
+ 	* - intermediate image / view / memory 생성/재생성
+ 	* - 입력 이미지 → intermediate 로 copy / blit / render
+ 	* - layout transition 규칙 적용
+ 	* - 포멧이 다를때나, 해상도가 다를때나, 레이아웃, 색공간 변환이나 scale이 필요한 경우에 intermediate image를 만들어서 제출하는 과정 담당
+ 	* ### Result:
+ 	* - 가공된 Vulkan 이미지 생성
+ 	* - 제출 가능한 상태로 Vulkan 이미지 준비
+ 	* ### 한계:
+ 	* - 입력 텍스처 해석
+ 	* - 최종 제출 완료 관리
+ 	*/
+public:
+	explicit FVdjmVkIntermediateStage(FVdjmAndroidEncoderBackendVulkan* const owner)
+		: FVdjmVkSubProcessContext(owner)
+	{
+	}
+
+	bool NeedRecreate(const FVdjmVkSubmitFrameInfo& frameInfo,uint32 curWid,uint32 curhei,VkFormat  curFormat) const;
+	bool EnsureResource(FVdjmAndroidEncoderBackendVulkan& backend, const FVdjmVkSubmitFrameInfo& frameInfo);
+	bool RecordPrepareAndCopy(FVdjmAndroidEncoderBackendVulkan& owner, const FVdjmVkSubmitFrameInfo& frameInfo);
+	
+	FVdjmVkIntermediateImageState& GetIntermediateState() { return mIntermediateState; }
+	const FVdjmVkIntermediateImageState& GetIntermediateStateConst() const { return mIntermediateState; }
+	
+	bool IsValidIntermediateImage() const { return mIntermediateState.IntermediateImage != VK_NULL_HANDLE; }
+	bool IsValidIntermediateSwapchainResolutions(FVdjmAndroidEncoderBackendVulkan* backend = nullptr) const;
+	bool IsValidIntermediateFormat(FVdjmAndroidEncoderBackendVulkan*  backend = nullptr) const;
+
+private:
+	FVdjmVkIntermediateImageState mIntermediateState;
+};
+
+/**	
+ *	@brief Vulkan 이미지 제출 과정에서 필요한 최종 제출 담당 클래스
+ *	@class FVdjmVkSurfaceSubmitter
+ */
+class FVdjmVkSurfaceSubmitter : public FVdjmVkSubProcessContext
+{
+	friend class FVdjmAndroidEncoderBackendVulkan;
+	/**
+	 * @brief Vulkan 이미지 제출 담당 클래스
+	 * ### 목적:
+	 * - 제출 command buffer / queue submit
+	 * - semaphore / fence 관리
+	 * - 제출 완료 대기 또는 상태 확인
+	 * - stop / terminate 시 남은 작업 정리
+	 * ### Result:
+	 * - 최종 제출 + 완료 추적기
+	 * ### 한계:
+	 * - 입력 텍스처 분석
+	 * - intermediate 생성 정책 판단
+	 */
+public:
+	explicit FVdjmVkSurfaceSubmitter(FVdjmAndroidEncoderBackendVulkan* const owner)
+		: FVdjmVkSubProcessContext(owner)
+	{
+	}
+
+	bool Submit(FVdjmAndroidEncoderBackendVulkan& owner, double timeStampSec);
+};
+
 
 /**	
  *	@brief Vulkan 기반 Android 인코더 백엔드 구현 클래스
@@ -257,20 +272,20 @@ public:
 	uint32 GetSwapchainWidth() const { return mRecordSessionState.SwapchainWidth; }
 	uint32 GetSwapchainHeight() const { return mRecordSessionState.SwapchainHeight; }
 
-	VkImage GetIntermediateImage() const { return mRecordSessionState.IntermediateImage; }
-	VkImageView GetIntermediateView() const { return mRecordSessionState.IntermediateView; }
-	VkFormat GetIntermediateFormat() const { return mRecordSessionState.IntermediateFormat; }
-	uint32 GetIntermediateWidth() const { return mRecordSessionState.IntermediateWidth; }
-	uint32 GetIntermediateHeight() const { return mRecordSessionState.IntermediateHeight; }
+	VkImage GetIntermediateImage() const { return mIntermediateStage.GetIntermediateStateConst(). IntermediateImage; }
+	VkImageView GetIntermediateView() const { return mIntermediateStage.GetIntermediateStateConst().IntermediateView; }
+	VkFormat GetIntermediateFormat() const { return mIntermediateStage.GetIntermediateStateConst().IntermediateFormat; }
+	uint32 GetIntermediateWidth() const { return mIntermediateStage.GetIntermediateStateConst().IntermediateWidth; }
+	uint32 GetIntermediateHeight() const { return mIntermediateStage.GetIntermediateStateConst().IntermediateHeight; }
 
-	void SetIntermediateImage(VkImage InImage) { mRecordSessionState.IntermediateImage = InImage; }
-	void SetIntermediateView(VkImageView InView) { mRecordSessionState.IntermediateView = InView; }
-	void SetIntermediateMemory(VkDeviceMemory InMemory) { mRecordSessionState.IntermediateMemory = InMemory; }
-	void SetIntermediateFormat(VkFormat InFormat) { mRecordSessionState.IntermediateFormat = InFormat; }
-	void SetIntermediateWidth(uint32 InWidth) { mRecordSessionState.IntermediateWidth = InWidth; }
-	void SetIntermediateHeight(uint32 InHeight) { mRecordSessionState.IntermediateHeight = InHeight; }
+	void SetIntermediateImage(VkImage InImage) { mIntermediateStage.GetIntermediateState().IntermediateImage = InImage; }
+	void SetIntermediateView(VkImageView InView) { mIntermediateStage.GetIntermediateState().IntermediateView = InView; }
+	void SetIntermediateMemory(VkDeviceMemory InMemory) { mIntermediateStage.GetIntermediateState().IntermediateMemory = InMemory; }
+	void SetIntermediateFormat(VkFormat InFormat) { mIntermediateStage.GetIntermediateState().IntermediateFormat = InFormat; }
+	void SetIntermediateWidth(uint32 InWidth) { mIntermediateStage.GetIntermediateState().IntermediateWidth = InWidth; }
+	void SetIntermediateHeight(uint32 InHeight) { mIntermediateStage.GetIntermediateState().IntermediateHeight = InHeight; }
 
-	bool IsValidIntermediateImage() const { return mRecordSessionState.IntermediateImage != VK_NULL_HANDLE; }
+	bool IsValidIntermediateImage() const { return mIntermediateStage.IsValidIntermediateImage(); }
 	
 private:
 	

@@ -60,12 +60,12 @@ bool FVdjmVkIntermediateStage::NeedRecreate(const FVdjmVkSubmitFrameInfo& frameI
 		return true;
 	}
 
-	if (mWidth != Owner.GetSwapchainWidth() || mHeight != Owner.GetSwapchainHeight())
+	if (IsValidIntermediateSwapchainResolutions())
 	{
 		return true;
 	}
 
-	if (mFormat != Owner.GetSwapchainFormat())
+	if (IsValidIntermediateFormat())
 	{
 		return true;
 	}
@@ -76,7 +76,9 @@ bool FVdjmVkIntermediateStage::NeedRecreate(const FVdjmVkSubmitFrameInfo& frameI
 bool FVdjmVkIntermediateStage::EnsureResource(FVdjmAndroidEncoderBackendVulkan& backend,
 	const FVdjmVkSubmitFrameInfo& frameInfo)
 {
-	if (!NeedRecreate(Owner, FrameInfo))
+	const FVdjmVkSubmitFrameInfo& frameInfo, uint32 curWid, uint32 curhei, VkFormat curFormat
+	
+	if (!NeedRecreate(frameInfo, FrameInfo))
 	{
 		return true;
 	}
@@ -173,6 +175,36 @@ bool FVdjmVkIntermediateStage::RecordPrepareAndCopy(FVdjmAndroidEncoderBackendVu
 	}
 
 	return true;
+}
+
+bool FVdjmVkIntermediateStage::IsValidIntermediateSwapchainResolutions(FVdjmAndroidEncoderBackendVulkan*  backend) const
+{
+	FVdjmAndroidEncoderBackendVulkan* target = backend;
+	if (target == nullptr)
+	{
+		target = mOwnerBackend;
+		if (target == nullptr)
+		{
+			return false;
+		}
+	}
+	FVdjmAndroidEncoderBackendVulkan& Owner = *target;
+	return (mIntermediateState.IntermediateWidth == Owner.GetSwapchainWidth() && mIntermediateState.IntermediateHeight == Owner.GetSwapchainHeight());
+}
+
+bool FVdjmVkIntermediateStage::IsValidIntermediateFormat(FVdjmAndroidEncoderBackendVulkan*  backend) const
+{
+	FVdjmAndroidEncoderBackendVulkan* target = mOwnerBackend;
+	if (target == nullptr)
+	{
+		target = backend;
+		if (target == nullptr)
+		{
+			return false;
+		}
+	}
+	FVdjmAndroidEncoderBackendVulkan& Owner = *target;
+	return (mIntermediateState.IntermediateFormat == Owner.GetSwapchainFormat());
 }
 
 bool FVdjmVkSurfaceSubmitter::Submit(FVdjmAndroidEncoderBackendVulkan& owner, double timeStampSec)
