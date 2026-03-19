@@ -7,14 +7,14 @@ bool FVdjmVkInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubm
 {
 	if (!srcTexture.IsValid())
 	{
-		UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("Analyze: srcTexture is invalid"));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Analyze: srcTexture is invalid"));
 		return false;
 	}
 
 	outInfo.SrcImage = static_cast<VkImage>(srcTexture->GetNativeResource());
 	if (outInfo.SrcImage == VK_NULL_HANDLE)
 	{
-		UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("Analyze: native VkImage is null"));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Analyze: native VkImage is null"));
 		return false;
 	}
 
@@ -30,7 +30,7 @@ bool FVdjmVkInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubm
 		outInfo.SrcFormat = VK_FORMAT_R8G8B8A8_UNORM;
 		break;
 	default:
-		UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("Analyze: unsupported UE pixel format %d"), (int32)srcTexture->GetFormat());
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Analyze: unsupported UE pixel format %d"), (int32)srcTexture->GetFormat());
 		return false;
 	}
 
@@ -45,27 +45,166 @@ bool FVdjmVkInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubm
 	return true;
 }
 
-bool FVdjmVkIntermediateStage::NeedRecreate(const FVdjmVkSubmitFrameInfo& frameInfo, uint32 curWid, uint32 curhei,
-                                            VkFormat curFormat) const
+bool FVdjmVkIntermediateStage::NeedRecreate(const FVdjmVkSubmitFrameInfo& frameInfo, uint32 curWid, uint32 curhei, VkFormat curFormat) const
 {
+	if (mIntermediateImage == VK_NULL_HANDLE)
+	{
+		return true;
+	}
+
+	if (mWidth != Owner.GetSwapchainWidth() || mHeight != Owner.GetSwapchainHeight())
+	{
+		return true;
+	}
+
+	if (mFormat != Owner.GetSwapchainFormat())
+	{
+		return true;
+	}
+
 	return false;
 }
 
 bool FVdjmVkIntermediateStage::EnsureResource(FVdjmAndroidEncoderBackendVulkan& backend,
 	const FVdjmVkSubmitFrameInfo& frameInfo)
 {
-	return false;
+	if (!NeedRecreate(Owner, FrameInfo))
+	{
+		return true;
+	}
+
+	Release();
+
+	VkImageCreateInfo ImageInfo{};
+	ImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	ImageInfo.imageType = VK_IMAGE_TYPE_2D;
+	ImageInfo.format = Owner.GetSwapchainFormat();
+	ImageInfo.extent.width = Owner.GetSwapchainWidth();
+	ImageInfo.extent.height = Owner.GetSwapchainHeight();
+	ImageInfo.extent.depth = 1;
+	ImageInfo.mipLevels = 1;
+	ImageInfo.arrayLayers = 1;
+	ImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	ImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+	ImageInfo.usage =
+		VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+		VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+		VK_IMAGE_USAGE_SAMPLED_BIT |
+		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+	ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+	VkResult Result = vkCreateImage(Owner.GetVkDevice(), &ImageInfo, nullptr, &mIntermediateImage);
+	if (Result != VK_SUCCESS)
+	{
+		UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("EnsureResource: vkCreateImage failed"));
+		return false;
+	}
+
+	// 여기에서 memory requirements / allocate / bind
+	// 그리고 image view 생성
+
+	mWidth = Owner.GetSwapchainWidth();
+	mHeight = Owner.GetSwapchainHeight();
+	mFormat = Owner.GetSwapchainFormat();
+
+	return true;
 }
 
 bool FVdjmVkIntermediateStage::RecordPrepareAndCopy(FVdjmAndroidEncoderBackendVulkan& owner,
 	const FVdjmVkSubmitFrameInfo& frameInfo)
 {
-	return false;
+	VkCommandBuffer Cmd = Owner.GetCommandBuffer();
+	if (Cmd == VK_NULL_HANDLE)
+	{
+		return false;
+	}
+
+	// 1. src -> TRANSFER_SRC_OPTIMAL
+	// 2. intermediate -> TRANSFER_DST_OPTIMAL
+	// 3. vkCmdBlitImage or vkCmdCopyImage
+	// 4. intermediate -> TRANSFER_SRC_OPTIMAL or SHADER_READ layout
+
+	// 포맷/해상도 같으면 vkCmdCopyImage
+	// 다르면 vkCmdBlitImage
+
+	if (FrameInfo.SrcWidth == Owner.GetSwapchainWidth() &&
+		FrameInfo.SrcHeight == Owner.GetSwapchainHeight() &&
+		FrameInfo.SrcFormat == Owner.GetSwapchainFormat())
+	{
+		VkImageCopy Region{};
+		Region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		Region.srcSubresource.layerCount = 1;
+		Region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		Region.dstSubresource.layerCount = 1;
+		Region.extent.width = FrameInfo.SrcWidth;
+		Region.extent.height = FrameInfo.SrcHeight;
+		Region.extent.depth = 1;
+
+		vkCmdCopyImage(
+			Cmd,
+			FrameInfo.SrcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			mIntermediateImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			1, &Region);
+	}
+	else
+	{
+		VkImageBlit Blit{};
+		Blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		Blit.srcSubresource.layerCount = 1;
+		Blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		Blit.dstSubresource.layerCount = 1;
+		Blit.srcOffsets[1] = { (int32)FrameInfo.SrcWidth, (int32)FrameInfo.SrcHeight, 1 };
+		Blit.dstOffsets[1] = { (int32)Owner.GetSwapchainWidth(), (int32)Owner.GetSwapchainHeight(), 1 };
+
+		vkCmdBlitImage(
+			Cmd,
+			FrameInfo.SrcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			mIntermediateImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+			1, &Blit,
+			VK_FILTER_LINEAR);
+	}
+
+	return true;
 }
 
 bool FVdjmVkSurfaceSubmitter::Submit(FVdjmAndroidEncoderBackendVulkan& owner, double timeStampSec)
 {
-	return false;
+	VkPipelineStageFlags WaitStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+	VkSubmitInfo SubmitInfo{};
+	SubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	SubmitInfo.waitSemaphoreCount = 1;
+	SubmitInfo.pWaitSemaphores = &Owner.mAcquireSemaphore;
+	SubmitInfo.pWaitDstStageMask = &WaitStage;
+	SubmitInfo.commandBufferCount = 1;
+	SubmitInfo.pCommandBuffers = &Owner.mCommandBuffer;
+	SubmitInfo.signalSemaphoreCount = 1;
+	SubmitInfo.pSignalSemaphores = &Owner.mRenderCompleteSemaphore;
+
+	vkResetFences(Owner.mDevice, 1, &Owner.mSubmitFence);
+
+	VkResult Result = vkQueueSubmit(Owner.mQueue, 1, &SubmitInfo, Owner.mSubmitFence);
+	if (Result != VK_SUCCESS)
+	{
+		return false;
+	}
+
+	Result = vkWaitForFences(Owner.mDevice, 1, &Owner.mSubmitFence, VK_TRUE, UINT64_MAX);
+	if (Result != VK_SUCCESS)
+	{
+		return false;
+	}
+
+	VkPresentInfoKHR PresentInfo{};
+	PresentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+	PresentInfo.waitSemaphoreCount = 1;
+	PresentInfo.pWaitSemaphores = &Owner.mRenderCompleteSemaphore;
+	PresentInfo.swapchainCount = 1;
+	PresentInfo.pSwapchains = &Owner.mCodecSwapchain;
+	PresentInfo.pImageIndices = &Owner.mCurrentSwapchainImageIndex;
+
+	Result = vkQueuePresentKHR(Owner.mQueue, &PresentInfo);
+	return (Result == VK_SUCCESS);
 }
 
 
@@ -245,21 +384,32 @@ bool FVdjmAndroidEncoderBackendVulkan::TryExtractNativeVkImage(const FTextureRHI
 bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(FRHICommandList& RHICmdList,
 	const FTextureRHIRef& srcTexture, VkImage srcImage, double timeStampSec)
 {
-	FVdjmVkSubmitFrameInfo frameInfo;
-	if (!mAnalyzer.Analyze(srcTexture, frameInfo))
+	VkResult Result = vkAcquireNextImageKHR(
+		mDevice,
+		mCodecSwapchain,
+		UINT64_MAX,
+		mAcquireSemaphore,
+		VK_NULL_HANDLE,
+		&mCurrentSwapchainImageIndex);
+
+	if (Result != VK_SUCCESS)
 	{
+		UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("vkAcquireNextImageKHR failed: %d"), (int32)Result);
 		return false;
 	}
 
-	if (!mIntermediateStage.EnsureResource(*this, frameInfo))
-	{
-		return false;
-	}
+	VkImage DstImage = mSwapchainImages[mCurrentSwapchainImageIndex];
+	VkCommandBuffer Cmd = mCommandBuffer;
 
-	if (!mIntermediateStage.RecordPrepareAndCopy(*this, frameInfo))
-	{
-		return false;
-	}
+	// begin cmd
+	// source or intermediate -> dst swapchain image
+	// dst -> PRESENT_SRC_KHR
+
+	VkImage FinalSrc = mIntermediateStage.HasIntermediateImage()
+		? mIntermediateStage.GetImage()
+		: srcImage;
+
+	// barrier / copy / barrier 기록
 
 	if (!mSubmitter.Submit(*this, timeStampSec))
 	{
