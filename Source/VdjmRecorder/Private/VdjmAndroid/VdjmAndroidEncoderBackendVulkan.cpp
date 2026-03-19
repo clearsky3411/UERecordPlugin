@@ -3,9 +3,46 @@
 
 #include "VdjmAndroid/VdjmAndroidEncoderBackendVulkan.h"
 #if PLATFORM_ANDROID || defined(__RESHARPER__)
-bool FVdjmVKInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) const
+bool FVdjmVkInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) const
 {
-	return false;
+	if (!srcTexture.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("Analyze: srcTexture is invalid"));
+		return false;
+	}
+
+	outInfo.SrcImage = static_cast<VkImage>(srcTexture->GetNativeResource());
+	if (outInfo.SrcImage == VK_NULL_HANDLE)
+	{
+		UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("Analyze: native VkImage is null"));
+		return false;
+	}
+
+	outInfo.SrcWidth = srcTexture->GetSizeX();
+	outInfo.SrcHeight = srcTexture->GetSizeY();
+
+	switch (srcTexture->GetFormat())
+	{
+	case PF_B8G8R8A8:
+		outInfo.SrcFormat = VK_FORMAT_B8G8R8A8_UNORM;
+		break;
+	case PF_R8G8B8A8:
+		outInfo.SrcFormat = VK_FORMAT_R8G8B8A8_UNORM;
+		break;
+	default:
+		UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("Analyze: unsupported UE pixel format %d"), (int32)srcTexture->GetFormat());
+		return false;
+	}
+
+	outInfo.bFormatMatchesSwapchain = (outInfo.SrcFormat == OwnerBackend->GetSwapchainFormat());
+	outInfo.bExtentMatchesSwapchain =
+		(outInfo.SrcWidth == OwnerBackend->GetSwapchainWidth() &&
+		 outInfo.SrcHeight == OwnerBackend->GetSwapchainHeight());
+
+	outInfo.bCanDirectCopy = outInfo.bFormatMatchesSwapchain && outInfo.bExtentMatchesSwapchain;
+	outInfo.bNeedsIntermediate = !outInfo.bCanDirectCopy;
+
+	return true;
 }
 
 bool FVdjmVkIntermediateStage::NeedRecreate(const FVdjmVkSubmitFrameInfo& frameInfo, uint32 curWid, uint32 curhei,
@@ -29,6 +66,21 @@ bool FVdjmVkIntermediateStage::RecordPrepareAndCopy(FVdjmAndroidEncoderBackendVu
 bool FVdjmVkSurfaceSubmitter::Submit(FVdjmAndroidEncoderBackendVulkan& owner, double timeStampSec)
 {
 	return false;
+}
+
+
+FVdjmAndroidEncoderBackendVulkan::FVdjmAndroidEncoderBackendVulkan()
+	: mAnalyzer(this), mIntermediateStage(this), mSubmitter(this),
+	mInitialized(false), mStarted(false), mPaused(false), mRuntimeReady(false),
+	mIntermediateImage(VK_NULL_HANDLE),
+	mIntermediateMemory(VK_NULL_HANDLE),
+	mIntermediateView(VK_NULL_HANDLE),
+	mCommandPool(VK_NULL_HANDLE),
+	mCommandBuffer(VK_NULL_HANDLE),
+	mSubmitFence(VK_NULL_HANDLE),
+	mIntermediateWidth(0), mIntermediateHeight(0), 
+	mIntermediateFormat(VK_FORMAT_UNDEFINED)
+{
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow)
@@ -112,42 +164,46 @@ bool FVdjmAndroidEncoderBackendVulkan::IsRunnable()
 
 bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec)
 {
-	if (not IsRunnable())
+	if (!IsRunnable())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderBackendVulkan::Running - Not runnable"));
+		//UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("Vulkan backend is not runnable"));
 		return false;
 	}
-	if (not srcTexture.IsValid())
+
+	if (!EnsureRuntimeReady())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderBackendVulkan::Running - srcTexture is invalid"));
+		//UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("EnsureRuntimeReady failed"));
 		return false;
 	}
-	if (not EnsureRuntimeReady())
+
+	FVdjmVkSubmitFrameInfo FrameInfo;
+	if (!mAnalyzer.Analyze(srcTexture, FrameInfo))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderBackendVulkan::Running - runtime is not ready"));
+		//UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("Analyze failed"));
 		return false;
 	}
-	FVdjmVkSubmitFrameInfo frameInfo;
-	if (not mAnalyzer.Analyze(srcTexture, frameInfo))
+
+	if (FrameInfo.bNeedsIntermediate)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderBackendVulkan::Running - Failed to analyze source texture"));
+		if (!mIntermediateStage.EnsureResource(*this, FrameInfo))
+		{
+			//UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("EnsureResource failed"));
+			return false;
+		}
+
+		if (!mIntermediateStage.RecordPrepareAndCopy(*this, FrameInfo))
+		{
+			//UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("RecordPrepareAndCopy failed"));
+			return false;
+		}
+	}
+
+	if (!SubmitTextureToCodecSurface(RHICmdList, srcTexture, FrameInfo.SrcImage, timeStampSec))
+	{
+		//UE_LOG(LogVdjmRecorderEncoder, Error, TEXT("SubmitTextureToCodecSurface failed"));
 		return false;
 	}
-	if ( not mIntermediateStage.EnsureResource(*this, frameInfo))
-	{
-		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderBackendVulkan::Running - Failed to ensure intermediate resource"));
-		return false;
-	}
-	
-	if (not mIntermediateStage.RecordPrepareAndCopy(*this, frameInfo))
-	{
-		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderBackendVulkan::Running - Failed to prepare and copy to intermediate resource"));
-		return false;
-	}
-	if (!mSubmitter.Submit(*this, timeStampSec))
-	{
-		return false;
-	}
+
 	return true;
 }
 

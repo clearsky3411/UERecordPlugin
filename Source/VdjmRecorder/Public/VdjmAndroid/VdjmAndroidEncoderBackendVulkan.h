@@ -29,6 +29,7 @@ struct FVdjmVkSubmitFrameInfo
 	bool bFormatMatchesSwapchain = false;
 	bool bExtentMatchesSwapchain = false;
 	bool bNeedsIntermediate = false;
+	bool bCanDirectCopy = false;
 	
 	FVdjmVkSubmitFrameInfo() = default;
 	FVdjmVkSubmitFrameInfo(const FVdjmVkSubmitFrameInfo& other) = default;
@@ -51,7 +52,20 @@ struct FVdjmVkSubmitFrameInfo
 	}
 };
 
-class FVdjmVKInputAnalyzer
+/**	
+ *	@brief Vulkan 이미지 제출 과정에서 필요한 분석과 중간 단계 처리 담당 클래스들의 공통 기반 클래스
+ *	@class FVdjmVkSubProcessContext
+ */
+class FVdjmVkSubProcessContext
+{
+public:
+	FVdjmVkSubProcessContext(FVdjmAndroidEncoderBackendVulkan* owner) : OwnerBackend(owner) {}
+	virtual ~FVdjmVkSubProcessContext() = default;
+protected:
+	class FVdjmAndroidEncoderBackendVulkan* OwnerBackend = nullptr;
+};
+
+class FVdjmVkInputAnalyzer : public FVdjmVkSubProcessContext
 {
 	/**
 	* @brief Vulkan 이미지에서 필요한 정보를 추출하는 유틸리티 클래스
@@ -65,10 +79,20 @@ class FVdjmVKInputAnalyzer
 	* - 자원 생성, command submit, 동기화 완료 처리
 	*/
 public:
+	explicit FVdjmVkInputAnalyzer(FVdjmAndroidEncoderBackendVulkan* const owner)
+		: FVdjmVkSubProcessContext(owner)
+	{
+	}
+
 	bool Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) const;
 	
 };
-class FVdjmVkIntermediateStage
+
+/**	
+ *	@brief Vulkan 이미지 제출 과정에서 필요한 중간 단계 처리 담당 클래스
+ *	@class FVdjmVkIntermediateStage
+ */
+class FVdjmVkIntermediateStage: public FVdjmVkSubProcessContext
 {
 	/**
  	* @brief 불칸 내부 이미지 제출 과정에서 필요한 중간 단계 처리 클래스
@@ -77,6 +101,7 @@ class FVdjmVkIntermediateStage
  	* - intermediate image / view / memory 생성/재생성
  	* - 입력 이미지 → intermediate 로 copy / blit / render
  	* - layout transition 규칙 적용
+ 	* - 포멧이 다를때나, 해상도가 다를때나, 레이아웃, 색공간 변환이나 scale이 필요한 경우에 intermediate image를 만들어서 제출하는 과정 담당
  	* ### Result:
  	* - 가공된 Vulkan 이미지 생성
  	* - 제출 가능한 상태로 Vulkan 이미지 준비
@@ -85,11 +110,21 @@ class FVdjmVkIntermediateStage
  	* - 최종 제출 완료 관리
  	*/
 public:
+	explicit FVdjmVkIntermediateStage(FVdjmAndroidEncoderBackendVulkan* const owner)
+		: FVdjmVkSubProcessContext(owner)
+	{
+	}
+
 	bool NeedRecreate(const FVdjmVkSubmitFrameInfo& frameInfo,uint32 curWid,uint32 curhei,VkFormat  curFormat) const;
 	bool EnsureResource(FVdjmAndroidEncoderBackendVulkan& backend, const FVdjmVkSubmitFrameInfo& frameInfo);
 	bool RecordPrepareAndCopy(FVdjmAndroidEncoderBackendVulkan& owner, const FVdjmVkSubmitFrameInfo& frameInfo);
 };
-class FVdjmVkSurfaceSubmitter
+
+/**	
+ *	@brief Vulkan 이미지 제출 과정에서 필요한 최종 제출 담당 클래스
+ *	@class FVdjmVkSurfaceSubmitter
+ */
+class FVdjmVkSurfaceSubmitter : public FVdjmVkSubProcessContext
 {
 	/**
 	 * @brief Vulkan 이미지 제출 담당 클래스
@@ -105,22 +140,36 @@ class FVdjmVkSurfaceSubmitter
 	 * - intermediate 생성 정책 판단
 	 */
 public:
+	explicit FVdjmVkSurfaceSubmitter(FVdjmAndroidEncoderBackendVulkan* const owner)
+		: FVdjmVkSubProcessContext(owner)
+	{
+	}
+
 	bool Submit(FVdjmAndroidEncoderBackendVulkan& owner, double timeStampSec);
 };
 
+/**	
+ *	@brief Vulkan 기반 Android 인코더 백엔드 구현 클래스
+ *	@class FVdjmAndroidEncoderBackendVulkan
+ */
 class FVdjmAndroidEncoderBackendVulkan : public FVdjmAndroidEncoderBackend
 {
 public:
-	FVdjmAndroidEncoderBackendVulkan() = default;
+	FVdjmAndroidEncoderBackendVulkan();
 	virtual ~FVdjmAndroidEncoderBackendVulkan() override = default;
 	
 	virtual bool Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow) override;
 	virtual bool Start() override;
 	virtual void Stop() override;
 	virtual void Terminate() override;
+	//	여기에서 orchestration 담당, Running이 호출될 때마다 제출 시도, 제출 과정에서 필요한 분석과 중간 단계 처리는 별도의 클래스에서 담당
 	virtual bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec) override;
 	
 	bool IsRunnable();
+	VkFormat GetSwapchainFormat();
+	uint32 GetSwapchainWidth();
+	uint32 GetSwapchainHeight();
+
 private:
 	
 	bool EnsureRuntimeReady();
@@ -146,7 +195,7 @@ private:
 	uint32 mIntermediateHeight = 0;
 	VkFormat mIntermediateFormat = VK_FORMAT_UNDEFINED;
 
-	FVdjmVKInputAnalyzer mAnalyzer;
+	FVdjmVkInputAnalyzer mAnalyzer;
 	FVdjmVkIntermediateStage mIntermediateStage;
 	FVdjmVkSurfaceSubmitter mSubmitter;
 	
