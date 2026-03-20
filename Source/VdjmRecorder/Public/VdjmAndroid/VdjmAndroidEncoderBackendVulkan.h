@@ -254,8 +254,9 @@ public:
 	}
 
 	bool NeedRecreate(const FVdjmVkSubmitFrameInfo& frameInfo,uint32 curWid,uint32 curhei,VkFormat  curFormat) const;
+	void Release(FVdjmAndroidEncoderBackendVulkan& owner);
 	bool EnsureResource(FVdjmAndroidEncoderBackendVulkan& backend, const FVdjmVkSubmitFrameInfo& frameInfo);
-	bool RecordPrepareAndCopy(FVdjmAndroidEncoderBackendVulkan& owner, const FVdjmVkSubmitFrameInfo& frameInfo);
+	bool RecordPrepareAndCopy(FVdjmAndroidEncoderBackendVulkan& owner, const FVdjmVkSubmitFrameInfo& frameInfo, FVdjmVkFrameSubmitState& inOutFrameState);
 	
 	FVdjmVkIntermediateImageState& GetIntermediateState() { return mIntermediateState; }
 	const FVdjmVkIntermediateImageState& GetIntermediateStateConst() const { return mIntermediateState; }
@@ -294,7 +295,7 @@ public:
 	{
 	}
 
-	bool Submit(FVdjmAndroidEncoderBackendVulkan& owner, double timeStampSec);
+	bool Submit(FVdjmAndroidEncoderBackendVulkan& owner, const FVdjmVkFrameSubmitState& frameState, double timeStampSec);
 };
 
 
@@ -368,16 +369,16 @@ public:
 	static VkPresentModeKHR ChoosePresentMode(const TArray<VkPresentModeKHR>& modes);
 	static VkCompositeAlphaFlagBitsKHR ChooseCompositeAlpha(VkCompositeAlphaFlagsKHR flags);
 	static VkExtent2D ChooseExtent(	const VkSurfaceCapabilitiesKHR& caps,uint32 desiredWid,	uint32 desiredHei);
+	
+	bool TryExtractNativeVkImage(const FTextureRHIRef& srcTexture, VkImage& outImage) const;
 private:
 	
 	bool InitVkRuntimeContext();
-	
 	void ReleaseRecordSessionVkResources();
-	
 	bool EnsureRuntimeReady();
-	bool TryExtractNativeVkImage(const FTextureRHIRef& srcTexture, VkImage& outImage) const;
-	bool SubmitTextureToCodecSurface(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, VkImage srcImage, double timeStampSec);
-
+	bool AcquireNextSwapchainImage(FVdjmVkFrameSubmitState& outFrameState);
+	bool SubmitTextureToCodecSurface(const FVdjmVkFrameSubmitState& frameState);
+	
 	FVdjmAndroidEncoderConfigure mConfig;
 	
 	bool mInitialized = false;
