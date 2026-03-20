@@ -69,6 +69,25 @@ struct FVdjmVkRuntimeContext
 	VkPhysicalDevice VkPhysicalDevice = VK_NULL_HANDLE;
 	VkQueue GraphicsQueue = VK_NULL_HANDLE;
 	uint32 GraphicsQueueFamilyIndex = 0;
+	
+	void Clear()
+	{
+		bInitialized = false;
+		VulkanRHI = nullptr;
+		VkInstance = VK_NULL_HANDLE;
+		VkDevice = VK_NULL_HANDLE;
+		VkPhysicalDevice = VK_NULL_HANDLE;
+		GraphicsQueue = VK_NULL_HANDLE;
+		GraphicsQueueFamilyIndex = 0;
+	}
+	bool IsInitValid() const
+	{
+		return VulkanRHI != nullptr && VkInstance != VK_NULL_HANDLE && VkDevice != VK_NULL_HANDLE && VkPhysicalDevice != VK_NULL_HANDLE && GraphicsQueue != VK_NULL_HANDLE && GraphicsQueueFamilyIndex != UINT32_MAX;
+	}
+	bool IsValid() const
+	{
+		return bInitialized && IsInitValid();
+	}
 };
 
 /**
@@ -95,6 +114,23 @@ struct FVdjmVkRecordSessionState
 	VkFence SubmitFence = VK_NULL_HANDLE;
 	VkSemaphore AcquireSemaphore = VK_NULL_HANDLE;
 	VkSemaphore RenderCompleteSemaphore = VK_NULL_HANDLE;
+	
+	void Clear()
+	{
+		bReady = false;
+		CodecSurface = VK_NULL_HANDLE;
+		CodecSwapchain = VK_NULL_HANDLE;
+		SwapchainFormat = VK_FORMAT_UNDEFINED;
+		SwapchainWidth = 0;
+		SwapchainHeight = 0;
+		SwapchainImages.Empty();
+		SwapchainImageViews.Empty();
+		CommandPool = VK_NULL_HANDLE;
+		CommandBuffer = VK_NULL_HANDLE;
+		SubmitFence = VK_NULL_HANDLE;
+		AcquireSemaphore = VK_NULL_HANDLE;
+		RenderCompleteSemaphore = VK_NULL_HANDLE;
+	}
 };
 
 /**
@@ -110,6 +146,25 @@ struct FVdjmVkIntermediateImageState
 	VkFormat IntermediateFormat = VK_FORMAT_UNDEFINED;
 	uint32 IntermediateWidth = 0;
 	uint32 IntermediateHeight = 0;
+	
+	void Clear()
+	{
+		IntermediateImage = VK_NULL_HANDLE;
+		IntermediateMemory = VK_NULL_HANDLE;
+		IntermediateView = VK_NULL_HANDLE;
+		IntermediateFormat = VK_FORMAT_UNDEFINED;
+		IntermediateWidth = 0;
+		IntermediateHeight = 0;
+	}
+	bool IsValid() const
+	{
+		return (IntermediateImage != VK_NULL_HANDLE) && (IntermediateMemory != VK_NULL_HANDLE) && (IntermediateView != VK_NULL_HANDLE) && IntermediateWidth > 0 && IntermediateHeight > 0 && IntermediateFormat != VK_FORMAT_UNDEFINED;
+	}
+	
+	bool NeedsRecreate(uint32 newWidth, uint32 newHeight, VkFormat newFormat) const
+	{
+		return !IsValid() || IntermediateWidth != newWidth || IntermediateHeight != newHeight || IntermediateFormat != newFormat;
+	}
 };
 
 /**
@@ -146,7 +201,7 @@ protected:
 	class FVdjmAndroidEncoderBackendVulkan* mOwnerBackend = nullptr;
 };
 
-class FVdjmVkInputAnalyzer : public FVdjmVkSubProcessContext
+class FVdjmVkSubProcInputAnalyzer : public FVdjmVkSubProcessContext
 {
 	friend class FVdjmAndroidEncoderBackendVulkan;
 	/**
@@ -161,7 +216,7 @@ class FVdjmVkInputAnalyzer : public FVdjmVkSubProcessContext
 	* - 자원 생성, command submit, 동기화 완료 처리
 	*/
 public:
-	explicit FVdjmVkInputAnalyzer(FVdjmAndroidEncoderBackendVulkan* const owner)
+	explicit FVdjmVkSubProcInputAnalyzer(FVdjmAndroidEncoderBackendVulkan* const owner)
 		: FVdjmVkSubProcessContext(owner)
 	{
 	}
@@ -172,9 +227,9 @@ public:
 
 /**	
  *	@brief Vulkan 이미지 제출 과정에서 필요한 중간 단계 처리 담당 클래스
- *	@class FVdjmVkIntermediateStage
+ *	@class FVdjmVkSubProcIntermediateStage
  */
-class FVdjmVkIntermediateStage: public FVdjmVkSubProcessContext
+class FVdjmVkSubProcIntermediateStage: public FVdjmVkSubProcessContext
 {
 	friend class FVdjmAndroidEncoderBackendVulkan;
 	/**
@@ -193,7 +248,7 @@ class FVdjmVkIntermediateStage: public FVdjmVkSubProcessContext
  	* - 최종 제출 완료 관리
  	*/
 public:
-	explicit FVdjmVkIntermediateStage(FVdjmAndroidEncoderBackendVulkan* const owner)
+	explicit FVdjmVkSubProcIntermediateStage(FVdjmAndroidEncoderBackendVulkan* const owner)
 		: FVdjmVkSubProcessContext(owner)
 	{
 	}
@@ -215,9 +270,9 @@ private:
 
 /**	
  *	@brief Vulkan 이미지 제출 과정에서 필요한 최종 제출 담당 클래스
- *	@class FVdjmVkSurfaceSubmitter
+ *	@class FVdjmVkSubProcSurfaceSubmitter
  */
-class FVdjmVkSurfaceSubmitter : public FVdjmVkSubProcessContext
+class FVdjmVkSubProcSurfaceSubmitter : public FVdjmVkSubProcessContext
 {
 	friend class FVdjmAndroidEncoderBackendVulkan;
 	/**
@@ -234,7 +289,7 @@ class FVdjmVkSurfaceSubmitter : public FVdjmVkSubProcessContext
 	 * - intermediate 생성 정책 판단
 	 */
 public:
-	explicit FVdjmVkSurfaceSubmitter(FVdjmAndroidEncoderBackendVulkan* const owner)
+	explicit FVdjmVkSubProcSurfaceSubmitter(FVdjmAndroidEncoderBackendVulkan* const owner)
 		: FVdjmVkSubProcessContext(owner)
 	{
 	}
@@ -266,31 +321,31 @@ public:
 	VkQueue GetGraphicsQueue() const { return mVkRuntime.GraphicsQueue; }
 	uint32 GetGraphicsQueueFamilyIndex() const { return mVkRuntime.GraphicsQueueFamilyIndex; }
 
-	VkCommandPool GetCommandPool() const { return mRecordSessionState.CommandPool; }
-	VkCommandBuffer GetCommandBuffer() const { return mRecordSessionState.CommandBuffer; }
-	const VkCommandBuffer* GetCommandBufferConst() const { return &mRecordSessionState.CommandBuffer; }
-	VkFence GetSubmitFence() const { return mRecordSessionState.SubmitFence; }
-	const VkFence* GetSubmitFenceConst() const { return &mRecordSessionState.SubmitFence; }
+	VkCommandPool GetCommandPool() const { return mVkRecordSession.CommandPool; }
+	VkCommandBuffer GetCommandBuffer() const { return mVkRecordSession.CommandBuffer; }
+	const VkCommandBuffer* GetCommandBufferConst() const { return &mVkRecordSession.CommandBuffer; }
+	VkFence GetSubmitFence() const { return mVkRecordSession.SubmitFence; }
+	const VkFence* GetSubmitFenceConst() const { return &mVkRecordSession.SubmitFence; }
 	
-	VkSurfaceKHR GetCodecSurface() const { return mRecordSessionState.CodecSurface; }
-	VkSwapchainKHR GetCodecSwapchain() const { return mRecordSessionState.CodecSwapchain; }
-	const VkSwapchainKHR* GetCodecSwapchainConst() const { return &mRecordSessionState.CodecSwapchain; }
+	VkSurfaceKHR GetCodecSurface() const { return mVkRecordSession.CodecSurface; }
+	VkSwapchainKHR GetCodecSwapchain() const { return mVkRecordSession.CodecSwapchain; }
+	const VkSwapchainKHR* GetCodecSwapchainConst() const { return &mVkRecordSession.CodecSwapchain; }
 
-	const TArray<VkImage>& GetSwapchainImages() const { return mRecordSessionState.SwapchainImages; }
-	const TArray<VkImageView>& GetSwapchainImageViews() const { return mRecordSessionState.SwapchainImageViews; }
+	const TArray<VkImage>& GetSwapchainImages() const { return mVkRecordSession.SwapchainImages; }
+	const TArray<VkImageView>& GetSwapchainImageViews() const { return mVkRecordSession.SwapchainImageViews; }
 
-	VkSemaphore GetAcquireSemaphore() const { return mRecordSessionState.AcquireSemaphore; }
-	const VkSemaphore* GetAcquireSemaphoreConst() const { return &mRecordSessionState.AcquireSemaphore; }
-	VkSemaphore GetRenderCompleteSemaphore() const { return mRecordSessionState.RenderCompleteSemaphore; }
-	const VkSemaphore* GetRenderCompleteSemaphoreConst() const { return &mRecordSessionState.RenderCompleteSemaphore; }
+	VkSemaphore GetAcquireSemaphore() const { return mVkRecordSession.AcquireSemaphore; }
+	const VkSemaphore* GetAcquireSemaphoreConst() const { return &mVkRecordSession.AcquireSemaphore; }
+	VkSemaphore GetRenderCompleteSemaphore() const { return mVkRecordSession.RenderCompleteSemaphore; }
+	const VkSemaphore* GetRenderCompleteSemaphoreConst() const { return &mVkRecordSession.RenderCompleteSemaphore; }
 
 	uint32 GetCurrentSwapchainImageIndex() const { return mCurrentSwapchainImageIndex32; }
 	const uint32_t* GetCurrentSwapchainImageIndexConst() const { return &mCurrentSwapchainImageIndex32; }
 	void SetCurrentSwapchainImageIndex(uint32 InIndex) { mCurrentSwapchainImageIndex32 = InIndex; }
 
-	VkFormat GetSwapchainFormat() const { return mRecordSessionState.SwapchainFormat; }
-	uint32 GetSwapchainWidth() const { return mRecordSessionState.SwapchainWidth; }
-	uint32 GetSwapchainHeight() const { return mRecordSessionState.SwapchainHeight; }
+	VkFormat GetSwapchainFormat() const { return mVkRecordSession.SwapchainFormat; }
+	uint32 GetSwapchainWidth() const { return mVkRecordSession.SwapchainWidth; }
+	uint32 GetSwapchainHeight() const { return mVkRecordSession.SwapchainHeight; }
 
 	VkImage GetIntermediateImage() const { return mIntermediateStage.GetIntermediateStateConst(). IntermediateImage; }
 	VkImageView GetIntermediateView() const { return mIntermediateStage.GetIntermediateStateConst().IntermediateView; }
@@ -307,9 +362,17 @@ public:
 
 	bool IsValidIntermediateImage() const { return mIntermediateStage.IsValidIntermediateImage(); }
 	
+	static uint32 FindMemoryType(VkPhysicalDevice physicalDevice, uint32 typeFilter, VkMemoryPropertyFlags properties);
+	static void TransitionImageLayout(VkCommandBuffer commandBuffer, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+	static VkSurfaceFormatKHR ChooseSurfaceFormat(const FVdjmVkRuntimeContext& runtimeContext,const TArray<VkSurfaceFormatKHR>& availableFormats);
+	static VkPresentModeKHR ChoosePresentMode(const TArray<VkPresentModeKHR>& modes);
+	static VkCompositeAlphaFlagBitsKHR ChooseCompositeAlpha(VkCompositeAlphaFlagsKHR flags);
+	static VkExtent2D ChooseExtent(	const VkSurfaceCapabilitiesKHR& caps,uint32 desiredWid,	uint32 desiredHei);
 private:
 	
 	bool InitVkRuntimeContext();
+	
+	void ReleaseRecordSessionVkResources();
 	
 	bool EnsureRuntimeReady();
 	bool TryExtractNativeVkImage(const FTextureRHIRef& srcTexture, VkImage& outImage) const;
@@ -325,11 +388,12 @@ private:
 	uint32_t mCurrentSwapchainImageIndex32;
 	
 	FVdjmVkRuntimeContext mVkRuntime;
-	FVdjmVkRecordSessionState mRecordSessionState;
+	FVdjmVkRecordSessionState mVkRecordSession;
+
 	
-	FVdjmVkInputAnalyzer mAnalyzer;
-	FVdjmVkIntermediateStage mIntermediateStage;
-	FVdjmVkSurfaceSubmitter mSurfaceSubmitter;
+	FVdjmVkSubProcInputAnalyzer mAnalyzer;
+	FVdjmVkSubProcIntermediateStage mIntermediateStage;
+	FVdjmVkSubProcSurfaceSubmitter mSurfaceSubmitter;
 	
 };
 
