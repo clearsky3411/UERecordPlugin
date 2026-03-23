@@ -894,6 +894,10 @@ void AVdjmRecordBridgeActor::PostResourceInit(UVdjmRecordResource* resource)
 				UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::PostResourceInit - Failed to create record pipeline instance."));
 				return;
 			}
+			else
+			{
+				UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::PostResourceInit - Record pipeline instance created successfully."));
+			}
 			
 			mRecordPipeline->InitializeRecordPipeline(mRecordResource);
 			mCurrentEnvInfo->SetRecordUnitPipeline(mRecordPipeline);
@@ -917,15 +921,16 @@ void AVdjmRecordBridgeActor::PostResourceInit(UVdjmRecordResource* resource)
 	}
 }
 
-void AVdjmRecordBridgeActor::BeginPlay()
+bool AVdjmRecordBridgeActor::BeginInit()
 {
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::BeginPlay - BeginPlay started. Attempting to load record configure data asset."));
 	if (mRecordConfigureDataAsset == nullptr)
 	{
 		mRecordConfigureDataAsset = TryGetRecordEnvConfigure();
 		if (mRecordConfigureDataAsset == nullptr)
 		{
 			UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::BeginPlay - Failed to load record configure data asset."));
-			return;
+			return true;
 		}
 	}
 	
@@ -965,7 +970,20 @@ void AVdjmRecordBridgeActor::BeginPlay()
 			UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::BeginPlay - No platform info found for target platform."));
 		}
 	}
-	
+	return false;
+}
+
+void AVdjmRecordBridgeActor::BeginPlay()
+{
+	Super::BeginPlay();
+	if (BeginInit())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::BeginPlay - Initialization failed. Check previous logs for details."));
+	}
+	else
+	{
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::BeginPlay - Initialization successful."));
+	}
 }
 
 bool AVdjmRecordBridgeActor::DbcRecordStartableFull() const

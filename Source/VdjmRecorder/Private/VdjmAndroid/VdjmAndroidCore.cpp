@@ -21,6 +21,7 @@ class UVdjmRecordAndroidResource : public UVdjmRecordResource
 void UVdjmRecordAndroidResource::InitializeResource(AVdjmRecordBridgeActor* ownerBridge)
 {
 	Super::InitializeResource(ownerBridge);
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidResource::InitializeResource - Resource initialized for bridge actor: %s"), *ownerBridge->GetName());
 }
 
 void UVdjmRecordAndroidResource::ReleaseResources()
@@ -249,6 +250,7 @@ void UVdjmAndroidRecordPipeline::InitializeRecordPipeline(UVdjmRecordResource* r
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - recordResource is null."));
 		return;
 	}
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - Initializing pipeline with record resource for bridge actor: %s"), *recordResource->OwnerBridgeActor->GetName());
 	LinkedBridgeActor = recordResource->OwnerBridgeActor;
 	if (LinkedBridgeActor.IsValid() && LinkedBridgeActor->DbcValidRecordResource())
 	{

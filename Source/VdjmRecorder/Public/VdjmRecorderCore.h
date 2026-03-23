@@ -787,6 +787,7 @@ public:
 	static EVdjmRecordEnvPlatform GetTargetPlatform();
 	
 	void PostResourceInit(UVdjmRecordResource* resource);
+	bool BeginInit();
 
 	UVdjmRecordEnvDataAsset* GetRecordEnvConfigureDataAsset()
 	{
