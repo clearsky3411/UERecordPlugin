@@ -454,6 +454,10 @@ public:
 	{
 		return DbcIsDefaultReady();
 	}
+	virtual bool IsLazyPostInitializeCheck() const
+	{
+		return false;
+	}
 	/*
 	 * 굳이 안써도됨. 
 	 */
@@ -774,6 +778,8 @@ public:
 		return DbcRecordingPossible() && not bIsRecording;
 	}
 
+	bool DbcValidInitializeComplete() const;
+	
 	bool DbcRecordStartableFull() const;
 	FVdjmRecordGlobalRules GetGlobalRules() const
     {

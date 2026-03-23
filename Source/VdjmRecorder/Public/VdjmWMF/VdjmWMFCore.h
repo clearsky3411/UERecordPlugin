@@ -32,6 +32,10 @@ public:
 	
 	virtual bool DbcIsValidResource() const override;
 	virtual void BeginDestroy() override;
+	virtual bool IsLazyPostInitializeCheck() const override
+	{
+		return true;
+	}
 
 private:
 	TArray<FTextureRHIRef> mTexturePoolRHI;

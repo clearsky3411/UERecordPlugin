@@ -881,6 +881,12 @@ EVdjmRecordEnvPlatform AVdjmRecordBridgeActor::GetTargetPlatform()
 
 void AVdjmRecordBridgeActor::PostResourceInit(UVdjmRecordResource* resource)
 {
+	if (mRecordConfigureDataAsset == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::PostResourceInit - Record configure data asset is null. Cannot initialize record pipeline."));
+		return;
+	}
+	
 	if (mRecordPipeline == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::PostResourceInit - Initializing record pipeline after resource initialization."));
@@ -930,7 +936,7 @@ bool AVdjmRecordBridgeActor::BeginInit()
 		if (mRecordConfigureDataAsset == nullptr)
 		{
 			UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::BeginPlay - Failed to load record configure data asset."));
-			return true;
+			return false;
 		}
 	}
 	
@@ -959,10 +965,19 @@ bool AVdjmRecordBridgeActor::BeginInit()
 				
 				//	TODO: 이거도 Wnd 나 그런걸로 나눌 수 있게 만들어야함. 이게 null
 				mRecordResource = NewObject<UVdjmRecordResource>(this,platformInfo->RecordResourceClass);
+				if (mRecordResource->IsLazyPostInitializeCheck())
+				{
+					mOnResourceTexturePoolInitializedHandle = mRecordResource->OnResourceTexturePoolInitializedFunc.AddUObject(this,&AVdjmRecordBridgeActor::PostResourceInit);
+					UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::BeginPlay - Record resource initialized with lazy post-initialize check. Waiting for texture pool initialization before post-initialize steps."));
+					mRecordResource->InitializeResource(this);
+				}
+				else
+				{
+					mRecordResource->InitializeResource(this);
+					PostResourceInit(mRecordResource);
+					UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::BeginPlay - Record resource initialized immediately without waiting for lazy post-initialize check."));
+				}
 				
-				mOnResourceTexturePoolInitializedHandle = mRecordResource->OnResourceTexturePoolInitializedFunc.AddUObject(this,&AVdjmRecordBridgeActor::PostResourceInit);
-				
-				mRecordResource->InitializeResource(this);
 			}
 		}
 		else
@@ -970,7 +985,7 @@ bool AVdjmRecordBridgeActor::BeginInit()
 			UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::BeginPlay - No platform info found for target platform."));
 		}
 	}
-	return false;
+	return DbcValidInitializeComplete();
 }
 
 void AVdjmRecordBridgeActor::BeginPlay()
@@ -978,12 +993,42 @@ void AVdjmRecordBridgeActor::BeginPlay()
 	Super::BeginPlay();
 	if (BeginInit())
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::BeginPlay - Initialization failed. Check previous logs for details."));
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::BeginPlay - Initialization successful."));
 	}
 	else
 	{
-		UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::BeginPlay - Initialization successful."));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::BeginPlay - Initialization failed. Check previous logs for details."));
 	}
+}
+
+bool AVdjmRecordBridgeActor::DbcValidInitializeComplete() const
+{
+	if (mRecordConfigureDataAsset == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mRecordConfigureDataAsset == nullptr"));
+		return false;
+	}
+	if (mTargetPlayerController == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mTargetPlayerController == nullptr"));
+		return false;
+	}
+	if (mTargetViewport == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mTargetViewport == nullptr"));
+		return false;
+	}
+	if (mCurrentEnvInfo == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mCurrentEnvInfo == nullptr"));
+		return false;
+	}
+	if (mRecordResource == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mRecordResource == nullptr"));
+		return false;
+	}
+	return true;
 }
 
 bool AVdjmRecordBridgeActor::DbcRecordStartableFull() const
