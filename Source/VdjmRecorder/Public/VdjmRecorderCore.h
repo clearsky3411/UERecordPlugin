@@ -523,7 +523,8 @@ USTRUCT(Blueprintable)
 struct VDJMRECORDER_API FVdjmRecordEnvPlatformInfo 
 {
 	GENERATED_BODY()
-
+	UPROPERTY(Category ="Record|Env",EditAnywhere)
+	bool bUseAutoTargetPlatformResolution = false;
 	UPROPERTY(Category ="Record|Env",EditAnywhere)
 	FIntPoint Resolution = FIntPoint(1920,1080);
 	UPROPERTY(Category ="Record|Env",EditAnywhere)
