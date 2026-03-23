@@ -807,6 +807,10 @@ public:
 	{
 		return mCurrentEnvInfo ? mCurrentEnvInfo->GetCurrentGlobalRules() : FVdjmRecordGlobalRules();
 	}
+	UVdjmRecordResource* GetRecordResource()
+	{
+		return mRecordResource;
+	}
 	
 	/*	↓↓↓[			Delegators			]↓↓↓	*/
 	UPROPERTY(BlueprintAssignable,EditAnywhere)
@@ -836,10 +840,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
-
-public:
-
-protected:
+	
 	UPROPERTY()
 	FVdjmRecordGlobalRules mGlobalRules;
 	UPROPERTY()

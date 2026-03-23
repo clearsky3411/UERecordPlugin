@@ -217,18 +217,18 @@ void UVdjmRecordAndroidUnit::SubmitFrameToSurfacer(FRDGBuilder& graphBuilder, co
 			{
 				return;
 			}
-
+	
 			if (!WeakThis->mAndroidEncoder.IsValid())
 			{
 				return;
 			}
-
+	
 			FTextureRHIRef sourceRHI = PassParams->InputTexture->GetRHI();
 			if (!sourceRHI.IsValid())
 			{
 				return;
 			}
-
+	
 			WeakThis->mAndroidEncoder->SubmitSurfaceFrame(
 				RHICmdList,
 				sourceRHI,

@@ -52,6 +52,7 @@ public class VdjmRecorder : ModuleRules
                     "Launch",                 // Android JNI 접근용
                     "AndroidRuntimeSettings", // 정말 쓰는 경우만 유지
                     "Vulkan", 
+                    "VulkanRHI",
                 }
             );
             //근데 hresult 의 값은 필요로 하거든. 어차피 hresult 그냥 int 값아님? 저거 내가 변경해야겠다.
@@ -61,6 +62,7 @@ public class VdjmRecorder : ModuleRules
             PublicSystemLibraries.Add("log");
             PublicSystemLibraries.Add("EGL");
             PublicSystemLibraries.Add("GLESv3");
+            PublicSystemLibraries.Add("vulkan");
 
             // 인텔리센스 / 헤더 탐색용
             string NdkRoot = Environment.GetEnvironmentVariable("NDKROOT");

@@ -16,7 +16,7 @@ struct FVdjmVkEncoderContext
 	VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
 	VkDevice Device = VK_NULL_HANDLE;
 	VkQueue GraphicsQueue = VK_NULL_HANDLE;
-	uint32_t GraphicsQueueFamilyIndex = 0;
+	uint32_t GraphicsQueueFamilyIndex = UINT32_MAX;
 };
 
 struct FVdjmVkSubmitFrameInfo

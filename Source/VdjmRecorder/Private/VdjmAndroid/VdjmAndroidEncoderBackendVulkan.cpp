@@ -3,9 +3,9 @@
 
 #include "VdjmAndroid/VdjmAndroidEncoderBackendVulkan.h"
 
-#include "vulkan_android.h"
-#include "Runtime/VulkanRHI/Public/IVulkanDynamicRHI.h"
 #if PLATFORM_ANDROID || defined(__RESHARPER__)
+#include "vulkan_android.h"
+#include "IVulkanDynamicRHI.h"
 
 namespace
 {

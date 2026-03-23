@@ -572,9 +572,12 @@ FTextureRHIRef UVdjmRecordResource::CreateTextureForNV12(FIntPoint resolution, E
 UVdjmRecordEnvDataAsset* AVdjmRecordBridgeActor::TryGetRecordEnvConfigure()
 {
 	/*
+	 *  /Script/VdjmRecorder.VdjmRecordEnvDataAsset'/Game/Temp/VdjmTestDataAsset.VdjmTestDataAsset'
+	 *
+	 *
 	 * /Script/VdjmRecorder.VdjmRecordEnvDataAsset'/VdjmMobileUi/Record/Bp_VdjmRecordConfigDataAsset.Bp_VdjmRecordConfigDataAsset'
 	 */
-	return FVdjmFunctionLibraryHelper::TryGetRecordConfigureDataAsset<UVdjmRecordEnvDataAsset>(FSoftObjectPath( TEXT("/Script/VdjmRecorder.VdjmRecordEnvDataAsset'/VdjmMobileUi/Record/Bp_VdjmRecordConfigDataAsset.Bp_VdjmRecordConfigDataAsset'")));
+	return FVdjmFunctionLibraryHelper::TryGetRecordConfigureDataAsset<UVdjmRecordEnvDataAsset>(FSoftObjectPath( TEXT(" /Script/VdjmRecorder.VdjmRecordEnvDataAsset'/Game/Temp/VdjmTestDataAsset.VdjmTestDataAsset'")));
 }
 
 AVdjmRecordBridgeActor* AVdjmRecordBridgeActor::TryGetRecordBridgeActor(UWorld* worldContext)
@@ -817,7 +820,7 @@ void AVdjmRecordBridgeActor::OnBackBufferReady_RenderThread(SWindow& SlateWindow
 	}
 	
 	mNextFrameTime = Now + mFrameInterval;
-	
+	float deltaTime = mNextFrameTime - Now;
 	FVdjmRecordUnitParamContext recordUnitContext = {};
 	FRDGBuilder RDGBuilder(FRHICommandListExecutor::GetImmediateCommandList());
 	
@@ -840,6 +843,17 @@ void AVdjmRecordBridgeActor::OnBackBufferReady_RenderThread(SWindow& SlateWindow
 	//newPayload.LogString.Appendf(TEXT("{{ OnBackBufferReady_RenderThread - Captured BackBuffer Texture \n"));
 	
 	mRecordPipeline->ExecuteRecordPipeline(recordUnitContext, newPayload);
+	
+	FVdjmEncoderStatus::DbcGameThreadTask([
+		weakThis = TWeakObjectPtr<AVdjmRecordBridgeActor>(this),
+		deltaTime]()
+	{
+		if (weakThis.IsValid())
+		{
+			weakThis->OnRecordTick.Broadcast(weakThis->GetRecordResource(),deltaTime);
+		}
+	});
+	
 	
 	UE_LOG(LogTemp, Verbose, TEXT("OnBackBufferReady_RenderThread - Finished Recording Frame"));
 	//newPayload.LogString.Appendf(TEXT(" }} OnBackBufferReady_RenderThread - Finished Recording Frame \n"));
@@ -890,7 +904,13 @@ void AVdjmRecordBridgeActor::BeginPlay()
 	if (mRecordConfigureDataAsset == nullptr)
 	{
 		mRecordConfigureDataAsset = TryGetRecordEnvConfigure();
+		if (mRecordConfigureDataAsset == nullptr)
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::BeginPlay - Failed to load record configure data asset."));
+			return;
+		}
 	}
+	
 	if (UWorld* worldContext = GetWorld())
 	{
 		if (mTargetPlayerController == nullptr)
