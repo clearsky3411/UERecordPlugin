@@ -191,6 +191,15 @@ void UVdjmRecordAndroidUnit::ReleaseUnit()
 
 bool UVdjmRecordAndroidUnit::DbcIsValidUnitInit() const
 {
+	if (Super::DbcIsValidUnitInit())
+	{
+		
+	}
+	else
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("UVdjmRecordAndroidUnit::DbcIsValidUnitInit - Super::DbcIsValidUnitInit() returned false."));
+		return false;
+	}
 	return Super::DbcIsValidUnitInit();
 }
 

@@ -557,11 +557,18 @@ struct VDJMRECORDER_API FVdjmRecordEnvPlatformInfo
 		return PipelineUnitClassMap.Find(stage);
 	}
 	
+	bool DbcIsValidResolution() const
+	{
+		return bUseAutoTargetPlatformResolution || (Resolution.X > 0 && Resolution.Y > 0);
+	}
 	bool DbcIsValid() const
 	{
 		return RecordResourceClass != nullptr
 			&& PipelineClass != nullptr
-			&& PipelineUnitClassMap.Num() > 0;
+			&& PipelineUnitClassMap.Num() > 0
+			&& BitrateMap .Num() > 0 
+			&& FrameRate > 0 
+			&& DbcIsValidResolution();
 	}
 };
 
@@ -590,6 +597,30 @@ public:
         }
         return nullptr;
     }
+	bool DbcGlobalRulesValid() const
+	{
+		return GlobalRules.MaxRecordDurationSeconds > 0.0f
+			&& GlobalRules.MinFrameRate > 0
+			&& GlobalRules.MaxFrameRate >= GlobalRules.MinFrameRate
+			&& GlobalRules.Numthreads.X > 0
+			&& GlobalRules.Numthreads.Y > 0
+			&& GlobalRules.Numthreads.Z > 0;
+	}
+	bool DbcPlatformInfoValid() const
+	{
+		for (const auto& pair : PlatformInfoMap)
+		{
+			if (not pair.Value.DbcIsValid())
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+	bool DbcIsValid() const
+	{
+		return DbcGlobalRulesValid() && DbcPlatformInfoValid();
+	}
 };
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
@@ -605,8 +636,8 @@ class VDJMRECORDER_API UVdjmRecordEnvCurrentInfo : public UObject
 {
 	GENERATED_BODY()
 public:
-	void InitializeCurrentEnvironment(AVdjmRecordBridgeActor* ownerBridge);
-
+	bool InitializeCurrentEnvironment(AVdjmRecordBridgeActor* ownerBridge);
+	
 	bool DbcIsValidCurrentInfo() const;
 	bool DbcValidCurrentInfoPipelines() const
 	{
@@ -682,6 +713,8 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FVdjmRecordInnerEvent,UVdjmRecordResource*);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmRecordTickEvent,UVdjmRecordResource*, recordResource, float, deltaTime);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVdjmRecordBridgeActorChainInitEvent, AVdjmRecordBridgeActor*, bridgeActor, int32, prevInitResult, int32, currentInitResult);
+
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 						UVdjmRecordEncoderUnit 		
@@ -741,6 +774,13 @@ public:
 		return FString();
 	}
 	
+	UFUNCTION(BlueprintCallable)
+	void CriticalErrorStop(const FString& errorMessage)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Critical Error: %s"), *errorMessage);
+		StopRecordingInternal();
+	}
+	
 	/**
 	* @param SlateWindow : 녹화 대상이 되는 윈도우. 보통은 게임 뷰포트가 될 것임.
 	* @param  BackBuffer : 녹화 대상 윈도우의 백버퍼 텍스처. 이 텍스처를 기반으로 녹화 유닛들이 필요한 작업들을 수행하게 될 것임. 즉 이게 inputTexture
@@ -793,7 +833,7 @@ public:
 	static EVdjmRecordEnvPlatform GetTargetPlatform();
 	
 	void PostResourceInit(UVdjmRecordResource* resource);
-	bool BeginInit();
+	int32 BeginInit();
 
 	UVdjmRecordEnvDataAsset* GetRecordEnvConfigureDataAsset()
 	{
@@ -839,15 +879,41 @@ public:
 	UPROPERTY(BlueprintAssignable,EditAnywhere)
 	FVdjmRecordEvent OnRecordError;
 	
+	UPROPERTY(BlueprintAssignable,EditAnywhere)
+	FVdjmRecordBridgeActorChainInitEvent OnChainInitEvent;
+	
 	FSceneViewport* mTargetViewport;
 	TWeakObjectPtr<APlayerController> mTargetPlayerController;
 
 	UPROPERTY(EditAnywhere)
 	EVdjmRecordBitrateType SelectedBitrateType = EVdjmRecordBitrateType::EDefault;
 
-
+	bool TryResolveViewportSize(FIntPoint& OutSize) const;
 protected:
 	virtual void BeginPlay() override;
+	
+	static struct FVdjmChainInitSemantics
+	{
+		static constexpr int32 InitErrorEnd = -2;
+		static constexpr int32 InitError = -1;
+		static constexpr int32 InitializeWorldParts = 0;
+		static constexpr int32 InitializeCurrentEnvironment = 1;
+		static constexpr int32 CreateRecordResource = 2;
+		static constexpr int32 Complete = 3;
+	} ChainInitSemantics; 
+	
+	bool CheckChainCount(const FString& errorMsg);
+	void OnTryChainInitNext(int32 nextState);
+	void ChainInit_InitializeWorldParts();
+	void ChainInit_InitializeCurrentEnvironment();
+	void ChainInit_CreateRecordResource();
+	
+	UPROPERTY()
+	int32 mChainTryInitCount = 8;
+	UPROPERTY()
+	int32 mCurrentChainInitState = 0;
+	UPROPERTY()
+	FTimerHandle mChainInitTimerHandle;
 	
 	UPROPERTY()
 	FVdjmRecordGlobalRules mGlobalRules;

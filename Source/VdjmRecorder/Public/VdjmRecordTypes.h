@@ -231,6 +231,7 @@ struct VDJMRECORDER_API FVdjmEncoderStatus
 		);
 		}
 	}
+	
 };
 
 

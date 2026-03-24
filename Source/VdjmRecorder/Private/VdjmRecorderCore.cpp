@@ -10,7 +10,8 @@
 #include "VdjmRecordTypes.h"
 #include "HAL/FileManager.h"
 #include "VdjmRecoderEncoderImpl.h"
-
+#include "DSP/AudioDebuggingUtilities.h"
+#include "Slate/SceneViewport.h"
 
 
 /*
@@ -365,7 +366,7 @@ EPixelFormat UVdjmRecordDescriptor::GetRenderTargetPixelFormat() const
 	class UVdjmRecordEnvDataAsset :public UPrimaryDataAsset
 	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 */
-void UVdjmRecordEnvCurrentInfo::InitializeCurrentEnvironment(AVdjmRecordBridgeActor* ownerBridge)
+bool UVdjmRecordEnvCurrentInfo::InitializeCurrentEnvironment(AVdjmRecordBridgeActor* ownerBridge)
 {
 	if (ownerBridge && ownerBridge->DbcValidConfigureDataAsset())
 	{
@@ -378,15 +379,23 @@ void UVdjmRecordEnvCurrentInfo::InitializeCurrentEnvironment(AVdjmRecordBridgeAc
 			mCurrentGlobalRules = ownerBridge->GetCurrentGlobalRules();
 			if (perPlatform->bUseAutoTargetPlatformResolution)
 			{
-				mCurrentResolution = FIntPoint(
-					GEngine->GameViewport->Viewport->GetSizeXY().X,
-					GEngine->GameViewport->Viewport->GetSizeXY().Y);
-				UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordEnvCurrentInfo::InitializeCurrentEnvironment - Using auto target platform resolution : (%d, %d)"), mCurrentResolution.X, mCurrentResolution.Y);
+				FIntPoint outputResolution = FIntPoint::ZeroValue;
+				if (ownerBridge->TryResolveViewportSize(outputResolution))
+				{
+					mCurrentResolution = outputResolution;
+				}
+				else
+				{
+					mCurrentResolution = FIntPoint(1920,1080);
+					ownerBridge->CriticalErrorStop(TEXT("Failed to resolve viewport size for recording. Recording cannot proceed."));
+					return false;
+				}
 			}
 			else
 			{
 				mCurrentResolution = perPlatform->Resolution;
 			}
+			
 			mCurrentFrameRate = perPlatform->FrameRate;
 			mCurrentPixelFormat = perPlatform->PixelFormat;
 			mAllBitrateMap = perPlatform->BitrateMap;
@@ -406,6 +415,7 @@ void UVdjmRecordEnvCurrentInfo::InitializeCurrentEnvironment(AVdjmRecordBridgeAc
 				// TODO
 			}
 			mCurrentFilePath = defualtFilePath;
+			return true;
 		}
 		else
 		{
@@ -416,7 +426,9 @@ void UVdjmRecordEnvCurrentInfo::InitializeCurrentEnvironment(AVdjmRecordBridgeAc
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecorderCore::Initialize - ownerBridge is null."));
 	}
+	return false;
 }
+
 
 bool UVdjmRecordEnvCurrentInfo::DbcIsValidCurrentInfo() const
 {
@@ -861,7 +873,7 @@ void AVdjmRecordBridgeActor::OnBackBufferReady_RenderThread(SWindow& SlateWindow
 		}
 	});
 	
-	
+	RDGBuilder.Execute(); 
 	UE_LOG(LogTemp, Verbose, TEXT("OnBackBufferReady_RenderThread - Finished Recording Frame"));
 	//newPayload.LogString.Appendf(TEXT(" }} OnBackBufferReady_RenderThread - Finished Recording Frame \n"));
 }
@@ -927,7 +939,7 @@ void AVdjmRecordBridgeActor::PostResourceInit(UVdjmRecordResource* resource)
 	}
 }
 
-bool AVdjmRecordBridgeActor::BeginInit()
+int32 AVdjmRecordBridgeActor::BeginInit()
 {
 	UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::BeginPlay - BeginPlay started. Attempting to load record configure data asset."));
 	if (mRecordConfigureDataAsset == nullptr)
@@ -936,7 +948,7 @@ bool AVdjmRecordBridgeActor::BeginInit()
 		if (mRecordConfigureDataAsset == nullptr)
 		{
 			UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::BeginPlay - Failed to load record configure data asset."));
-			return false;
+			return -1;
 		}
 	}
 	
@@ -956,7 +968,12 @@ bool AVdjmRecordBridgeActor::BeginInit()
 			{
 				//	DataAsset 을 넣어서 CurrentEnvInfo 가 만들어지도록 한다.
 				mCurrentEnvInfo = NewObject<UVdjmRecordEnvCurrentInfo>(this,UVdjmRecordEnvCurrentInfo::StaticClass());
-				mCurrentEnvInfo->InitializeCurrentEnvironment(this);
+				if (not mCurrentEnvInfo->InitializeCurrentEnvironment(this))
+				{
+					
+					//OnTryChainInitNext(TODO);
+					return 0;
+				}
 			}
 		
 			if (mRecordResource == nullptr)
@@ -975,9 +992,9 @@ bool AVdjmRecordBridgeActor::BeginInit()
 				{
 					mRecordResource->InitializeResource(this);
 					PostResourceInit(mRecordResource);
+					
 					UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::BeginPlay - Record resource initialized immediately without waiting for lazy post-initialize check."));
 				}
-				
 			}
 		}
 		else
@@ -988,17 +1005,231 @@ bool AVdjmRecordBridgeActor::BeginInit()
 	return DbcValidInitializeComplete();
 }
 
+bool AVdjmRecordBridgeActor::TryResolveViewportSize(FIntPoint& OutSize) const
+{
+	OutSize = FIntPoint::ZeroValue;
+	if (mTargetViewport)
+	{
+		const FIntPoint Size = mTargetViewport->GetSizeXY();
+		if (Size.X > 0 && Size.Y > 0)
+		{
+			OutSize = Size;
+			return true;
+		}
+	}
+	if (const UWorld* World = GetWorld())
+	{
+		if (UGameViewportClient* ViewportClient = World->GetGameViewport())
+		{
+			if (FViewport* Viewport = ViewportClient->Viewport)
+			{
+				const FIntPoint Size = Viewport->GetSizeXY();
+				if (Size.X > 0 && Size.Y > 0)
+				{
+					OutSize = Size;
+					return true;
+				}
+			}
+		}
+	}
+	if (GEngine && GEngine->GameViewport && GEngine->GameViewport->Viewport)
+	{
+		const FIntPoint Size = GEngine->GameViewport->Viewport->GetSizeXY();
+		if (Size.X > 0 && Size.Y > 0)
+		{
+			OutSize = Size;
+			return true;
+		}
+	}
+	return false;
+}
+
 void AVdjmRecordBridgeActor::BeginPlay()
 {
 	Super::BeginPlay();
-	if (BeginInit())
+	int32 result = BeginInit();
+	if (result == 1)
 	{
 		UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::BeginPlay - Initialization successful."));
+	}
+	else if (result == 0)
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("AVdjmRecordBridgeActor::BeginPlay - Initialization completed with warnings. Check previous logs for details."));
 	}
 	else
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::BeginPlay - Initialization failed. Check previous logs for details."));
 	}
+}
+
+void AVdjmRecordBridgeActor::OnTryChainInitNext(int32 nextState)
+{
+	int32 prevState = mCurrentChainInitState;
+	mCurrentChainInitState = nextState;
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("OnTryChainInitNext - Transitioning from state %d to state %d"), prevState, mCurrentChainInitState);
+	if (mChainInitTimerHandle.IsValid())
+	{
+		GetWorld()->GetTimerManager().ClearTimer(mChainInitTimerHandle);
+	}
+	
+	--mChainTryInitCount;
+	
+	if (mChainTryInitCount < 1)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("OnTryChainInit - Exceeded maximum retry attempts. Current state: %d"), mCurrentChainInitState);
+		return;
+	}
+	UWorld* worldContext = GetWorld();
+	switch (mCurrentChainInitState)
+	{
+	case -2://	eof
+		
+		break;
+	case -1://	error
+		
+		break;
+	case 0://	try ChainInit_InitializeWorldParts
+		mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_InitializeWorldParts);
+		OnChainInitEvent.Broadcast(this,prevState,mCurrentChainInitState);
+		break;
+	case 1://	try ChainInit_InitializeCurrentEnvironment
+		mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_InitializeCurrentEnvironment);
+		OnChainInitEvent.Broadcast(this,prevState,mCurrentChainInitState);
+
+		break;
+	case 2://	ChainInit_CreateRecordResource
+		mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_CreateRecordResource);
+		OnChainInitEvent.Broadcast(this,prevState,mCurrentChainInitState);
+
+		break;
+	default:
+		break;
+	}
+}
+
+bool AVdjmRecordBridgeActor::CheckChainCount(const FString& errorMsg)
+{
+	if (mChainTryInitCount < 1)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("CheckChainCount - %s. Current state: %d"), *errorMsg, mCurrentChainInitState);
+		OnTryChainInitNext(FVdjmChainInitSemantics::InitErrorEnd);
+		return true;
+	}
+	return false;
+}
+
+void AVdjmRecordBridgeActor::ChainInit_InitializeWorldParts()
+{
+	if (CheckChainCount(TEXT("ChainInit_InitializeWorldParts - Exceeded maximum retry attempts while initializing world parts.")))
+	{
+		return;
+	}
+	
+	if (UWorld* worldContext = GetWorld())
+	{
+		mTargetPlayerController = UGameplayStatics::GetPlayerController(worldContext,0);
+		mTargetViewport = worldContext->GetGameViewport()->GetGameViewport();
+		
+		if (mTargetViewport == nullptr || mTargetPlayerController == nullptr)
+		{
+			OnTryChainInitNext(FVdjmChainInitSemantics::InitializeWorldParts);
+			return;
+		}
+		OnTryChainInitNext(FVdjmChainInitSemantics::InitializeCurrentEnvironment);
+	}
+	else
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_InitializeCurrentEnvironment - Failed to get world context."));
+		OnTryChainInitNext(FVdjmChainInitSemantics::InitError);
+	}
+}
+
+void AVdjmRecordBridgeActor::ChainInit_InitializeCurrentEnvironment()
+{
+	if (CheckChainCount(TEXT("ChainInit_InitializeCurrentEnvironment - Exceeded maximum retry attempts while initializing current environment.")))
+	{
+		return;
+	}
+	
+	if (FVdjmRecordEnvPlatformInfo* platformInfo = mRecordConfigureDataAsset->GetPlatformInfo(GetTargetPlatform()))
+	{
+		if (mCurrentEnvInfo == nullptr)
+		{
+			//	DataAsset 을 넣어서 CurrentEnvInfo 가 만들어지도록 한다.
+			mCurrentEnvInfo = NewObject<UVdjmRecordEnvCurrentInfo>(this,UVdjmRecordEnvCurrentInfo::StaticClass());
+			
+		}
+		
+		if (mCurrentEnvInfo->InitializeCurrentEnvironment(this))
+		{
+			//	이때는 무조건 mCurrentEnvInfo 가 존재함.
+			OnTryChainInitNext(FVdjmChainInitSemantics::CreateRecordResource);
+		}
+		else
+		{
+			OnTryChainInitNext(FVdjmChainInitSemantics::InitializeCurrentEnvironment);
+		}
+	}
+	else
+	{
+		if (not mRecordConfigureDataAsset->DbcIsValid())
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_InitializeCurrentEnvironment - Record configure data asset is not valid."));
+		}
+		if (platformInfo == nullptr)
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_InitializeCurrentEnvironment - No platform info found for target platform."));
+		}
+		OnTryChainInitNext(FVdjmChainInitSemantics::InitError);
+	}
+}
+
+void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
+{
+	if (CheckChainCount(TEXT("ChainInit_CreateRecordResource - Exceeded maximum retry attempts while creating record resource.")))
+	{
+		return;
+	}
+	FVdjmRecordEnvPlatformInfo* platformInfo = mRecordConfigureDataAsset->GetPlatformInfo(GetTargetPlatform());
+		
+	if (platformInfo == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordResource - No platform info found for target platform."));
+		OnTryChainInitNext(FVdjmChainInitSemantics::InitError);
+		return;
+	}
+	
+	if (mRecordResource == nullptr)
+	{
+		mRecordResource = NewObject<UVdjmRecordResource>(this,platformInfo->RecordResourceClass);
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordResource - Record resource instance created."));
+	}
+	
+	if (mRecordResource->IsLazyPostInitializeCheck())
+	{
+		mOnResourceTexturePoolInitializedHandle = mRecordResource->OnResourceTexturePoolInitializedFunc.AddUObject(this,&AVdjmRecordBridgeActor::PostResourceInit);
+		
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::BeginPlay - Record resource initialized with lazy post-initialize check. Waiting for texture pool initialization before post-initialize steps."));
+		mRecordResource->InitializeResource(this);
+	}
+	else
+	{
+		mRecordResource->InitializeResource(this);
+		/*
+		 * OriginResolution 
+		 * TextureResolution
+		 * FinalFrameRate
+		 * FinalBitrate
+		 * FinalFilePath 
+		 * 검증이 들어가야 할거같은데...
+		 * PostResourceInit 여기도 사실상 내꺼의 핵심인데, pipeline 초기화도 여기서 하고, record start 가능 여부도 여기서 체크하는게 맞는거같음. BeginPlay에서는 일단 resource init까지만 하고, PostResourceInit에서 pipeline init 하고 record start 가능 여부 체크해서 바로 start 하는걸로.
+		 */
+		PostResourceInit(mRecordResource);
+					
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::BeginPlay - Record resource initialized immediately without waiting for lazy post-initialize check."));
+	}
+	
+	
 }
 
 bool AVdjmRecordBridgeActor::DbcValidInitializeComplete() const
