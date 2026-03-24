@@ -555,6 +555,7 @@ FVdjmAndroidEncoderBackendVulkan::FVdjmAndroidEncoderBackendVulkan()
 bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow)
 {
 	//	config 저장, input window 저장, runtime handle 확보 및 초기화
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("FVdjmAndroidEncoderBackendVulkan::Init - start"));
 	if (!config.IsValidateEncoderArguments())
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderBackendVulkan::Init - invalid config"));

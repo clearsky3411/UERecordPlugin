@@ -195,6 +195,7 @@ public:
 	virtual void StopEncoder() override;
 	
 	virtual void TerminateEncoder() override;
+	static FString GetCurrentRHINameSafe();
 	
 	bool IsOpenGLRHI() const;
 	bool IsVulkanRHI() const;

@@ -13,6 +13,8 @@
 #include <GLES3/gl3.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include "Misc/HardwareInfo.h"
+#include "RHI.h"
 
 #include "VdjmAndroid/VdjmAndroidEncoderBackendOpenGL.h"
 #include "VdjmAndroid/VdjmAndroidEncoderBackendVulkan.h"
@@ -546,6 +548,7 @@ FVdjmAndroidEncoderImpl::~FVdjmAndroidEncoderImpl()
 
 bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, int32 width, int32 height, int32 bitrate,int32 framerate)
 {
+	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidEncoderImpl::InitializeEncoder - outputFilePath: %s, width: %d, height: %d, bitrate: %d, framerate: %d"), *outputFilePath, width, height, bitrate, framerate);
 	//	생성을 위한곳
 	if (not mRecordSession.IsValid() || mRecordSession == nullptr)
 	{
@@ -561,7 +564,8 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, i
 	FVdjmAndroidEncoderConfigure config = FVdjmAndroidEncoderConfigure(width, height, bitrate, framerate,outputFilePath);
 	config.MimeType = VdjmMimeAvc;
 	config.VideoIntervalSec = 1;
-	config.GraphicBackend = IsVulkanRHI() ? EVdjmAndroidGraphicBackend::EVulkan : (IsOpenGLRHI() ? EVdjmAndroidGraphicBackend::EOpenGL : EVdjmAndroidGraphicBackend::EUnknown);
+	config.GraphicBackend = IsVulkanRHI() ? 
+	EVdjmAndroidGraphicBackend::EVulkan : (IsOpenGLRHI() ? EVdjmAndroidGraphicBackend::EOpenGL : EVdjmAndroidGraphicBackend::EUnknown);
 	
 	return mRecordSession->Initialize(config);
 }
@@ -622,23 +626,47 @@ void FVdjmAndroidEncoderImpl::TerminateEncoder()
 	mRecordSession.Reset();
 }
 
+FString FVdjmAndroidEncoderImpl::GetCurrentRHINameSafe()
+{
+	FString RHIName;
+
+	RHIName = FApp::GetGraphicsRHI();
+	if (!RHIName.IsEmpty())
+	{
+		return RHIName;
+	}
+
+	RHIName = FHardwareInfo::GetHardwareInfo(NAME_RHI);
+	if (!RHIName.IsEmpty())
+	{
+		return RHIName;
+	}
+
+	if (GDynamicRHI != nullptr)
+	{
+		RHIName = GDynamicRHI->GetName();
+		if (!RHIName.IsEmpty())
+		{
+			return RHIName;
+		}
+	}
+
+	return TEXT("Unknown");
+}
+
 bool FVdjmAndroidEncoderImpl::IsOpenGLRHI() const
 {
-	if (GDynamicRHI == nullptr)
-	{
-		return false;
-	}
-	const FString RHIName = GDynamicRHI->GetName();
-	return RHIName.Contains(TEXT("OpenGL"), ESearchCase::IgnoreCase);
+	const FString RHIName = GetCurrentRHINameSafe();
+	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidEncoderImpl::IsOpenGLRHI - Current RHI Name: %s"), *RHIName);
+	return RHIName.Contains(TEXT("OpenGL"), ESearchCase::IgnoreCase)
+		|| RHIName.Contains(TEXT("OpenGLES"), ESearchCase::IgnoreCase)
+		|| RHIName.Contains(TEXT("GL"), ESearchCase::IgnoreCase);
 }
 
 bool FVdjmAndroidEncoderImpl::IsVulkanRHI() const
 {
-	if (GDynamicRHI == nullptr)
-	{
-		return false;
-	}
-	const FString RHIName = GDynamicRHI->GetName();
+	const FString RHIName = GetCurrentRHINameSafe();
+	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidEncoderImpl::IsVulkanRHI - Current RHI Name: %s"), *RHIName);
 	return RHIName.Contains(TEXT("Vulkan"), ESearchCase::IgnoreCase);
 }
 

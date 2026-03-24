@@ -180,7 +180,6 @@ void UVdjmRecordAndroidUnit::ExecuteUnit(const FVdjmRecordUnitParamContext& cont
 
 void UVdjmRecordAndroidUnit::ReleaseUnit()
 {
-	Super::ReleaseUnit();
 	if (mAndroidEncoder.IsValid())
 	{
 		mAndroidEncoder->TerminateEncoder();
