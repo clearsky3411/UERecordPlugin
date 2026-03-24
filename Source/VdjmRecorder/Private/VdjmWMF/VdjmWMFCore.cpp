@@ -16,8 +16,7 @@
 §	↓		class UVdjmRecordWMFResource : public UVdjmRecordResource			↓
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 */
-void UVdjmRecordWMFResource::InitializeTexturePool(FIntPoint textureResolution, EPixelFormat finalPixelFormat,
-	const int32 poolSize)
+void UVdjmRecordWMFResource::InitializeTexturePool(FIntPoint textureResolution, EPixelFormat finalPixelFormat,	const int32 poolSize)
 {
 	if (IsInRenderingThread())
 	{
@@ -34,10 +33,9 @@ void UVdjmRecordWMFResource::InitializeTexturePool(FIntPoint textureResolution, 
 		
 		FVdjmEncoderStatus::DbcGameThreadTask([weakThis = TWeakObjectPtr<UVdjmRecordResource>(this)]()
 		{
-			if (weakThis.IsValid())
+			if (weakThis.IsValid() && weakThis->OwnerBridgeActor.IsValid())
 			{
-				weakThis->OnResourceTexturePoolInitializedFunc.Broadcast(weakThis.Get());
-				//weakThis->OwnerBridgeActor->PostResourceInit(weakThis.Get());
+				weakThis->OwnerBridgeActor->OnResourceReadyForPostInit(weakThis.Get());
 			}
 		});
 	}

@@ -501,7 +501,7 @@ public:
 	//UPROPERTY(BlueprintAssignable)
 	//FVdjmRecordEvent OnResourceTexturePoolInitialized;
 	FVdjmRecordChangeStatusEvent OnChangeResourceStatusFunc;
-	FVdjmRecordCallBackEvent OnResourceTexturePoolInitializedFunc;
+	FVdjmRecordCallBackEvent OnResourceReadyForPostInit;
 	
 	FIntVector	CachedGroupCount;
 	FIntPoint	OriginResolution;
@@ -713,7 +713,7 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FVdjmRecordInnerEvent,UVdjmRecordResource*);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmRecordTickEvent,UVdjmRecordResource*, recordResource, float, deltaTime);
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVdjmRecordBridgeActorChainInitEvent, AVdjmRecordBridgeActor*, bridgeActor, int32, prevInitResult, int32, currentInitResult);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVdjmRecordBridgeActorChainInitEvent, AVdjmRecordBridgeActor*, bridgeActor, EVdjmRecordBridgeInitStep, prevInitstep, EVdjmRecordBridgeInitStep, currentInitStep);
 
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
@@ -745,6 +745,168 @@ protected:
 	↓		class  UVdjmRecordFileSaver : public UObject		↓
 	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 */
+
+namespace VdjmRecorderValidation
+{
+	static bool DbcValidateResolution(
+		const FIntPoint& InResolution,
+		FIntPoint& OutSafeResolution,
+		const TCHAR* DebugOwner)
+	{
+		OutSafeResolution = FIntPoint::ZeroValue;
+
+		if (InResolution.X <= 0 || InResolution.Y <= 0)
+		{
+			UE_LOG(LogVdjmRecorderCore, Error,
+				TEXT("%s - Invalid resolution. X=%d Y=%d"),
+				DebugOwner,
+				InResolution.X,
+				InResolution.Y);
+			return false;
+		}
+
+		// 영상 인코더/서피스 계열에서 짝수 해상도를 요구하는 경우가 많으므로 방어적으로 보정
+		const int32 SafeX = FMath::Max(2, InResolution.X & ~1);
+		const int32 SafeY = FMath::Max(2, InResolution.Y & ~1);
+
+		if (SafeX <= 0 || SafeY <= 0)
+		{
+			UE_LOG(LogVdjmRecorderCore, Error,
+				TEXT("%s - Safe resolution collapsed to invalid value. X=%d Y=%d"),
+				DebugOwner,
+				SafeX,
+				SafeY);
+			return false;
+		}
+
+		OutSafeResolution = FIntPoint(SafeX, SafeY);
+		return true;
+	}
+
+	static bool DbcValidateBitrate(
+		const int32 InBitrate,
+		int32& OutSafeBitrate,
+		const TCHAR* DebugOwner)
+	{
+		OutSafeBitrate = 0;
+
+		if (InBitrate <= 0)
+		{
+			UE_LOG(LogVdjmRecorderCore, Error,
+				TEXT("%s - Invalid bitrate. Bitrate=%d"),
+				DebugOwner,
+				InBitrate);
+			return false;
+		}
+
+		// 지나치게 작은 값/비정상 큰 값 방어
+		constexpr int32 MinBitrate = 100000;      // 100 Kbps
+		constexpr int32 MaxBitrate = 100000000;   // 100 Mbps
+
+		if (InBitrate < MinBitrate || InBitrate > MaxBitrate)
+		{
+			UE_LOG(LogVdjmRecorderCore, Error,
+				TEXT("%s - Bitrate out of safe range. Bitrate=%d Range=[%d,%d]"),
+				DebugOwner,
+				InBitrate,
+				MinBitrate,
+				MaxBitrate);
+			return false;
+		}
+
+		OutSafeBitrate = InBitrate;
+		return true;
+	}
+
+	static bool DbcValidateOutputFilePath(
+		const FString& InFilePath,
+		FString& OutSafeFilePath,
+		const TCHAR* DebugOwner)
+	{
+		OutSafeFilePath.Reset();
+
+		FString SafePath = InFilePath;
+		SafePath.TrimStartAndEndInline();
+
+		if (SafePath.IsEmpty())
+		{
+			UE_LOG(LogVdjmRecorderCore, Error,
+				TEXT("%s - Output file path is empty."),
+				DebugOwner);
+			return false;
+		}
+
+		FPaths::NormalizeFilename(SafePath);
+
+		if (FPaths::IsRelative(SafePath))
+		{
+			UE_LOG(LogVdjmRecorderCore, Error,
+				TEXT("%s - Output file path is relative. Path=%s"),
+				DebugOwner,
+				*SafePath);
+			return false;
+		}
+
+		const FString DirectoryPath = FPaths::GetPath(SafePath);
+		if (DirectoryPath.IsEmpty())
+		{
+			UE_LOG(LogVdjmRecorderCore, Error,
+				TEXT("%s - Output file path has no parent directory. Path=%s"),
+				DebugOwner,
+				*SafePath);
+			return false;
+		}
+
+		if (!IFileManager::Get().DirectoryExists(*DirectoryPath))
+		{
+			UE_LOG(LogVdjmRecorderCore, Error,
+				TEXT("%s - Output directory does not exist. Directory=%s"),
+				DebugOwner,
+				*DirectoryPath);
+			return false;
+		}
+
+		const FString CleanFilename = FPaths::GetCleanFilename(SafePath);
+		if (CleanFilename.IsEmpty())
+		{
+			UE_LOG(LogVdjmRecorderCore, Error,
+				TEXT("%s - Output file name is empty. Path=%s"),
+				DebugOwner,
+				*SafePath);
+			return false;
+		}
+
+		// 확장자 강제 확인
+		const FString Extension = FPaths::GetExtension(SafePath, true).ToLower();
+		if (Extension != TEXT(".mp4"))
+		{
+			UE_LOG(LogVdjmRecorderCore, Error,
+				TEXT("%s - Invalid output extension. Expected=.mp4 Path=%s"),
+				DebugOwner,
+				*SafePath);
+			return false;
+		}
+
+		// Windows 금지 문자 방어. Android에서도 파일명 오염 방지용으로 그대로 써도 무방
+		static const TCHAR* InvalidChars = TEXT("<>:\"|?*");
+		for (TCHAR Ch : CleanFilename)
+		{
+			if (FCString::Strchr(InvalidChars, Ch) != nullptr)
+			{
+				UE_LOG(LogVdjmRecorderCore, Error,
+					TEXT("%s - Output file name contains invalid character '%c'. File=%s"),
+					DebugOwner,
+					Ch,
+					*CleanFilename);
+				return false;
+			}
+		}
+
+		OutSafeFilePath = SafePath;
+		return true;
+	}
+}
+
 UCLASS(Blueprintable)
 class VDJMRECORDER_API AVdjmRecordBridgeActor : public AActor
 {
@@ -815,7 +977,7 @@ public:
 	
 	bool DbcRecordStartable() const
 	{
-		return DbcRecordingPossible() && not bIsRecording;
+		return bValidateInitializeComplete && DbcRecordingPossible() && not bIsRecording;
 	}
 
 	bool DbcValidInitializeComplete() const;
@@ -827,7 +989,9 @@ public:
     }
 	
 	void StopRecordingInternal();
-	
+	UFUNCTION(BlueprintCallable)
+	void OnResourceReadyForPostInit(UVdjmRecordResource* resource);
+
 
 	//	Platform Branch Function
 	static EVdjmRecordEnvPlatform GetTargetPlatform();
@@ -892,28 +1056,23 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	
-	static struct FVdjmChainInitSemantics
-	{
-		static constexpr int32 InitErrorEnd = -2;
-		static constexpr int32 InitError = -1;
-		static constexpr int32 InitializeWorldParts = 0;
-		static constexpr int32 InitializeCurrentEnvironment = 1;
-		static constexpr int32 CreateRecordResource = 2;
-		static constexpr int32 Complete = 3;
-	} ChainInitSemantics; 
-	
 	bool CheckChainCount(const FString& errorMsg);
-	void OnTryChainInitNext(int32 nextState);
+	void OnTryChainInitNext(EVdjmRecordBridgeInitStep nextStep);
 	void ChainInit_InitializeWorldParts();
 	void ChainInit_InitializeCurrentEnvironment();
 	void ChainInit_CreateRecordResource();
+	void ChainInit_PostResourceInitResolve();
+	void ChainInit_CreateRecordPipeline();
+	void ChainInit_FinalizeInitialization();
 	
 	UPROPERTY()
 	int32 mChainTryInitCount = 8;
-	UPROPERTY()
-	int32 mCurrentChainInitState = 0;
+
 	UPROPERTY()
 	FTimerHandle mChainInitTimerHandle;
+	UPROPERTY()
+	EVdjmRecordBridgeInitStep mCurrentInitStep = EVdjmRecordBridgeInitStep::EInitializeWorldParts;
+	EVdjmRecordBridgeInitStep mRetryStep = EVdjmRecordBridgeInitStep::EInitErrorEnd;
 	
 	UPROPERTY()
 	FVdjmRecordGlobalRules mGlobalRules;
@@ -928,6 +1087,7 @@ protected:
 	FDelegateHandle mOnResourceTexturePoolInitializedHandle;
 	
 	bool bIsRecording = false;
+	bool bValidateInitializeComplete = false
 
 	UPROPERTY()
 	TObjectPtr<UVdjmRecordEnvDataAsset> mRecordConfigureDataAsset;

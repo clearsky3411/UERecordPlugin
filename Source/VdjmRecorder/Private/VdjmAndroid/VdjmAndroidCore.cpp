@@ -22,7 +22,7 @@ void UVdjmRecordAndroidResource::InitializeResource(AVdjmRecordBridgeActor* owne
 {
 	Super::InitializeResource(ownerBridge);
 	UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidResource::InitializeResource - Resource initialized for bridge actor: %s"), *ownerBridge->GetName());
-	OnResourceTexturePoolInitializedFunc.Broadcast(this);	//	다른거 실행할 필요도 없이 그냥 호출.
+	OnResourceReadyForPostInit.Broadcast(this);	//	다른거 실행할 필요도 없이 그냥 호출.
 }
 
 void UVdjmRecordAndroidResource::ReleaseResources()

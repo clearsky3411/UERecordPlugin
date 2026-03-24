@@ -128,6 +128,20 @@ enum class EVdjmRecordEnvPlatform : uint8
 	EDefault     UMETA(DisplayName = "Default / Fallback")
 };
 
+UENUM(BlueprintType)
+enum class EVdjmRecordBridgeInitStep : uint8
+{
+	EInitErrorEnd,
+	EInitError,
+	EInitializeWorldParts,
+	EInitializeCurrentEnvironment,
+	ECreateRecordResource,
+	EPostResourceInitResolve,
+	ECreatePipelines,
+	EFinalizeInitialization,
+	EComplete,
+};
+
 USTRUCT(Blueprintable)
 struct VDJMRECORDER_API FVdjmEncoderStatus
 {
