@@ -1038,6 +1038,7 @@ void AVdjmRecordBridgeActor::OnTryChainInitNext(EVdjmRecordBridgeInitStep nextSt
 	
 	if (UWorld* worldContext = GetWorld())
 	{
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("OnTryChainInitNext - Successfully obtained world context for step { %s }"), GetInitStepName(mCurrentInitStep));
 		switch (mCurrentInitStep){
 		case EVdjmRecordBridgeInitStep::EInitErrorEnd:
 			break;
@@ -1132,6 +1133,27 @@ void AVdjmRecordBridgeActor::ChainInit_InitializeCurrentEnvironment()
 {
 	if (CheckChainCount(TEXT("ChainInit_InitializeCurrentEnvironment - Exceeded maximum retry attempts while initializing current environment.")))
 	{
+		return;
+	}
+	if ( mRecordConfigureDataAsset == nullptr)
+	{
+		mRecordConfigureDataAsset = TryGetRecordEnvConfigure();
+		if (mRecordConfigureDataAsset == nullptr)
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_InitializeCurrentEnvironment - Failed to load record configure data asset."));
+			OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
+			return;
+		}
+		else
+		{
+			UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_InitializeCurrentEnvironment - Record configure data asset loaded successfully."));
+		}
+	}
+	
+	if (mRecordConfigureDataAsset == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_InitializeCurrentEnvironment - Record configure data asset is null after loading attempt."));
+		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitErrorEnd);
 		return;
 	}
 	
