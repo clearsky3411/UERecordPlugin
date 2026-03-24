@@ -990,6 +990,21 @@ bool AVdjmRecordBridgeActor::TryResolveViewportSize(FIntPoint& OutSize) const
 	return false;
 }
 
+const TCHAR* AVdjmRecordBridgeActor::GetInitStepName(EVdjmRecordBridgeInitStep step)
+{
+	switch (step)
+	{
+	case EVdjmRecordBridgeInitStep::EInitializeStart: return TEXT("InitializeStart");
+	case EVdjmRecordBridgeInitStep::EInitializeWorldParts: return TEXT("InitializeWorldParts");
+	case EVdjmRecordBridgeInitStep::EInitializeCurrentEnvironment: return TEXT("InitializeCurrentEnvironment");
+	case EVdjmRecordBridgeInitStep::ECreateRecordResource: return TEXT("CreateRecordResource");
+	case EVdjmRecordBridgeInitStep::EPostResourceInitResolve: return TEXT("PostResourceInitResolve");
+	case EVdjmRecordBridgeInitStep::ECreatePipelines: return TEXT("ECreatePipelines");
+	case EVdjmRecordBridgeInitStep::EFinalizeInitialization: return TEXT("FinalizeInitialization");
+	default: return TEXT("Unknown");
+	}
+}
+
 void AVdjmRecordBridgeActor::BeginPlay()
 {
 	Super::BeginPlay();
@@ -1001,56 +1016,68 @@ void AVdjmRecordBridgeActor::OnTryChainInitNext(EVdjmRecordBridgeInitStep nextSt
 	EVdjmRecordBridgeInitStep prevInitStep = mCurrentInitStep;
 	mCurrentInitStep = nextStep;
 	
-	UE_LOG(LogVdjmRecorderCore, Log, TEXT("OnTryChainInitNext - Transitioning from step %d to step %d"), prevInitStep, mCurrentInitStep);
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("OnTryChainInitNext - Transitioning from step { %s } to step { %s }"), GetInitStepName(prevInitStep), GetInitStepName(mCurrentInitStep));
 	
 	if (mChainInitTimerHandle.IsValid())
 	{
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("OnTryChainInitNext - Clearing existing timer for step { %s }"), GetInitStepName(prevInitStep));
 		GetWorld()->GetTimerManager().ClearTimer(mChainInitTimerHandle);
 	}
 	
 	if (mChainTryInitCount < 1)
 	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("OnTryChainInitNext - Exceeded maximum retry attempts. Transitioning to EInitErrorEnd."));
 		mCurrentInitStep = EVdjmRecordBridgeInitStep::EInitErrorEnd;
 		return;
 	}
 	else
 	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("OnTryChainInitNext - Attempting step { %s }. Remaining attempts: %d"), GetInitStepName(mCurrentInitStep), mChainTryInitCount);
 		mRetryStep = prevInitStep;
 	}
 	
-	UWorld* worldContext = GetWorld();
-	switch (mCurrentInitStep){
-	case EVdjmRecordBridgeInitStep::EInitErrorEnd:
-		
-		break;
-	case EVdjmRecordBridgeInitStep::EInitError:
-		--mChainTryInitCount;
-		OnTryChainInitNext(mRetryStep);
-		break;
-	case EVdjmRecordBridgeInitStep::EInitializeWorldParts:
-		mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_InitializeWorldParts);
-		break;
-	case EVdjmRecordBridgeInitStep::EInitializeCurrentEnvironment:
-		mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_InitializeCurrentEnvironment);
-		break;
-	case EVdjmRecordBridgeInitStep::ECreateRecordResource:
-		mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_CreateRecordResource);
-		break;
-	case EVdjmRecordBridgeInitStep::EPostResourceInitResolve:
-		mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_PostResourceInitResolve);
-		break;
-	case EVdjmRecordBridgeInitStep::ECreatePipelines:
-		mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_CreateRecordPipeline);
-		break;
-	case EVdjmRecordBridgeInitStep::EFinalizeInitialization:
-		mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_FinalizeInitialization);
-		break;
-	case EVdjmRecordBridgeInitStep::EComplete:
-		bValidateInitializeComplete = true;
-		mChainInitTimerHandle.Invalidate();
-		break;
+	if (UWorld* worldContext = GetWorld())
+	{
+		switch (mCurrentInitStep){
+		case EVdjmRecordBridgeInitStep::EInitErrorEnd:
+			break;
+		case EVdjmRecordBridgeInitStep::EInitError:
+			--mChainTryInitCount;
+			OnTryChainInitNext(mRetryStep);
+			break;
+		case EVdjmRecordBridgeInitStep::EInitializeStart:
+			break;
+		case EVdjmRecordBridgeInitStep::EInitializeWorldParts:
+			mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_InitializeWorldParts);
+			break;
+		case EVdjmRecordBridgeInitStep::EInitializeCurrentEnvironment:
+			mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_InitializeCurrentEnvironment);
+			break;
+		case EVdjmRecordBridgeInitStep::ECreateRecordResource:
+			mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_CreateRecordResource);
+			break;
+		case EVdjmRecordBridgeInitStep::EPostResourceInitResolve:
+			mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_PostResourceInitResolve);
+			break;
+		case EVdjmRecordBridgeInitStep::ECreatePipelines:
+			mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_CreateRecordPipeline);
+			break;
+		case EVdjmRecordBridgeInitStep::EFinalizeInitialization:
+			mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_FinalizeInitialization);
+			break;
+		case EVdjmRecordBridgeInitStep::EComplete:
+			bValidateInitializeComplete = true;
+			mChainInitTimerHandle.Invalidate();
+			break;
+		}
+		OnChainInitEvent.Broadcast(this,prevInitStep,mCurrentInitStep);
 	}
-	OnChainInitEvent.Broadcast(this,prevInitStep,mCurrentInitStep);
+	else
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("OnTryChainInitNext - Failed to get world context. Transitioning to EInitError."));
+		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
+	}
+	
 }
 
 bool AVdjmRecordBridgeActor::CheckChainCount(const FString& errorMsg)
@@ -1074,13 +1101,24 @@ void AVdjmRecordBridgeActor::ChainInit_InitializeWorldParts()
 	if (UWorld* worldContext = GetWorld())
 	{
 		mTargetPlayerController = UGameplayStatics::GetPlayerController(worldContext,0);
-		mTargetViewport = worldContext->GetGameViewport()->GetGameViewport();
+		if (UGameViewportClient* gameView = worldContext->GetGameViewport())
+		{
+			mTargetViewport = gameView->GetGameViewport();
+		}
+		else
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_InitializeWorldParts - Failed to get GameViewportClient from world context."));
+			OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
+			return;
+		}
 		
 		if (mTargetViewport == nullptr || mTargetPlayerController == nullptr)
 		{
-			OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitializeWorldParts);
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_InitializeWorldParts - Failed to initialize world parts. PlayerController or Viewport is null."));
+			OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 			return;
 		}
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_InitializeWorldParts - Successfully initialized world parts."));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitializeCurrentEnvironment);
 	}
 	else
@@ -1189,10 +1227,10 @@ void AVdjmRecordBridgeActor::ChainInit_PostResourceInitResolve()
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
-	int32 resolvFrameRate = 0;
-	if (VdjmRecorderValidation::DbcValidateBitrate( recordResource.FinalBitrate,resolvFrameRate,TEXT("ChainInit_PostResourceInitResolve - Invalid bitrate from record resource after initialization.")))
+	int32 resolveFrameRate = 0;
+	if (VdjmRecorderValidation::DbcValidateBitrate( recordResource.FinalBitrate,resolveFrameRate,TEXT("ChainInit_PostResourceInitResolve - Invalid bitrate from record resource after initialization.")))
 	{
-		recordResource.FinalBitrate = resolvFrameRate;
+		recordResource.FinalBitrate = resolveFrameRate;
 	}
 	else
 	{

@@ -1051,6 +1051,8 @@ public:
 	EVdjmRecordBitrateType SelectedBitrateType = EVdjmRecordBitrateType::EDefault;
 
 	bool TryResolveViewportSize(FIntPoint& OutSize) const;
+	static const TCHAR* GetInitStepName(EVdjmRecordBridgeInitStep step);
+
 protected:
 	virtual void BeginPlay() override;
 	
@@ -1069,8 +1071,8 @@ protected:
 	UPROPERTY()
 	FTimerHandle mChainInitTimerHandle;
 	UPROPERTY()
-	EVdjmRecordBridgeInitStep mCurrentInitStep = EVdjmRecordBridgeInitStep::EInitializeWorldParts;
-	EVdjmRecordBridgeInitStep mRetryStep = EVdjmRecordBridgeInitStep::EInitErrorEnd;
+	EVdjmRecordBridgeInitStep mCurrentInitStep = EVdjmRecordBridgeInitStep::EInitializeStart;
+	EVdjmRecordBridgeInitStep mRetryStep = EVdjmRecordBridgeInitStep::EInitializeStart;
 	
 	UPROPERTY()
 	FVdjmRecordGlobalRules mGlobalRules;

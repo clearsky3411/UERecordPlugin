@@ -133,6 +133,7 @@ enum class EVdjmRecordBridgeInitStep : uint8
 {
 	EInitErrorEnd,
 	EInitError,
+	EInitializeStart,
 	EInitializeWorldParts,
 	EInitializeCurrentEnvironment,
 	ECreateRecordResource,
@@ -141,6 +142,7 @@ enum class EVdjmRecordBridgeInitStep : uint8
 	EFinalizeInitialization,
 	EComplete,
 };
+
 
 USTRUCT(Blueprintable)
 struct VDJMRECORDER_API FVdjmEncoderStatus
