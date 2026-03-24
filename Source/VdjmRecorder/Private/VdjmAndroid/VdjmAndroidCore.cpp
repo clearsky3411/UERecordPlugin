@@ -118,27 +118,31 @@ bool UVdjmRecordAndroidUnit::InitializeUnit(UVdjmRecordResource* recordResource)
 	{
 		if (not mAndroidEncoder.IsValid())
 		{
+			UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidSurfacer::InitializeUnit - Initializing Android Encoder."));
 			mAndroidEncoder = CreatePlatformVideoEncoder();
+			
 			bool bSuccess = mAndroidEncoder->InitializeEncoder(
 				LinkedRecordResource->FinalFilePath,
 				LinkedRecordResource->OriginResolution.X,
 				LinkedRecordResource->OriginResolution.Y,
 				LinkedRecordResource->FinalBitrate,
 				LinkedRecordResource->FinalFrameRate);
+			
 			if (not bSuccess)
 			{
 				UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidSurfacer::InitializeUnit - Failed to initialize Android Encoder."));
 				mAndroidEncoder.Reset();
 				return false;
 			}
+			UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidSurfacer::InitializeUnit - Successfully initialized Android Encoder."));
 			if (AVdjmRecordBridgeActor* bridge = AVdjmRecordBridgeActor::TryGetRecordBridgeActor())
 			{
 				if (not mStartRecordPrepareHandle.IsValid())
 				{
+					UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidSurfacer::InitializeUnit - Binding RecordPrevStart to bridge's OnRecordPrevStartInner event."));
 					mStartRecordPrepareHandle = bridge->OnRecordPrevStartInner.AddUObject(this, &UVdjmRecordAndroidUnit::RecordPrevStart);
 				}
 			}
-			
 		}
 		return true;
 	}

@@ -13,7 +13,8 @@
 #include <GLES3/gl3.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include "Misc/HardwareInfo.h"
+
+#include "HardwareInfo.h"
 #include "RHI.h"
 
 #include "VdjmAndroid/VdjmAndroidEncoderBackendOpenGL.h"
@@ -148,6 +149,7 @@ bool FVdjmAndroidEncoderConfigure::IsValidateEncoderArguments() const
 	if (GraphicBackend == EVdjmAndroidGraphicBackend::EUnknown)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - GraphicBackend is unknown. Make sure to set it correctly for optimal performance."));
+		
 		return false;
 	}
 	
@@ -185,6 +187,16 @@ FVdjmAndroidRecordSession::~FVdjmAndroidRecordSession()
 
 bool FVdjmAndroidRecordSession::Initialize(const FVdjmAndroidEncoderConfigure& configure )
 {
+	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidRecordSession::Initialize - Initializing with OutputFilePath: %s, MimeType: %s, Resolution: %dx%d, Bitrate: %d, FPS: %d, I-Frame Interval: %d, GraphicBackend: %d"),
+		*configure.OutputFilePath,
+		*configure.MimeType,
+		configure.VideoWidth,
+		configure.VideoHeight,
+		configure.VideoBitrate,
+		configure.VideoFPS,
+		configure.VideoIntervalSec,
+		static_cast<int32>(configure.GraphicBackend));
+	
 	if (mInitialized )
 	{
 		return false;
@@ -206,7 +218,7 @@ bool FVdjmAndroidRecordSession::Start()
 	{
 		return false;
 	}
-	
+	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidRecordSession::Start - Starting recording session."));
 	mOutputFd = open(TCHAR_TO_UTF8(*mConfig.OutputFilePath), O_RDWR | O_CREAT | O_TRUNC, 0644);
 	if (mOutputFd < 0)
 	{
@@ -275,6 +287,7 @@ bool FVdjmAndroidRecordSession::Start()
 	
 	if (not mGraphicBackend.IsValid())
 	{
+		UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidRecordSession::Start - Creating graphic backend for %d"), static_cast<int32>(mConfig.GraphicBackend));
 		switch (mConfig.GraphicBackend)
 		{
 		case EVdjmAndroidGraphicBackend::EUnknown:
@@ -564,8 +577,11 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, i
 	FVdjmAndroidEncoderConfigure config = FVdjmAndroidEncoderConfigure(width, height, bitrate, framerate,outputFilePath);
 	config.MimeType = VdjmMimeAvc;
 	config.VideoIntervalSec = 1;
-	config.GraphicBackend = IsVulkanRHI() ? 
-	EVdjmAndroidGraphicBackend::EVulkan : (IsOpenGLRHI() ? EVdjmAndroidGraphicBackend::EOpenGL : EVdjmAndroidGraphicBackend::EUnknown);
+	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidEncoderImpl::InitializeEncoder - Determining graphic backend for RHI: %s"), *GetCurrentRHINameSafe());
+	config.GraphicBackend = 
+		IsVulkanRHI() ? EVdjmAndroidGraphicBackend::EVulkan : 
+	(IsOpenGLRHI() ? EVdjmAndroidGraphicBackend::EOpenGL : 
+		EVdjmAndroidGraphicBackend::EUnknown);
 	
 	return mRecordSession->Initialize(config);
 }
