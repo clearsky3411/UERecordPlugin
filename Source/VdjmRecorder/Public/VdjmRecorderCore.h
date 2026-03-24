@@ -991,14 +991,12 @@ public:
 	void StopRecordingInternal();
 	UFUNCTION(BlueprintCallable)
 	void OnResourceReadyForPostInit(UVdjmRecordResource* resource);
-
-
+	
 	//	Platform Branch Function
 	static EVdjmRecordEnvPlatform GetTargetPlatform();
 	
 	void PostResourceInit(UVdjmRecordResource* resource);
-	int32 BeginInit();
-
+	
 	UVdjmRecordEnvDataAsset* GetRecordEnvConfigureDataAsset()
 	{
 		return mRecordConfigureDataAsset;
@@ -1087,7 +1085,7 @@ protected:
 	FDelegateHandle mOnResourceTexturePoolInitializedHandle;
 	
 	bool bIsRecording = false;
-	bool bValidateInitializeComplete = false
+	bool bValidateInitializeComplete = false;
 
 	UPROPERTY()
 	TObjectPtr<UVdjmRecordEnvDataAsset> mRecordConfigureDataAsset;

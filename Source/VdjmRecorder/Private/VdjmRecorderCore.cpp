@@ -825,7 +825,7 @@ void AVdjmRecordBridgeActor::OnResourceReadyForPostInit(UVdjmRecordResource* res
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
-	resource->OnResourceReadyForPostInit.Broadcast(resource);
+	
 	OnTryChainInitNext(EVdjmRecordBridgeInitStep::EPostResourceInitResolve);
 }
 
@@ -951,70 +951,6 @@ void AVdjmRecordBridgeActor::PostResourceInit(UVdjmRecordResource* resource)
 	}
 }
 
-int32 AVdjmRecordBridgeActor::BeginInit()
-{
-	UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::BeginPlay - BeginPlay started. Attempting to load record configure data asset."));
-	if (mRecordConfigureDataAsset == nullptr)
-	{
-		mRecordConfigureDataAsset = TryGetRecordEnvConfigure();
-		if (mRecordConfigureDataAsset == nullptr)
-		{
-			UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::BeginPlay - Failed to load record configure data asset."));
-			return -1;
-		}
-	}
-	
-	if (UWorld* worldContext = GetWorld())
-	{
-		if (mTargetPlayerController == nullptr)
-		{
-			mTargetPlayerController = UGameplayStatics::GetPlayerController(worldContext,0);
-		}
-		if (mTargetViewport == nullptr)
-		{
-			mTargetViewport = worldContext->GetGameViewport()->GetGameViewport();
-		}
-		if (FVdjmRecordEnvPlatformInfo* platformInfo = mRecordConfigureDataAsset->GetPlatformInfo(GetTargetPlatform()))
-		{
-			if (mCurrentEnvInfo == nullptr)
-			{
-				//	DataAsset 을 넣어서 CurrentEnvInfo 가 만들어지도록 한다.
-				mCurrentEnvInfo = NewObject<UVdjmRecordEnvCurrentInfo>(this,UVdjmRecordEnvCurrentInfo::StaticClass());
-				if (not mCurrentEnvInfo->InitializeCurrentEnvironment(this))
-				{
-					
-					//OnTryChainInitNext(TODO);
-					return 0;
-				}
-			}
-		
-			if (mRecordResource == nullptr)
-			{
-				UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::BeginPlay - Initializing record resource."));
-				
-				//	TODO: 이거도 Wnd 나 그런걸로 나눌 수 있게 만들어야함. 이게 null
-				mRecordResource = NewObject<UVdjmRecordResource>(this,platformInfo->RecordResourceClass);
-				if (mRecordResource->IsLazyPostInitializeCheck())
-				{
-					// mOnResourceTexturePoolInitializedHandle = mRecordResource->OnResourceReadyForPostInit.AddUObject(this,&AVdjmRecordBridgeActor::PostResourceInit);
-					UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::BeginPlay - Record resource initialized with lazy post-initialize check. Waiting for texture pool initialization before post-initialize steps."));
-					mRecordResource->InitializeResource(this);
-				}
-				else
-				{
-					mRecordResource->InitializeResource(this);
-					OnTryChainInitNext(EVdjmRecordBridgeInitStep::EPostResourceInitResolve);
-				}
-			}
-		}
-		else
-		{
-			UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::BeginPlay - No platform info found for target platform."));
-		}
-	}
-	return DbcValidInitializeComplete();
-}
-
 bool AVdjmRecordBridgeActor::TryResolveViewportSize(FIntPoint& OutSize) const
 {
 	OutSize = FIntPoint::ZeroValue;
@@ -1057,19 +993,7 @@ bool AVdjmRecordBridgeActor::TryResolveViewportSize(FIntPoint& OutSize) const
 void AVdjmRecordBridgeActor::BeginPlay()
 {
 	Super::BeginPlay();
-	int32 result = BeginInit();
-	if (result == 1)
-	{
-		UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::BeginPlay - Initialization successful."));
-	}
-	else if (result == 0)
-	{
-		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("AVdjmRecordBridgeActor::BeginPlay - Initialization completed with warnings. Check previous logs for details."));
-	}
-	else
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::BeginPlay - Initialization failed. Check previous logs for details."));
-	}
+	OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitializeWorldParts);
 }
 
 void AVdjmRecordBridgeActor::OnTryChainInitNext(EVdjmRecordBridgeInitStep nextStep)
@@ -1234,6 +1158,10 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
 		return;
 	}
 	mRecordResource->InitializeResource(this);
+	if (not mRecordResource->IsLazyPostInitializeCheck())
+	{
+		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EPostResourceInitResolve);
+	}
 }
 
 void AVdjmRecordBridgeActor::ChainInit_PostResourceInitResolve()
