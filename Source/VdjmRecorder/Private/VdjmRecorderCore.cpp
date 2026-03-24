@@ -451,7 +451,7 @@ FString UVdjmRecordEnvCurrentInfo::MakeFinalFilePath(const FString& customFileNa
 		basePath = FPaths::ProjectSavedDir();
 		break;
 	case EVdjmRecordEnvPlatform::EAndroid:
-		basePath = FPaths::ProjectSavedDir();
+		basePath =  FPaths::ConvertRelativePathToFull(FPaths::ProjectPersistentDownloadDir());
 		break;
 	case EVdjmRecordEnvPlatform::EIOS:
 		basePath = FPaths::ProjectSavedDir();
@@ -591,11 +591,172 @@ FTextureRHIRef UVdjmRecordResource::CreateTextureForNV12(FIntPoint resolution, E
 // 	return result;
 // }
 
+bool VdjmRecorderValidation::DbcValidateResolution(const FIntPoint& InResolution, FIntPoint& OutSafeResolution,
+	const TCHAR* DebugOwner)
+{
+	OutSafeResolution = FIntPoint::ZeroValue;
+
+	if (InResolution.X <= 0 || InResolution.Y <= 0)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+		       TEXT("%s - Invalid resolution. X=%d Y=%d"),
+		       DebugOwner,
+		       InResolution.X,
+		       InResolution.Y);
+		return false;
+	}
+
+	// 영상 인코더/서피스 계열에서 짝수 해상도를 요구하는 경우가 많으므로 방어적으로 보정
+	const int32 SafeX = FMath::Max(2, InResolution.X & ~1);
+	const int32 SafeY = FMath::Max(2, InResolution.Y & ~1);
+
+	if (SafeX <= 0 || SafeY <= 0)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+		       TEXT("%s - Safe resolution collapsed to invalid value. X=%d Y=%d"),
+		       DebugOwner,
+		       SafeX,
+		       SafeY);
+		return false;
+	}
+
+	OutSafeResolution = FIntPoint(SafeX, SafeY);
+	return true;
+}
+
+bool VdjmRecorderValidation::DbcValidateBitrate(const int32 InBitrate, int32& OutSafeBitrate, const TCHAR* DebugOwner)
+{
+	OutSafeBitrate = 0;
+
+	if (InBitrate <= 0)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+		       TEXT("%s - Invalid bitrate. Bitrate=%d"),
+		       DebugOwner,
+		       InBitrate);
+		return false;
+	}
+
+	// 지나치게 작은 값/비정상 큰 값 방어
+	constexpr int32 MinBitrate = 100000;      // 100 Kbps
+	constexpr int32 MaxBitrate = 100000000;   // 100 Mbps
+
+	if (InBitrate < MinBitrate || InBitrate > MaxBitrate)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+		       TEXT("%s - Bitrate out of safe range. Bitrate=%d Range=[%d,%d]"),
+		       DebugOwner,
+		       InBitrate,
+		       MinBitrate,
+		       MaxBitrate);
+		return false;
+	}
+
+	OutSafeBitrate = InBitrate;
+	return true;
+}
+
+bool VdjmRecorderValidation::DbcValidateOutputFilePath(const FString& InFilePath, FString& OutSafeFilePath,
+	const TCHAR* DebugOwner)
+{
+	OutSafeFilePath.Reset();
+
+	FString SafePath = InFilePath;
+	SafePath.TrimStartAndEndInline();
+
+	if (SafePath.IsEmpty())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+		       TEXT("%s - Output file path is empty."),
+		       DebugOwner);
+		return false;
+	}
+
+	FPaths::NormalizeFilename(SafePath);
+
+	// 상대경로면 한 번 절대경로화 시도
+	if (FPaths::IsRelative(SafePath))
+	{
+		SafePath = FPaths::ConvertRelativePathToFull(SafePath);
+		FPaths::NormalizeFilename(SafePath);
+	}
+
+	if (FPaths::IsRelative(SafePath))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+		       TEXT("%s - Output file path is still relative after normalization. Path=%s"),
+		       DebugOwner,
+		       *SafePath);
+		return false;
+	}
+
+	const FString DirectoryPath = FPaths::GetPath(SafePath);
+	if (DirectoryPath.IsEmpty())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+		       TEXT("%s - Output file path has no parent directory. Path=%s"),
+		       DebugOwner,
+		       *SafePath);
+		return false;
+	}
+
+	// 디렉터리가 없으면 생성 시도
+	if (!IFileManager::Get().DirectoryExists(*DirectoryPath))
+	{
+		if (!IFileManager::Get().MakeDirectory(*DirectoryPath, true))
+		{
+			UE_LOG(LogVdjmRecorderCore, Error,
+			       TEXT("%s - Failed to create output directory. Directory=%s"),
+			       DebugOwner,
+			       *DirectoryPath);
+			return false;
+		}
+	}
+
+	const FString CleanFilename = FPaths::GetCleanFilename(SafePath);
+	if (CleanFilename.IsEmpty())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+		       TEXT("%s - Output file name is empty. Path=%s"),
+		       DebugOwner,
+		       *SafePath);
+		return false;
+	}
+
+	const FString Extension = FPaths::GetExtension(SafePath, true).ToLower();
+	if (Extension != TEXT(".mp4"))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+		       TEXT("%s - Invalid output extension. Expected=.mp4 Path=%s"),
+		       DebugOwner,
+		       *SafePath);
+		return false;
+	}
+
+	static const TCHAR* InvalidChars = TEXT("<>:\"|?*");
+	for (TCHAR Ch : CleanFilename)
+	{
+		if (FCString::Strchr(InvalidChars, Ch) != nullptr)
+		{
+			UE_LOG(LogVdjmRecorderCore, Error,
+			       TEXT("%s - Output file name contains invalid character '%c'. File=%s"),
+			       DebugOwner,
+			       Ch,
+			       *CleanFilename);
+			return false;
+		}
+	}
+
+	OutSafeFilePath = SafePath;
+	return true;
+}
+
 UVdjmRecordEnvDataAsset* AVdjmRecordBridgeActor::TryGetRecordEnvConfigure()
 {
 	/*
 	 *  /Script/VdjmRecorder.VdjmRecordEnvDataAsset'/Game/Temp/VdjmTestDataAsset.VdjmTestDataAsset'
-	 *
+	 *  /Script/VdjmRecorder.VdjmRecordEnvDataAsset'/Game/Temp/VdjmTestDataAsset.VdjmTestDataAsset'
+	 *  
 	 *
 	 * /Script/VdjmRecorder.VdjmRecordEnvDataAsset'/VdjmMobileUi/Record/Bp_VdjmRecordConfigDataAsset.Bp_VdjmRecordConfigDataAsset'
 	 */
@@ -1001,6 +1162,9 @@ const TCHAR* AVdjmRecordBridgeActor::GetInitStepName(EVdjmRecordBridgeInitStep s
 	case EVdjmRecordBridgeInitStep::EPostResourceInitResolve: return TEXT("PostResourceInitResolve");
 	case EVdjmRecordBridgeInitStep::ECreatePipelines: return TEXT("ECreatePipelines");
 	case EVdjmRecordBridgeInitStep::EFinalizeInitialization: return TEXT("FinalizeInitialization");
+	case EVdjmRecordBridgeInitStep::EInitErrorEnd:	return TEXT("EInitErrorEnd");	
+	case EVdjmRecordBridgeInitStep::EInitError:	return TEXT("EInitError");
+	case EVdjmRecordBridgeInitStep::EComplete:	return TEXT("EComplete");
 	default: return TEXT("Unknown");
 	}
 }
@@ -1242,33 +1406,39 @@ void AVdjmRecordBridgeActor::ChainInit_PostResourceInitResolve()
 	FIntPoint resolvResolution = FIntPoint::ZeroValue;
 	if (VdjmRecorderValidation::DbcValidateResolution(recordResource.OriginResolution,resolvResolution,TEXT("ChainInit_PostResourceInitResolve - Invalid resolution from record resource after initialization.")))
 	{
+		recordResource.OriginResolution = resolvResolution;
 		recordResource.TextureResolution = resolvResolution;
 	}
 	else
 	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_PostResourceInitResolve - Failed to resolve valid resolution from record resource."));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
-	int32 resolveFrameRate = 0;
-	if (VdjmRecorderValidation::DbcValidateBitrate( recordResource.FinalBitrate,resolveFrameRate,TEXT("ChainInit_PostResourceInitResolve - Invalid bitrate from record resource after initialization.")))
+	int32 resolvedFrameRate = 0;
+	if (VdjmRecorderValidation::DbcValidateBitrate( recordResource.FinalBitrate,resolvedFrameRate,TEXT("ChainInit_PostResourceInitResolve - Invalid bitrate from record resource after initialization.")))
 	{
-		recordResource.FinalBitrate = resolveFrameRate;
+		recordResource.FinalBitrate = resolvedFrameRate;
 	}
 	else
 	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_PostResourceInitResolve - Failed to resolve valid bitrate from record resource."));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
-	FString resolvFilePath;
-	if (VdjmRecorderValidation::DbcValidateOutputFilePath(recordResource.FinalFilePath,resolvFilePath,TEXT("ChainInit_PostResourceInitResolve - Invalid file path from record resource after initialization.")))
+	FString resolvedFilePath;
+	if (VdjmRecorderValidation::DbcValidateOutputFilePath(recordResource.FinalFilePath,resolvedFilePath,TEXT("ChainInit_PostResourceInitResolve - Invalid file path from record resource after initialization.")))
 	{
-		recordResource.FinalFilePath = mRecordResource->FinalFilePath;
+		recordResource.FinalFilePath = resolvedFilePath;
 	}
 	else
 	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_PostResourceInitResolve - Failed to resolve valid file path from record resource."));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_PostResourceInitResolve - Successfully resolved record resource parameters. Resolution: %s, Bitrate: %d, FilePath: %s"), *recordResource.OriginResolution.ToString(), recordResource.FinalBitrate, *recordResource.FinalFilePath);
+	OnTryChainInitNext(EVdjmRecordBridgeInitStep::ECreatePipelines);
 }
 
 void AVdjmRecordBridgeActor::ChainInit_CreateRecordPipeline()
@@ -1293,6 +1463,7 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordPipeline()
 	
 	if (mRecordPipeline == nullptr)
 	{
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordPipeline - Creating record pipeline instance."));
 		mRecordPipeline = NewObject<UVdjmRecordUnitPipeline>(this,platformInfo->PipelineClass);
 	}
 	
@@ -1306,8 +1477,8 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordPipeline()
 	mRecordPipeline->InitializeRecordPipeline(mRecordResource);
 	mCurrentEnvInfo->SetRecordUnitPipeline(mRecordPipeline);
 	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordPipeline - Record pipeline created and initialized successfully."));
 	OnTryChainInitNext(EVdjmRecordBridgeInitStep::EFinalizeInitialization);
-	
 }
 
 void AVdjmRecordBridgeActor::ChainInit_FinalizeInitialization()
