@@ -36,7 +36,7 @@ void UVdjmRecordWMFResource::InitializeTexturePool(FIntPoint textureResolution, 
 			if (weakThis.IsValid() && weakThis->OwnerBridgeActor.IsValid())
 			{
 				weakThis->OwnerBridgeActor->OnResourceReadyForPostInit(weakThis.Get());
-				weakThis->OnResourceReadyForPostInit.Broadcast(weakThis.Get());
+				
 			}
 		});
 	}
