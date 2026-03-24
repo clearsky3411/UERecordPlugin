@@ -409,12 +409,22 @@ bool UVdjmRecordEnvCurrentInfo::InitializeCurrentEnvironment(AVdjmRecordBridgeAc
 			
 			//mCurrentBitrate =
 			mCurrentFilePrefix = perPlatform->FilePrefix;
-			FString defualtFilePath = FPaths::ProjectSavedDir();
+			FString defaultFilePath;
+			switch (mCurrentPlatform)
+			{
+			case EVdjmRecordEnvPlatform::EAndroid:
+				defaultFilePath = FPaths::ConvertRelativePathToFull(FPaths::ProjectPersistentDownloadDir());
+				break;
+			case EVdjmRecordEnvPlatform::EWindows:
+			default:
+				defaultFilePath = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());
+				break;
+			}
 			if (perPlatform->CustomFileSaverClass != nullptr)
 			{
 				// TODO
 			}
-			mCurrentFilePath = defualtFilePath;
+			mCurrentFilePath = defaultFilePath;
 			return true;
 		}
 		else
@@ -448,7 +458,7 @@ FString UVdjmRecordEnvCurrentInfo::MakeFinalFilePath(const FString& customFileNa
 	switch (mCurrentPlatform)
 	{
 	case EVdjmRecordEnvPlatform::EWindows:
-		basePath = FPaths::ProjectSavedDir();
+		basePath = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());
 		break;
 	case EVdjmRecordEnvPlatform::EAndroid:
 		basePath =  FPaths::ConvertRelativePathToFull(FPaths::ProjectPersistentDownloadDir());
@@ -1485,10 +1495,12 @@ void AVdjmRecordBridgeActor::ChainInit_FinalizeInitialization()
 {
 	if (DbcRecordStartableFull())
 	{
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_FinalizeInitialization - Initialization complete and record is startable. Transitioning to EComplete."));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EComplete);
 	}
 	else
 	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("ChainInit_FinalizeInitialization - Initialization complete but record is not startable. Check DbcRecordStartableFull for details. Transitioning to EInitError."));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 	}
 }
