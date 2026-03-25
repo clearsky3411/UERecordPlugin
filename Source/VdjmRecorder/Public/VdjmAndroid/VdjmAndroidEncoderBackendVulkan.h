@@ -19,13 +19,37 @@ struct FVdjmVkEncoderContext
 	uint32_t GraphicsQueueFamilyIndex = UINT32_MAX;
 };
 
-struct FVdjmVkSubmitFrameInfo
+struct FVdjmVkFrameCacheEntry
 {
 	VkImage SrcImage = VK_NULL_HANDLE;
 	VkFormat SrcFormat = VK_FORMAT_UNDEFINED;
 	uint32 SrcWidth = 0;
 	uint32 SrcHeight = 0;
 	VkImageLayout SrcLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	
+	void Clear()
+	{
+		SrcImage = VK_NULL_HANDLE;
+		SrcFormat = VK_FORMAT_UNDEFINED;
+		SrcWidth = 0;
+		SrcHeight = 0;
+		SrcLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	}
+	bool IsValid() const
+	{
+		return SrcImage != VK_NULL_HANDLE && SrcFormat != VK_FORMAT_UNDEFINED && SrcWidth > 0 && SrcHeight > 0 && SrcLayout != VK_IMAGE_LAYOUT_UNDEFINED;
+	}
+};
+
+struct FVdjmVkSubmitFrameInfo
+{
+	// VkImage SrcImage = VK_NULL_HANDLE;
+	// VkFormat SrcFormat = VK_FORMAT_UNDEFINED;
+	// uint32 SrcWidth = 0;
+	// uint32 SrcHeight = 0;
+	// VkImageLayout SrcLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	
+	FVdjmVkFrameCacheEntry CacheEntry; // 분석된 src image 상태 캐싱, 필요하면 나중에 확장 가능
 
 	bool bFormatMatchesSwapchain = false;
 	bool bExtentMatchesSwapchain = false;
@@ -173,11 +197,7 @@ struct FVdjmVkIntermediateImageState
  */
 struct FVdjmVkFrameSubmitState
 {
-	VkImage SrcImage = VK_NULL_HANDLE;
-	VkFormat SrcFormat = VK_FORMAT_UNDEFINED;
-	uint32 SrcWidth = 0;
-	uint32 SrcHeight = 0;
-	VkImageLayout SrcLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	FVdjmVkFrameCacheEntry CacheEntry;
 
 	bool bCanDirectCopy = false;
 	bool bNeedsIntermediate = false;
@@ -185,6 +205,16 @@ struct FVdjmVkFrameSubmitState
 	uint32 AcquiredImageIndex = UINT32_MAX;
 	VkImage DstSwapchainImage = VK_NULL_HANDLE;
 	VkImage FinalSrcImage = VK_NULL_HANDLE;
+	
+	void Clear()
+	{
+		CacheEntry.Clear();
+		bCanDirectCopy = false;
+		bNeedsIntermediate = false;
+		AcquiredImageIndex = UINT32_MAX;
+		DstSwapchainImage = VK_NULL_HANDLE;
+		FinalSrcImage = VK_NULL_HANDLE;
+	}
 };
 
 /**	
@@ -216,13 +246,16 @@ class FVdjmVkSubProcInputAnalyzer : public FVdjmVkSubProcessContext
 	* - 자원 생성, command submit, 동기화 완료 처리
 	*/
 public:
+	
 	explicit FVdjmVkSubProcInputAnalyzer(FVdjmAndroidEncoderBackendVulkan* const owner)
 		: FVdjmVkSubProcessContext(owner)
 	{
 	}
 
-	bool Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) const;
+	bool Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) ;
 	
+private:
+	FVdjmVkFrameCacheEntry mAnalyzedSourceState;
 };
 
 /**	

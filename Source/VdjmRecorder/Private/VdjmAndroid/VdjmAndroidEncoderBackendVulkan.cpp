@@ -12,9 +12,10 @@ namespace
 	static constexpr VkImageAspectFlags GColorAspect = VK_IMAGE_ASPECT_COLOR_BIT;
 }
 
-bool FVdjmVkSubProcInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) const
+bool FVdjmVkSubProcInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) 
 {
 	//	src image,format,extent,layout 분석
+	mAnalyzedSourceState = outInfo.CacheEntry;
 	outInfo.Clear();
 
 	if (mOwnerBackend == nullptr)
@@ -29,22 +30,22 @@ bool FVdjmVkSubProcInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdj
 		return false;
 	}
 
-	if (!mOwnerBackend->TryExtractNativeVkImage(srcTexture, outInfo.SrcImage))
+	if (!mOwnerBackend->TryExtractNativeVkImage(srcTexture, outInfo.CacheEntry.SrcImage))
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Analyze: failed to extract native VkImage"));
 		return false;
 	}
 
-	outInfo.SrcWidth = srcTexture->GetSizeX();
-	outInfo.SrcHeight = srcTexture->GetSizeY();
+	outInfo.CacheEntry.SrcWidth = srcTexture->GetSizeX();
+	outInfo.CacheEntry.SrcHeight = srcTexture->GetSizeY();
 
 	switch (srcTexture->GetFormat())
 	{
 	case PF_B8G8R8A8:
-		outInfo.SrcFormat = VK_FORMAT_B8G8R8A8_UNORM;
+		outInfo.CacheEntry.SrcFormat = VK_FORMAT_B8G8R8A8_UNORM;
 		break;
 	case PF_R8G8B8A8:
-		outInfo.SrcFormat = VK_FORMAT_R8G8B8A8_UNORM;
+		outInfo.CacheEntry.SrcFormat = VK_FORMAT_R8G8B8A8_UNORM;
 		break;
 	default:
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Analyze: unsupported UE pixel format = %d"), (int32)srcTexture->GetFormat());
@@ -53,12 +54,19 @@ bool FVdjmVkSubProcInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdj
 
 	// public VulkanRHI에서 정확한 현재 layout을 바로 얻기 어렵다.
 	// 지금 구조에서는 계약 layout으로 GENERAL을 둔다.
-	outInfo.SrcLayout = VK_IMAGE_LAYOUT_GENERAL;
+	if (mAnalyzedSourceState.SrcLayout == VK_IMAGE_LAYOUT_UNDEFINED)
+	{
+		outInfo.CacheEntry.SrcLayout = VK_IMAGE_LAYOUT_GENERAL; // 임시 fallback
+	}
+	else
+	{
+		outInfo.CacheEntry.SrcLayout = mAnalyzedSourceState.SrcLayout;
+	}
 
-	outInfo.bFormatMatchesSwapchain = (outInfo.SrcFormat == mOwnerBackend->GetSwapchainFormat());
+	outInfo.bFormatMatchesSwapchain = (outInfo.CacheEntry.SrcFormat == mOwnerBackend->GetSwapchainFormat());
 	outInfo.bExtentMatchesSwapchain =
-		(outInfo.SrcWidth == mOwnerBackend->GetSwapchainWidth()) &&
-		(outInfo.SrcHeight == mOwnerBackend->GetSwapchainHeight());
+		(outInfo.CacheEntry.SrcWidth == mOwnerBackend->GetSwapchainWidth()) &&
+		(outInfo.CacheEntry.SrcHeight == mOwnerBackend->GetSwapchainHeight());
 
 	outInfo.bCanDirectCopy = outInfo.bFormatMatchesSwapchain && outInfo.bExtentMatchesSwapchain;
 	outInfo.bNeedsIntermediate = !outInfo.bCanDirectCopy;
@@ -213,7 +221,7 @@ bool FVdjmVkSubProcIntermediateStage::EnsureResource(FVdjmAndroidEncoderBackendV
 
 bool FVdjmVkSubProcIntermediateStage::RecordPrepareAndCopy(FVdjmAndroidEncoderBackendVulkan& owner, const FVdjmVkSubmitFrameInfo& frameInfo, FVdjmVkFrameSubmitState& inOutFrameState)
 {
-	inOutFrameState.FinalSrcImage = frameInfo.SrcImage;
+	inOutFrameState.FinalSrcImage = frameInfo.CacheEntry.SrcImage;
 
 	if (!frameInfo.bNeedsIntermediate)
 	{
@@ -235,9 +243,9 @@ bool FVdjmVkSubProcIntermediateStage::RecordPrepareAndCopy(FVdjmAndroidEncoderBa
 
 	FVdjmAndroidEncoderBackendVulkan::TransitionImageLayout(
 		cmd,
-		frameInfo.SrcImage,
-		frameInfo.SrcFormat,
-		frameInfo.SrcLayout,
+		frameInfo.CacheEntry.SrcImage,
+		frameInfo.CacheEntry.SrcFormat,
+		frameInfo.CacheEntry.SrcLayout,
 		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
 	FVdjmAndroidEncoderBackendVulkan::TransitionImageLayout(
@@ -247,9 +255,9 @@ bool FVdjmVkSubProcIntermediateStage::RecordPrepareAndCopy(FVdjmAndroidEncoderBa
 		VK_IMAGE_LAYOUT_UNDEFINED,
 		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-	if (frameInfo.SrcFormat == mIntermediateState.IntermediateFormat
-		&& frameInfo.SrcWidth == mIntermediateState.IntermediateWidth
-		&& frameInfo.SrcHeight == mIntermediateState.IntermediateHeight)
+	if (frameInfo.CacheEntry.SrcFormat == mIntermediateState.IntermediateFormat
+		&& frameInfo.CacheEntry.SrcWidth == mIntermediateState.IntermediateWidth
+		&& frameInfo.CacheEntry.SrcHeight == mIntermediateState.IntermediateHeight)
 	{
 		VkImageCopy region{};
 		region.srcSubresource.aspectMask = GColorAspect;
@@ -260,13 +268,13 @@ bool FVdjmVkSubProcIntermediateStage::RecordPrepareAndCopy(FVdjmAndroidEncoderBa
 		region.dstSubresource.mipLevel = 0;
 		region.dstSubresource.baseArrayLayer = 0;
 		region.dstSubresource.layerCount = 1;
-		region.extent.width = frameInfo.SrcWidth;
-		region.extent.height = frameInfo.SrcHeight;
+		region.extent.width = frameInfo.CacheEntry.SrcWidth;
+		region.extent.height = frameInfo.CacheEntry.SrcHeight;
 		region.extent.depth = 1;
 
 		vkCmdCopyImage(
 			cmd,
-			frameInfo.SrcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			frameInfo.CacheEntry.SrcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 			mIntermediateState.IntermediateImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			1,
 			&region);
@@ -284,13 +292,13 @@ bool FVdjmVkSubProcIntermediateStage::RecordPrepareAndCopy(FVdjmAndroidEncoderBa
 		blit.dstSubresource.layerCount = 1;
 
 		blit.srcOffsets[0] = { 0, 0, 0 };
-		blit.srcOffsets[1] = { (int32)frameInfo.SrcWidth, (int32)frameInfo.SrcHeight, 1 };
+		blit.srcOffsets[1] = { (int32)frameInfo.CacheEntry.SrcWidth, (int32)frameInfo.CacheEntry.SrcHeight, 1 };
 		blit.dstOffsets[0] = { 0, 0, 0 };
 		blit.dstOffsets[1] = { (int32)mIntermediateState.IntermediateWidth, (int32)mIntermediateState.IntermediateHeight, 1 };
 
 		vkCmdBlitImage(
 			cmd,
-			frameInfo.SrcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			frameInfo.CacheEntry.SrcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 			mIntermediateState.IntermediateImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 			1,
 			&blit,
@@ -306,10 +314,10 @@ bool FVdjmVkSubProcIntermediateStage::RecordPrepareAndCopy(FVdjmAndroidEncoderBa
 
 	FVdjmAndroidEncoderBackendVulkan::TransitionImageLayout(
 		cmd,
-		frameInfo.SrcImage,
-		frameInfo.SrcFormat,
+		frameInfo.CacheEntry.SrcImage,
+		frameInfo.CacheEntry.SrcFormat,
 		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-		frameInfo.SrcLayout);
+		frameInfo.CacheEntry.SrcLayout);
 
 	inOutFrameState.FinalSrcImage = mIntermediateState.IntermediateImage;
 	return true;
@@ -799,14 +807,10 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 	}
 
 	FVdjmVkFrameSubmitState frameState;
-	frameState.SrcImage = analyzedInfo.SrcImage;
-	frameState.SrcFormat = analyzedInfo.SrcFormat;
-	frameState.SrcWidth = analyzedInfo.SrcWidth;
-	frameState.SrcHeight = analyzedInfo.SrcHeight;
-	frameState.SrcLayout = analyzedInfo.SrcLayout;
+	frameState.CacheEntry = analyzedInfo.CacheEntry;
 	frameState.bCanDirectCopy = analyzedInfo.bCanDirectCopy;
 	frameState.bNeedsIntermediate = analyzedInfo.bNeedsIntermediate;
-	frameState.FinalSrcImage = analyzedInfo.SrcImage;
+	frameState.FinalSrcImage = analyzedInfo.CacheEntry.SrcImage;
 
 	if (!AcquireNextSwapchainImage(frameState))
 	{
@@ -1177,6 +1181,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 
 bool FVdjmAndroidEncoderBackendVulkan::TryExtractNativeVkImage(const FTextureRHIRef& srcTexture,VkImage& outImage) const
 {
+	//source texture native handle 해석이 틀림.
 	outImage = VK_NULL_HANDLE;
 
 	if (!srcTexture.IsValid())
@@ -1211,15 +1216,15 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 	const VkImageLayout finalSrcOldLayout =
 		frameState.bNeedsIntermediate
 		? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-		: frameState.SrcLayout;
+		: frameState.CacheEntry.SrcLayout;
 
 	if (!frameState.bNeedsIntermediate)
 	{
 		TransitionImageLayout(
 			cmd,
 			frameState.FinalSrcImage,
-			frameState.SrcFormat,
-			frameState.SrcLayout,
+			frameState.CacheEntry.SrcFormat,
+			frameState.CacheEntry.SrcLayout,
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	}
 
@@ -1230,9 +1235,9 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 		VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
 		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-	if (frameState.SrcFormat == mVkRecordSession.SwapchainFormat
-		&& frameState.SrcWidth == mVkRecordSession.SwapchainWidth
-		&& frameState.SrcHeight == mVkRecordSession.SwapchainHeight)
+	if (frameState.CacheEntry.SrcFormat == mVkRecordSession.SwapchainFormat
+		&& frameState.CacheEntry.SrcWidth == mVkRecordSession.SwapchainWidth
+		&& frameState.CacheEntry.SrcHeight == mVkRecordSession.SwapchainHeight)
 	{
 		VkImageCopy region{};
 		region.srcSubresource.aspectMask = GColorAspect;
@@ -1243,8 +1248,8 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 		region.dstSubresource.mipLevel = 0;
 		region.dstSubresource.baseArrayLayer = 0;
 		region.dstSubresource.layerCount = 1;
-		region.extent.width = frameState.SrcWidth;
-		region.extent.height = frameState.SrcHeight;
+		region.extent.width = frameState.CacheEntry.SrcWidth;
+		region.extent.height = frameState.CacheEntry.SrcHeight;
 		region.extent.depth = 1;
 
 		vkCmdCopyImage(
@@ -1266,7 +1271,7 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 		blit.dstSubresource.baseArrayLayer = 0;
 		blit.dstSubresource.layerCount = 1;
 		blit.srcOffsets[0] = { 0, 0, 0 };
-		blit.srcOffsets[1] = { (int32)frameState.SrcWidth, (int32)frameState.SrcHeight, 1 };
+		blit.srcOffsets[1] = { (int32)frameState.CacheEntry.SrcWidth, (int32)frameState.CacheEntry.SrcHeight, 1 };
 		blit.dstOffsets[0] = { 0, 0, 0 };
 		blit.dstOffsets[1] = { (int32)mVkRecordSession.SwapchainWidth, (int32)mVkRecordSession.SwapchainHeight, 1 };
 
@@ -1291,9 +1296,9 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 		TransitionImageLayout(
 			cmd,
 			frameState.FinalSrcImage,
-			frameState.SrcFormat,
+			frameState.CacheEntry.SrcFormat,
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			frameState.SrcLayout);
+			frameState.CacheEntry.SrcLayout);
 	}
 
 	return true;
