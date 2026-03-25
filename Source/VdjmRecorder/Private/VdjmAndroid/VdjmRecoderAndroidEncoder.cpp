@@ -187,15 +187,7 @@ FVdjmAndroidRecordSession::~FVdjmAndroidRecordSession()
 
 bool FVdjmAndroidRecordSession::Initialize(const FVdjmAndroidEncoderConfigure& configure )
 {
-	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidRecordSession::Initialize - Initializing with OutputFilePath: %s, MimeType: %s, Resolution: %dx%d, Bitrate: %d, FPS: %d, I-Frame Interval: %d, GraphicBackend: %d"),
-		*configure.OutputFilePath,
-		*configure.MimeType,
-		configure.VideoWidth,
-		configure.VideoHeight,
-		configure.VideoBitrate,
-		configure.VideoFPS,
-		configure.VideoIntervalSec,
-		static_cast<int32>(configure.GraphicBackend));
+	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidRecordSession::Initialize - in Config %s"),*configure.ToString());
 	
 	if (mInitialized )
 	{
@@ -218,7 +210,17 @@ bool FVdjmAndroidRecordSession::Start()
 	{
 		return false;
 	}
-	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidRecordSession::Start - Starting recording session."));
+	UE_LOG(LogTemp, Warning,
+	TEXT("FVdjmAndroidRecordSession::Start - mConfig before validate: Path=%s Mime=%s W=%d H=%d Bitrate=%d FPS=%d Interval=%d GraphicBackend=%d"),
+	*mConfig.OutputFilePath,
+	*mConfig.MimeType,
+	mConfig.VideoWidth,
+	mConfig.VideoHeight,
+	mConfig.VideoBitrate,
+	mConfig.VideoFPS,
+	mConfig.VideoIntervalSec,
+	(int32)mConfig.GraphicBackend);
+	
 	mOutputFd = open(TCHAR_TO_UTF8(*mConfig.OutputFilePath), O_RDWR | O_CREAT | O_TRUNC, 0644);
 	if (mOutputFd < 0)
 	{
@@ -305,6 +307,7 @@ bool FVdjmAndroidRecordSession::Start()
 	if (not mGraphicBackend->Init(mConfig, mInputWindow) )
 	{
 		Terminate(); 
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::Start - Failed to initialize graphic backend"));
 		return false;
 	}
 	
@@ -577,11 +580,12 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, i
 	FVdjmAndroidEncoderConfigure config = FVdjmAndroidEncoderConfigure(width, height, bitrate, framerate,outputFilePath);
 	config.MimeType = VdjmMimeAvc;
 	config.VideoIntervalSec = 1;
-	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidEncoderImpl::InitializeEncoder - Determining graphic backend for RHI: %s"), *GetCurrentRHINameSafe());
 	config.GraphicBackend = 
 		IsVulkanRHI() ? EVdjmAndroidGraphicBackend::EVulkan : 
 	(IsOpenGLRHI() ? EVdjmAndroidGraphicBackend::EOpenGL : 
 		EVdjmAndroidGraphicBackend::EUnknown);
+	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidEncoderImpl::InitializeEncoder - con %s"), *config.ToString());
+	
 	
 	return mRecordSession->Initialize(config);
 }

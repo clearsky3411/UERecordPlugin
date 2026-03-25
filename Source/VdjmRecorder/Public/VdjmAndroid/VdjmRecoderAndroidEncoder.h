@@ -62,13 +62,13 @@ struct FVdjmAndroidEncoderConfigure
 	
 	FVdjmAndroidEncoderConfigure() = default;
 	FVdjmAndroidEncoderConfigure(int32 width, int32 height, int32 bitrate, int32 fps, const FString& outputFilePath)
-		: VideoWidth(width), VideoHeight(height), VideoBitrate(bitrate), VideoFPS(fps), OutputFilePath(outputFilePath)
+		: VideoWidth(width), VideoHeight(height), VideoBitrate(bitrate), VideoFPS(fps), OutputFilePath(outputFilePath), GraphicBackend(EVdjmAndroidGraphicBackend::EUnknown), MimeType("video/avc"), VideoIntervalSec(1)
 	{}
 	FVdjmAndroidEncoderConfigure(const FVdjmAndroidEncoderConfigure& other)
-		: VideoWidth(other.VideoWidth), VideoHeight(other.VideoHeight), VideoBitrate(other.VideoBitrate), VideoFPS(other.VideoFPS), OutputFilePath(other.OutputFilePath)
+		: VideoWidth(other.VideoWidth), VideoHeight(other.VideoHeight), VideoBitrate(other.VideoBitrate), VideoFPS(other.VideoFPS), OutputFilePath(other.OutputFilePath), MimeType(other.MimeType), GraphicBackend(other.GraphicBackend), VideoIntervalSec(other.VideoIntervalSec)
 	{}
 	FVdjmAndroidEncoderConfigure(FVdjmAndroidEncoderConfigure&& other) noexcept
-		: VideoWidth(other.VideoWidth), VideoHeight(other.VideoHeight), VideoBitrate(other.VideoBitrate), VideoFPS(other.VideoFPS), OutputFilePath(other.OutputFilePath)
+		: VideoWidth(other.VideoWidth), VideoHeight(other.VideoHeight), VideoBitrate(other.VideoBitrate), VideoFPS(other.VideoFPS), OutputFilePath(other.OutputFilePath), MimeType(other.MimeType), GraphicBackend(other.GraphicBackend), VideoIntervalSec(other.VideoIntervalSec)
 	{}
 	FVdjmAndroidEncoderConfigure& operator=(const FVdjmAndroidEncoderConfigure& other)
 	{
@@ -77,6 +77,9 @@ struct FVdjmAndroidEncoderConfigure
 		this->VideoBitrate = other.VideoBitrate;
 		this->VideoFPS = other.VideoFPS;
 		this->OutputFilePath = other.OutputFilePath;
+		this->MimeType = other.MimeType;
+		this->GraphicBackend = other.GraphicBackend;
+		this->VideoIntervalSec = other.VideoIntervalSec;
 		return *this;
 	}
 	FVdjmAndroidEncoderConfigure& operator=(FVdjmAndroidEncoderConfigure&& other) noexcept
@@ -86,6 +89,9 @@ struct FVdjmAndroidEncoderConfigure
 		this->VideoBitrate = other.VideoBitrate;
 		this->VideoFPS = other.VideoFPS;
 		this->OutputFilePath = other.OutputFilePath;
+		this->MimeType = other.MimeType;
+		this->GraphicBackend = other.GraphicBackend;
+		this->VideoIntervalSec = other.VideoIntervalSec;
 		return *this;
 	}
 	
@@ -98,7 +104,21 @@ struct FVdjmAndroidEncoderConfigure
 		VideoFPS = 0;
 		OutputFilePath.Empty();
 		MimeType = "video/avc";
+		VideoIntervalSec = 1;
 		GraphicBackend = EVdjmAndroidGraphicBackend::EUnknown;
+	}
+	
+	FString ToString() const
+	{
+		return FString::Printf(TEXT("OutputFilePath: %s, MimeType: %s, Resolution: %dx%d, Bitrate: %d, FPS: %d, I-Frame Interval: %d, GraphicBackend: %d"),
+			*OutputFilePath,
+			*MimeType,
+			VideoWidth,
+			VideoHeight,
+			VideoBitrate,
+			VideoFPS,
+			VideoIntervalSec,
+			static_cast<int32>(GraphicBackend));
 	}
 };
 /*

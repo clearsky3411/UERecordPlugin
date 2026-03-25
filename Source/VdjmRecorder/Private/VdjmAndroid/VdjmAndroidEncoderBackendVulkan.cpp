@@ -582,12 +582,13 @@ bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& 
 	mConfig = config;
 	mInputWindow = inputWindow;
 	ANativeWindow_acquire(mInputWindow);
-
+	
 	mInitialized = true;
 	mStarted = false;
 	mPaused = false;
 	mRuntimeReady = false;
-
+	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("FVdjmAndroidEncoderBackendVulkan::Init - success"));
 	return true;
 }
 
