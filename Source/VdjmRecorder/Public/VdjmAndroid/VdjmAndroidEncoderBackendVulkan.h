@@ -10,42 +10,12 @@
 struct IVulkanDynamicRHI;
 class FVdjmAndroidEncoderBackendVulkan;
 
-struct FVdjmVkEncoderContext
-{
-	VkInstance Instance = VK_NULL_HANDLE;
-	VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
-	VkDevice Device = VK_NULL_HANDLE;
-	VkQueue GraphicsQueue = VK_NULL_HANDLE;
-	uint32_t GraphicsQueueFamilyIndex = UINT32_MAX;
-};
 
-/**
- * @breif src image 상태 캐싱용
- */
-struct FVdjmVkFrameCacheEntry
-{
-	VkImage SrcImage = VK_NULL_HANDLE;
-	VkFormat SrcFormat = VK_FORMAT_UNDEFINED;
-	uint32 SrcWidth = 0;
-	uint32 SrcHeight = 0;
-	
-	void Clear()
-	{
-		SrcImage = VK_NULL_HANDLE;
-		SrcFormat = VK_FORMAT_UNDEFINED;
-		SrcWidth = 0;
-		SrcHeight = 0;
-	}
-	bool IsValid() const
-	{
-		return SrcImage != VK_NULL_HANDLE && SrcFormat != VK_FORMAT_UNDEFINED && SrcWidth > 0 && SrcHeight > 0;
-	}
-};
 
 /**
  * @brief backend가 소유한 이미지용
  */
-struct FVdjmVkFrameOwnedBackendImage
+struct FVdjmVkOwnedImageState
 {
 	VkImage Image = VK_NULL_HANDLE;
 	VkFormat Format = VK_FORMAT_UNDEFINED;
@@ -72,18 +42,14 @@ struct FVdjmVkFrameOwnedBackendImage
 };
 struct FVdjmVkSubmitFrameInfo
 {
-	// VkImage SrcImage = VK_NULL_HANDLE;
-	// VkFormat SrcFormat = VK_FORMAT_UNDEFINED;
-	// uint32 SrcWidth = 0;
-	// uint32 SrcHeight = 0;
-	// VkImageLayout SrcLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	VkImage SrcImage = VK_NULL_HANDLE;	
+	VkFormat SrcFormat = VK_FORMAT_UNDEFINED;
+	uint32 SrcWidth = 0;
+	uint32 SrcHeight = 0;
 	
-	FVdjmVkFrameCacheEntry CacheEntry; // 분석된 src image 상태 캐싱, 필요하면 나중에 확장 가능
-
-	bool bFormatMatchesSwapchain = false;
-	bool bExtentMatchesSwapchain = false;
 	bool bNeedsIntermediate = false;
 	bool bCanDirectCopy = false;
+
 	
 	FVdjmVkSubmitFrameInfo() = default;
 	FVdjmVkSubmitFrameInfo(const FVdjmVkSubmitFrameInfo& other) = default;
@@ -94,11 +60,13 @@ struct FVdjmVkSubmitFrameInfo
 	
 	void Clear()
 	{
-		CacheEntry.Clear();
+		SrcImage = VK_NULL_HANDLE;
+		SrcFormat = VK_FORMAT_UNDEFINED;
+		SrcWidth = 0;
+		SrcHeight = 0;
 		
-		bFormatMatchesSwapchain = false;
-		bExtentMatchesSwapchain = false;
 		bNeedsIntermediate = false;
+		bCanDirectCopy = false;
 	}
 };
 
@@ -164,9 +132,6 @@ struct FVdjmVkRecordSessionState
 	VkSemaphore AcquireSemaphore = VK_NULL_HANDLE;
 	VkSemaphore RenderCompleteSemaphore = VK_NULL_HANDLE;
 	
-	TArray<FVdjmVkFrameCacheEntry> FrameSourceCacheArray; // 프레임별 src image 상태 캐싱, 필요하면 나중에 확장 가능
-	TArray<FVdjmVkFrameOwnedBackendImage> FrameOwnedBackendImages; // 프레임별 backend 소유 이미지 상태 캐싱, 필요하면 나중에 확장 가능
-	
 	void Clear()
 	{
 		bReady = false;
@@ -185,39 +150,7 @@ struct FVdjmVkRecordSessionState
 	}
 };
 
-/**
- * @brief Vulkan 이미지 제출 과정에서 필요한 중간 이미지 상태와 리소스를 관리하는 구조체
- * @note life time : 분석을 한후에 필요하면 생성하고 FVdjmVkRecordSessionState 와 같은 주기
- */
-struct FVdjmVkIntermediateImageState
-{
-	VkImage IntermediateImage = VK_NULL_HANDLE;
-	VkDeviceMemory IntermediateMemory = VK_NULL_HANDLE;
-	VkImageView IntermediateView = VK_NULL_HANDLE;
-	
-	VkFormat IntermediateFormat = VK_FORMAT_UNDEFINED;
-	uint32 IntermediateWidth = 0;
-	uint32 IntermediateHeight = 0;
-	
-	void Clear()
-	{
-		IntermediateImage = VK_NULL_HANDLE;
-		IntermediateMemory = VK_NULL_HANDLE;
-		IntermediateView = VK_NULL_HANDLE;
-		IntermediateFormat = VK_FORMAT_UNDEFINED;
-		IntermediateWidth = 0;
-		IntermediateHeight = 0;
-	}
-	bool IsValid() const
-	{
-		return (IntermediateImage != VK_NULL_HANDLE) && (IntermediateMemory != VK_NULL_HANDLE) && (IntermediateView != VK_NULL_HANDLE) && IntermediateWidth > 0 && IntermediateHeight > 0 && IntermediateFormat != VK_FORMAT_UNDEFINED;
-	}
-	
-	bool NeedsRecreate(uint32 newWidth, uint32 newHeight, VkFormat newFormat) const
-	{
-		return !IsValid() || IntermediateWidth != newWidth || IntermediateHeight != newHeight || IntermediateFormat != newFormat;
-	}
-};
+
 
 /**
  * @brief Vulkan 이미지 제출 과정에서 각 프레임 제출 시점에 필요한 정보와 상태를 관리하는 구조체
@@ -225,22 +158,14 @@ struct FVdjmVkIntermediateImageState
  */
 struct FVdjmVkFrameSubmitState
 {
-	FVdjmVkFrameCacheEntry CacheEntry;
-
-	bool bCanDirectCopy = false;
-	bool bNeedsIntermediate = false;
-
 	uint32 AcquiredImageIndex = UINT32_MAX;
-	VkImage DstSwapchainImage = VK_NULL_HANDLE;
-	VkImage FinalSrcImage = VK_NULL_HANDLE;
+	FVdjmVkOwnedImageState* DstState;
+	VkImage FinalSrcImage = VK_NULL_HANDLE; // 최종 제출에 사용될 src image 핸들, intermediate가 필요한 경우 intermediate image로 설정
 	
 	void Clear()
 	{
-		CacheEntry.Clear();
-		bCanDirectCopy = false;
-		bNeedsIntermediate = false;
 		AcquiredImageIndex = UINT32_MAX;
-		DstSwapchainImage = VK_NULL_HANDLE;
+		DstState = nullptr;
 		FinalSrcImage = VK_NULL_HANDLE;
 	}
 };
@@ -280,9 +205,7 @@ public:
 	}
 
 	bool Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) ;
-	
-private:
-	FVdjmVkFrameCacheEntry mAnalyzedSourceState;
+
 };
 
 /**	
@@ -318,15 +241,15 @@ public:
 	bool EnsureResource(FVdjmAndroidEncoderBackendVulkan& backend, const FVdjmVkSubmitFrameInfo& frameInfo);
 	bool RecordPrepareAndCopy(FVdjmAndroidEncoderBackendVulkan& owner, const FVdjmVkSubmitFrameInfo& frameInfo, FVdjmVkFrameSubmitState& inOutFrameState);
 	
-	FVdjmVkIntermediateImageState& GetIntermediateState() { return mIntermediateState; }
-	const FVdjmVkIntermediateImageState& GetIntermediateStateConst() const { return mIntermediateState; }
+	FVdjmVkOwnedImageState& GetIntermediateState() { return mIntermediateState; }
+	const FVdjmVkOwnedImageState& GetIntermediateStateConst() const { return mIntermediateState; }
 	
-	bool IsValidIntermediateImage() const { return mIntermediateState.IntermediateImage != VK_NULL_HANDLE; }
+	bool IsValidIntermediateImage() const { return mIntermediateState.Image != VK_NULL_HANDLE; }
 	bool IsValidIntermediateSwapchainResolutions(FVdjmAndroidEncoderBackendVulkan* backend = nullptr) const;
 	bool IsValidIntermediateFormat(FVdjmAndroidEncoderBackendVulkan*  backend = nullptr) const;
 
 private:
-	FVdjmVkIntermediateImageState mIntermediateState;
+	FVdjmVkOwnedImageState mIntermediateState;
 };
 
 /**	
@@ -408,21 +331,8 @@ public:
 	uint32 GetSwapchainWidth() const { return mVkRecordSession.SwapchainWidth; }
 	uint32 GetSwapchainHeight() const { return mVkRecordSession.SwapchainHeight; }
 
-	VkImage GetIntermediateImage() const { return mIntermediateStage.GetIntermediateStateConst(). IntermediateImage; }
-	VkImageView GetIntermediateView() const { return mIntermediateStage.GetIntermediateStateConst().IntermediateView; }
-	VkFormat GetIntermediateFormat() const { return mIntermediateStage.GetIntermediateStateConst().IntermediateFormat; }
-	uint32 GetIntermediateWidth() const { return mIntermediateStage.GetIntermediateStateConst().IntermediateWidth; }
-	uint32 GetIntermediateHeight() const { return mIntermediateStage.GetIntermediateStateConst().IntermediateHeight; }
+	VkImage GetIntermediateImage() const { return mIntermediateStage.GetIntermediateStateConst().Image; }
 
-	void SetIntermediateImage(VkImage InImage) { mIntermediateStage.GetIntermediateState().IntermediateImage = InImage; }
-	void SetIntermediateView(VkImageView InView) { mIntermediateStage.GetIntermediateState().IntermediateView = InView; }
-	void SetIntermediateMemory(VkDeviceMemory InMemory) { mIntermediateStage.GetIntermediateState().IntermediateMemory = InMemory; }
-	void SetIntermediateFormat(VkFormat InFormat) { mIntermediateStage.GetIntermediateState().IntermediateFormat = InFormat; }
-	void SetIntermediateWidth(uint32 InWidth) { mIntermediateStage.GetIntermediateState().IntermediateWidth = InWidth; }
-	void SetIntermediateHeight(uint32 InHeight) { mIntermediateStage.GetIntermediateState().IntermediateHeight = InHeight; }
-
-	bool IsValidIntermediateImage() const { return mIntermediateStage.IsValidIntermediateImage(); }
-	
 	static uint32 FindMemoryType(VkPhysicalDevice physicalDevice, uint32 typeFilter, VkMemoryPropertyFlags properties);
 	static void TransitionImageLayout(VkCommandBuffer commandBuffer, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
 	static VkSurfaceFormatKHR ChooseSurfaceFormat(const FVdjmVkRuntimeContext& runtimeContext,const TArray<VkSurfaceFormatKHR>& availableFormats);

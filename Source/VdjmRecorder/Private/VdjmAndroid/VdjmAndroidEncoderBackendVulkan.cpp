@@ -15,7 +15,7 @@ namespace
 bool FVdjmVkSubProcInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) 
 {
 	//	src image,format,extent,layout 분석
-	mAnalyzedSourceState = outInfo.CacheEntry;
+	
 	outInfo.Clear();
 
 	if (mOwnerBackend == nullptr)
@@ -30,46 +30,28 @@ bool FVdjmVkSubProcInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdj
 		return false;
 	}
 
-	if (!mOwnerBackend->TryExtractNativeVkImage(srcTexture, outInfo.CacheEntry.SrcImage))
+	if (!mOwnerBackend->TryExtractNativeVkImage(srcTexture, outInfo.SrcImage))
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Analyze: failed to extract native VkImage"));
 		return false;
 	}
 
-	outInfo.CacheEntry.SrcWidth = srcTexture->GetSizeX();
-	outInfo.CacheEntry.SrcHeight = srcTexture->GetSizeY();
+	outInfo.SrcWidth = srcTexture->GetSizeX();
+	outInfo.SrcHeight = srcTexture->GetSizeY();
 
 	switch (srcTexture->GetFormat())
 	{
 	case PF_B8G8R8A8:
-		outInfo.CacheEntry.SrcFormat = VK_FORMAT_B8G8R8A8_UNORM;
+		outInfo.SrcFormat = VK_FORMAT_B8G8R8A8_UNORM;
 		break;
 	case PF_R8G8B8A8:
-		outInfo.CacheEntry.SrcFormat = VK_FORMAT_R8G8B8A8_UNORM;
+		outInfo.SrcFormat = VK_FORMAT_R8G8B8A8_UNORM;
 		break;
 	default:
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Analyze: unsupported UE pixel format = %d"), (int32)srcTexture->GetFormat());
 		return false;
 	}
-
-	// public VulkanRHI에서 정확한 현재 layout을 바로 얻기 어렵다.
-	// 지금 구조에서는 계약 layout으로 GENERAL을 둔다.
-	if (mAnalyzedSourceState.SrcLayout == VK_IMAGE_LAYOUT_UNDEFINED)
-	{
-		outInfo.CacheEntry.SrcLayout = VK_IMAGE_LAYOUT_GENERAL; // 임시 fallback
-	}
-	else
-	{
-		outInfo.CacheEntry.SrcLayout = mAnalyzedSourceState.SrcLayout;
-	}
-
-	outInfo.bFormatMatchesSwapchain = (outInfo.CacheEntry.SrcFormat == mOwnerBackend->GetSwapchainFormat());
-	outInfo.bExtentMatchesSwapchain =
-		(outInfo.CacheEntry.SrcWidth == mOwnerBackend->GetSwapchainWidth()) &&
-		(outInfo.CacheEntry.SrcHeight == mOwnerBackend->GetSwapchainHeight());
-
-	outInfo.bCanDirectCopy = outInfo.bFormatMatchesSwapchain && outInfo.bExtentMatchesSwapchain;
-	outInfo.bNeedsIntermediate = !outInfo.bCanDirectCopy;
+	
 
 	return true;
 }
@@ -221,6 +203,14 @@ bool FVdjmVkSubProcIntermediateStage::EnsureResource(FVdjmAndroidEncoderBackendV
 
 bool FVdjmVkSubProcIntermediateStage::RecordPrepareAndCopy(FVdjmAndroidEncoderBackendVulkan& owner, const FVdjmVkSubmitFrameInfo& frameInfo, FVdjmVkFrameSubmitState& inOutFrameState)
 {
+	/*
+	* 여기서는 intermediate가 필요하면
+
+mIntermediateState 대신
+FVdjmVkOwnedImageState mIntermediateImage
+
+하나만
+	 */
 	inOutFrameState.FinalSrcImage = frameInfo.CacheEntry.SrcImage;
 
 	if (!frameInfo.bNeedsIntermediate)
@@ -807,9 +797,9 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 	}
 
 	FVdjmVkFrameSubmitState frameState;
-	frameState.CacheEntry = analyzedInfo.CacheEntry;
-	frameState.bCanDirectCopy = analyzedInfo.bCanDirectCopy;
-	frameState.bNeedsIntermediate = analyzedInfo.bNeedsIntermediate;
+	/*
+	 * TODO: 여기 채워야 하지 않나
+	 */
 	frameState.FinalSrcImage = analyzedInfo.CacheEntry.SrcImage;
 
 	if (!AcquireNextSwapchainImage(frameState))
@@ -846,6 +836,7 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 		return false;
 	}
 
+	//	TODO: FVdjmVkFrameSubmitState 이거도 내부에 bNeedsIntermediate 이게 없음. bNeedsIntermediate이거는 FVdjmVkSubmitFrameInfo 에게만 있음. 
 	if (frameState.bNeedsIntermediate)
 	{
 		if (!mIntermediateStage.EnsureResource(*this, analyzedInfo))
@@ -891,6 +882,23 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 
 bool FVdjmAndroidEncoderBackendVulkan::EnsureRuntimeReady()
 {
+	/*
+	 * EnsureRuntimeReady
+	* 여기서 해야 하는 것:
+
+swapchain image를 가져온다
+SwapchainImageStates.SetNum(count)
+각 state에
+Image
+Format
+Width
+Height
+CurrentLayout = VK_IMAGE_LAYOUT_UNDEFINED
+를 넣는다
+
+즉 여기서부터 destination layout 추적 시작
+	 * 
+	 */
 	//	codec surface, swapchain, cmd , sync 생성
 	if (mRuntimeReady && mVkRecordSession.bReady)
 	{
@@ -1143,6 +1151,11 @@ bool FVdjmAndroidEncoderBackendVulkan::EnsureRuntimeReady()
 
 bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSubmitState& outFrameState)
 {
+	/*
+	* image index 받아오고
+FrameSubmitState.AcquiredImageIndex = imageIndex
+FrameSubmitState.DstState = &mVkRecordSession.SwapchainImageStates[imageIndex]
+	 */
 	if (!mRuntimeReady || !mVkRecordSession.bReady || mVkRecordSession.CodecSwapchain == VK_NULL_HANDLE)
 	{
 		return false;
@@ -1201,6 +1214,16 @@ bool FVdjmAndroidEncoderBackendVulkan::TryExtractNativeVkImage(const FTextureRHI
 
 bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVkFrameSubmitState& frameState)
 {
+	/*
+	* 해야 할 것:
+	이제부터는 destination layout은 DstState->CurrentLayout만 믿는다.
+		DstState->CurrentLayout -> TRANSFER_DST_OPTIMAL
+		copy/blit
+		TRANSFER_DST_OPTIMAL -> PRESENT_SRC_KHR
+		끝나면 DstState->CurrentLayout = PRESENT_SRC_KHR
+		
+		즉 layout transition 대상은 owned image만
+	 */
 	//	마지막 hop
 	if (frameState.FinalSrcImage == VK_NULL_HANDLE || frameState.DstSwapchainImage == VK_NULL_HANDLE)
 	{
