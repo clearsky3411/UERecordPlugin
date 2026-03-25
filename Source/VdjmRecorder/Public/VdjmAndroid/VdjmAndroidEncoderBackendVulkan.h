@@ -19,13 +19,15 @@ struct FVdjmVkEncoderContext
 	uint32_t GraphicsQueueFamilyIndex = UINT32_MAX;
 };
 
+/**
+ * @breif src image 상태 캐싱용
+ */
 struct FVdjmVkFrameCacheEntry
 {
 	VkImage SrcImage = VK_NULL_HANDLE;
 	VkFormat SrcFormat = VK_FORMAT_UNDEFINED;
 	uint32 SrcWidth = 0;
 	uint32 SrcHeight = 0;
-	VkImageLayout SrcLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	
 	void Clear()
 	{
@@ -33,14 +35,41 @@ struct FVdjmVkFrameCacheEntry
 		SrcFormat = VK_FORMAT_UNDEFINED;
 		SrcWidth = 0;
 		SrcHeight = 0;
-		SrcLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	}
 	bool IsValid() const
 	{
-		return SrcImage != VK_NULL_HANDLE && SrcFormat != VK_FORMAT_UNDEFINED && SrcWidth > 0 && SrcHeight > 0 && SrcLayout != VK_IMAGE_LAYOUT_UNDEFINED;
+		return SrcImage != VK_NULL_HANDLE && SrcFormat != VK_FORMAT_UNDEFINED && SrcWidth > 0 && SrcHeight > 0;
 	}
 };
 
+/**
+ * @brief backend가 소유한 이미지용
+ */
+struct FVdjmVkFrameOwnedBackendImage
+{
+	VkImage Image = VK_NULL_HANDLE;
+	VkFormat Format = VK_FORMAT_UNDEFINED;
+	uint32 Width = 0;
+	uint32 Height = 0;
+	VkImageLayout CurrentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+	void Clear()
+	{
+		Image = VK_NULL_HANDLE;
+		Format = VK_FORMAT_UNDEFINED;
+		Width = 0;
+		Height = 0;
+		CurrentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	}
+
+	bool IsValid() const
+	{
+		return Image != VK_NULL_HANDLE
+			&& Format != VK_FORMAT_UNDEFINED
+			&& Width > 0
+			&& Height > 0;
+	}
+};
 struct FVdjmVkSubmitFrameInfo
 {
 	// VkImage SrcImage = VK_NULL_HANDLE;
@@ -65,11 +94,7 @@ struct FVdjmVkSubmitFrameInfo
 	
 	void Clear()
 	{
-		SrcImage = VK_NULL_HANDLE;
-		SrcFormat = VK_FORMAT_UNDEFINED;
-		SrcWidth = 0;
-		SrcHeight = 0;
-		SrcLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		CacheEntry.Clear();
 		
 		bFormatMatchesSwapchain = false;
 		bExtentMatchesSwapchain = false;
@@ -138,6 +163,9 @@ struct FVdjmVkRecordSessionState
 	VkFence SubmitFence = VK_NULL_HANDLE;
 	VkSemaphore AcquireSemaphore = VK_NULL_HANDLE;
 	VkSemaphore RenderCompleteSemaphore = VK_NULL_HANDLE;
+	
+	TArray<FVdjmVkFrameCacheEntry> FrameSourceCacheArray; // 프레임별 src image 상태 캐싱, 필요하면 나중에 확장 가능
+	TArray<FVdjmVkFrameOwnedBackendImage> FrameOwnedBackendImages; // 프레임별 backend 소유 이미지 상태 캐싱, 필요하면 나중에 확장 가능
 	
 	void Clear()
 	{
@@ -235,15 +263,14 @@ class FVdjmVkSubProcInputAnalyzer : public FVdjmVkSubProcessContext
 {
 	friend class FVdjmAndroidEncoderBackendVulkan;
 	/**
-	* @brief Vulkan 이미지에서 필요한 정보를 추출하는 유틸리티 클래스
-	* ### 목적:
-	* - Vulkan 에 넣는 이미지가 바로 적합하지 않으니 VKImage에서 필요한 정보를 추출하는 역할
-	* - native Resource 추출
-	* ### Result:
-	* - width, height, format, layout 등 Vulkan 이미지로 제출하기 위해 필요한 정보를 추출
-	* - FVKSubmitFrameInfo 구조체로 결과 반환
-	* ### 한계:
-	* - 자원 생성, command submit, 동기화 완료 처리
+		SrcImage
+		SrcFormat
+		SrcWidth
+		SrcHeight
+		bFormatMatchesSwapchain
+		bExtentMatchesSwapchain
+		bCanDirectCopy
+		bNeedsIntermediate
 	*/
 public:
 	
