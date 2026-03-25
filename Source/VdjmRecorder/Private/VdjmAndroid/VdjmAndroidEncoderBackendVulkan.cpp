@@ -1055,6 +1055,17 @@ CurrentLayout = VK_IMAGE_LAYOUT_UNDEFINED
 		ReleaseRecordSessionVkResources();
 		return false;
 	}
+	
+	mVkRecordSession.SwapchainImageStates.SetNum(swapchainImageCount);
+	for (uint32 i = 0; i < swapchainImageCount; ++i)
+	{
+		auto& State = mVkRecordSession.SwapchainImageStates[i];
+		State.Image = mVkRecordSession.SwapchainImages[i];
+		State.Format = chosenSurfaceFormat.format;
+		State.Width = extent.width;
+		State.Height = extent.height;
+		State.CurrentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	}
 
 	mVkRecordSession.SwapchainImageViews.Reserve(mVkRecordSession.SwapchainImages.Num());
 	for (VkImage image : mVkRecordSession.SwapchainImages)
