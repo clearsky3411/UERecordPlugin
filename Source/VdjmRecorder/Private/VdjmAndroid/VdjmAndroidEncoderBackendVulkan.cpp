@@ -365,7 +365,15 @@ bool FVdjmVkSubProcSurfaceSubmitter::Submit(FVdjmAndroidEncoderBackendVulkan& ow
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Submit: vkResetFences failed (%d)"), (int32)result);
 		return false;
 	}
-
+	UE_LOG(LogVdjmRecorderCore, Warning,
+		TEXT("Submit: Queue=%p Cmd=%p Fence=%p AcquireSem=%p RenderSem=%p ImageIndex=%u"),
+		queue,
+		owner.GetCommandBuffer(),
+		owner.GetSubmitFence(),
+		owner.GetAcquireSemaphore(),
+		owner.GetRenderCompleteSemaphore(),
+		frameState.AcquiredImageIndex);
+	
 	result = vkQueueSubmit(queue, 1, &submitInfo, owner.GetSubmitFence());
 	if (result != VK_SUCCESS)
 	{
@@ -588,7 +596,16 @@ bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& 
 	mPaused = false;
 	mRuntimeReady = false;
 	
-	UE_LOG(LogVdjmRecorderCore, Log, TEXT("FVdjmAndroidEncoderBackendVulkan::Init - success"));
+	UE_LOG(LogVdjmRecorderCore, Log,
+	TEXT("Vulkan Init: Path=%s W=%d H=%d Bitrate=%d FPS=%d Interval=%d Backend=%d Window=%p"),
+		*mConfig.OutputFilePath,
+		mConfig.VideoWidth,
+		mConfig.VideoHeight,
+		mConfig.VideoBitrate,
+		mConfig.VideoFPS,
+		mConfig.VideoIntervalSec,
+		(int32)mConfig.GraphicBackend,
+		mInputWindow);
 	return true;
 }
 
@@ -626,7 +643,13 @@ bool FVdjmAndroidEncoderBackendVulkan::InitVkRuntimeContext()
 		mVkRuntime.Clear();
 		return false;
 	}
-
+	UE_LOG(LogVdjmRecorderCore, Warning,
+		TEXT("InitVkRuntimeContext: Instance=%p PhysicalDevice=%p Device=%p Queue=%p GraphicsQueueFamilyIndex=%u"),
+		mVkRuntime.VkInstance,
+		mVkRuntime.VkPhysicalDevice,
+		mVkRuntime.VkDevice,
+		mVkRuntime.GraphicsQueue,
+		mVkRuntime.GraphicsQueueFamilyIndex);
 	mVkRuntime.bInitialized = true;
 	return true;
 }
@@ -888,6 +911,24 @@ bool FVdjmAndroidEncoderBackendVulkan::EnsureRuntimeReady()
 		ReleaseRecordSessionVkResources();
 		return false;
 	}
+	
+	VkBool32 bSurfaceSupported = VK_FALSE;
+	VkResult codecResult = vkGetPhysicalDeviceSurfaceSupportKHR(
+		mVkRuntime.VkPhysicalDevice,
+		mVkRuntime.GraphicsQueueFamilyIndex,
+		mVkRecordSession.CodecSurface,
+		&bSurfaceSupported);
+
+	if (codecResult != VK_SUCCESS || bSurfaceSupported != VK_TRUE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("EnsureRuntimeReady: Graphics queue family does not support present. Result=%d QueueFamily=%u Supported=%d"),
+			(int32)codecResult,
+			mVkRuntime.GraphicsQueueFamilyIndex,
+			(int32)bSurfaceSupported);
+		ReleaseRecordSessionVkResources();
+		return false;
+	}
 
 	VkSurfaceCapabilitiesKHR caps{};
 	result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(mVkRuntime.VkPhysicalDevice, mVkRecordSession.CodecSurface, &caps);
@@ -1126,7 +1167,11 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 
 	outFrameState.AcquiredImageIndex = imageIndex;
 	outFrameState.DstSwapchainImage = mVkRecordSession.SwapchainImages[imageIndex];
-
+	UE_LOG(LogVdjmRecorderCore, Warning,
+		TEXT("AcquireNextSwapchainImage: Result=%d ImageIndex=%u Swapchain=%p"),
+		(int32)result,
+		imageIndex,
+		mVkRecordSession.CodecSwapchain);
 	return outFrameState.DstSwapchainImage != VK_NULL_HANDLE;
 }
 
@@ -1182,7 +1227,7 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 		cmd,
 		frameState.DstSwapchainImage,
 		mVkRecordSession.SwapchainFormat,
-		VK_IMAGE_LAYOUT_UNDEFINED,
+		VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
 		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
 	if (frameState.SrcFormat == mVkRecordSession.SwapchainFormat
