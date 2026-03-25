@@ -129,8 +129,7 @@ struct FVdjmVkRecordSessionState
 	uint32 SwapchainWidth = 0;
 	uint32 SwapchainHeight = 0;
 
-	TArray<VkImage> SwapchainImages;
-	TArray<VkImageView> SwapchainImageViews;
+	
 
 	VkCommandPool CommandPool = VK_NULL_HANDLE;
 	VkCommandBuffer CommandBuffer = VK_NULL_HANDLE;
@@ -139,6 +138,8 @@ struct FVdjmVkRecordSessionState
 	VkSemaphore AcquireSemaphore = VK_NULL_HANDLE;
 	VkSemaphore RenderCompleteSemaphore = VK_NULL_HANDLE;
 	
+	TArray<VkImage> SwapchainImages;
+	TArray<VkImageView> SwapchainImageViews;
 	TArray<FVdjmVkOwnedImageState> SwapchainImageStates;
 	TArray<VkSemaphore> RenderCompleteSemaphores;
 	
