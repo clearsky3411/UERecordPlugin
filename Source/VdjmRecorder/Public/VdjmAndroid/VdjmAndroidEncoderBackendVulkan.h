@@ -40,6 +40,7 @@ struct FVdjmVkOwnedImageState
 			&& Height > 0;
 	}
 };
+
 struct FVdjmVkSubmitFrameInfo
 {
 	VkImage SrcImage = VK_NULL_HANDLE;	
@@ -131,6 +132,9 @@ struct FVdjmVkRecordSessionState
 	VkFence SubmitFence = VK_NULL_HANDLE;
 	VkSemaphore AcquireSemaphore = VK_NULL_HANDLE;
 	VkSemaphore RenderCompleteSemaphore = VK_NULL_HANDLE;
+	
+	TArray<FVdjmVkOwnedImageState> SwapchainImageStates;
+	TArray<VkSemaphore> RenderCompleteSemaphores;
 	
 	void Clear()
 	{
