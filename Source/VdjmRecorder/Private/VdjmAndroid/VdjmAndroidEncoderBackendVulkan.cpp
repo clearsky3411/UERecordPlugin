@@ -487,6 +487,32 @@ void FVdjmAndroidEncoderBackendVulkan::TransitionImageLayout(VkCommandBuffer com
 		0, nullptr,
 		1, &Barrier);
 }
+bool FVdjmAndroidEncoderBackendVulkan::TransitionOwnedImage(
+	VkCommandBuffer Cmd,
+	FVdjmVkOwnedImageState& State,
+	VkImageLayout NewLayout)
+{
+	if (!State.IsValid())
+	{
+		return false;
+	}
+
+	// 이미 원하는 layout이면 아무 것도 안 함
+	if (State.CurrentLayout == NewLayout)
+	{
+		return true;
+	}
+
+	TransitionImageLayout(
+		Cmd,
+		State.Image,
+		State.Format,
+		State.CurrentLayout,
+		NewLayout);
+
+	State.CurrentLayout = NewLayout;
+	return true;
+}
 
 VkSurfaceFormatKHR FVdjmAndroidEncoderBackendVulkan::ChooseSurfaceFormat(const FVdjmVkRuntimeContext& runtimeContext,const TArray<VkSurfaceFormatKHR>& availableFormats)
 {
@@ -657,11 +683,14 @@ void FVdjmAndroidEncoderBackendVulkan::ReleaseRecordSessionVkResources()
 	{
 		mIntermediateStage.Release(*this);
 
-		if (mVkRecordSession.RenderCompleteSemaphore != VK_NULL_HANDLE)
+		for (VkSemaphore Sem : mVkRecordSession.RenderCompleteSemaphores)
 		{
-			vkDestroySemaphore(mVkRuntime.VkDevice, mVkRecordSession.RenderCompleteSemaphore, nullptr);
-			mVkRecordSession.RenderCompleteSemaphore = VK_NULL_HANDLE;
+			if (Sem != VK_NULL_HANDLE)
+			{
+				vkDestroySemaphore(mVkRuntime.VkDevice, Sem, nullptr);
+			}
 		}
+		mVkRecordSession.RenderCompleteSemaphores.Empty();
 
 		if (mVkRecordSession.AcquireSemaphore != VK_NULL_HANDLE)
 		{
@@ -1059,7 +1088,7 @@ CurrentLayout = VK_IMAGE_LAYOUT_UNDEFINED
 	mVkRecordSession.SwapchainImageStates.SetNum(swapchainImageCount);
 	for (uint32 i = 0; i < swapchainImageCount; ++i)
 	{
-		auto& State = mVkRecordSession.SwapchainImageStates[i];
+		FVdjmVkOwnedImageState& State = mVkRecordSession.SwapchainImageStates[i];
 		State.Image = mVkRecordSession.SwapchainImages[i];
 		State.Format = chosenSurfaceFormat.format;
 		State.Width = extent.width;
@@ -1067,6 +1096,7 @@ CurrentLayout = VK_IMAGE_LAYOUT_UNDEFINED
 		State.CurrentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	}
 
+	//	View
 	mVkRecordSession.SwapchainImageViews.Reserve(mVkRecordSession.SwapchainImages.Num());
 	for (VkImage image : mVkRecordSession.SwapchainImages)
 	{
@@ -1143,12 +1173,24 @@ CurrentLayout = VK_IMAGE_LAYOUT_UNDEFINED
 		return false;
 	}
 
-	result = vkCreateSemaphore(mVkRuntime.VkDevice, &semaphoreInfo, nullptr, &mVkRecordSession.RenderCompleteSemaphore);
-	if (result != VK_SUCCESS)
+	mVkRecordSession.RenderCompleteSemaphores.SetNum(swapchainImageCount);
+	for (uint32 i = 0; i < swapchainImageCount; ++i)
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("EnsureRuntimeReady: vkCreateSemaphore(RenderComplete) failed (%d)"), (int32)result);
-		ReleaseRecordSessionVkResources();
-		return false;
+		result = vkCreateSemaphore(
+			mVkRuntime.VkDevice,
+			&semaphoreInfo,
+			nullptr,
+			&mVkRecordSession.RenderCompleteSemaphores[i]);
+
+		if (result != VK_SUCCESS)
+		{
+			UE_LOG(LogVdjmRecorderCore, Error,
+				TEXT("EnsureRuntimeReady: vkCreateSemaphore(RenderComplete[%u]) failed (%d)"),
+				i,
+				(int32)result);
+			ReleaseRecordSessionVkResources();
+			return false;
+		}
 	}
 
 	mVkRecordSession.SwapchainFormat = chosenSurfaceFormat.format;
@@ -1194,13 +1236,8 @@ FrameSubmitState.DstState = &mVkRecordSession.SwapchainImageStates[imageIndex]
 	}
 
 	outFrameState.AcquiredImageIndex = imageIndex;
-	outFrameState.DstSwapchainImage = mVkRecordSession.SwapchainImages[imageIndex];
-	UE_LOG(LogVdjmRecorderCore, Warning,
-		TEXT("AcquireNextSwapchainImage: Result=%d ImageIndex=%u Swapchain=%p"),
-		(int32)result,
-		imageIndex,
-		mVkRecordSession.CodecSwapchain);
-	return outFrameState.DstSwapchainImage != VK_NULL_HANDLE;
+	outFrameState.DstState = &mVkRecordSession.SwapchainImageStates[imageIndex];
+	return outFrameState.DstState != nullptr && outFrameState.DstState->IsValid();
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::TryExtractNativeVkImage(const FTextureRHIRef& srcTexture,VkImage& outImage) const
@@ -1225,114 +1262,95 @@ bool FVdjmAndroidEncoderBackendVulkan::TryExtractNativeVkImage(const FTextureRHI
 
 bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVkFrameSubmitState& frameState)
 {
-	/*
-	* 해야 할 것:
-	이제부터는 destination layout은 DstState->CurrentLayout만 믿는다.
-		DstState->CurrentLayout -> TRANSFER_DST_OPTIMAL
-		copy/blit
-		TRANSFER_DST_OPTIMAL -> PRESENT_SRC_KHR
-		끝나면 DstState->CurrentLayout = PRESENT_SRC_KHR
-		
-		즉 layout transition 대상은 owned image만
-	 */
-	//	마지막 hop
-	if (frameState.FinalSrcImage == VK_NULL_HANDLE || frameState.DstSwapchainImage == VK_NULL_HANDLE)
+// 외부 source를 직접 쓰는 경우에만 이 임시 가정을 사용한다.
+	// intermediate를 쓰는 경우엔 FinalSrcOwnedState의 CurrentLayout을 믿는다.
+	const VkImageLayout AssumedExternalSrcLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+	if (frameState.DstState == nullptr || !frameState.DstState->IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("SubmitTextureToCodecSurface: DstState invalid"));
+		return false;
+	}
+
+	if (frameState.FinalSrcImage == VK_NULL_HANDLE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("SubmitTextureToCodecSurface: FinalSrcImage invalid"));
+		return false;
+	}
+
+	FVdjmVkOwnedImageState& DstState = *frameState.DstState;
+
+	// 1) 최종 source가 intermediate(owned)면, 그 layout을 믿고 TRANSFER_SRC로 맞춘다.
+	//    외부 source면 RecordPrepareAndCopy에서 이미 TRANSFER_SRC로 전이해 둔 상태라고 본다.
+	if (frameState.FinalSrcOwnedState != nullptr)
+	{
+		if (!TransitionOwnedImage(Cmd, *frameState.FinalSrcOwnedState, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL))
+		{
+			return false;
+		}
+	}
+
+	// 2) destination swapchain image를 쓰기 가능 상태로 전이
+	if (!TransitionOwnedImage(Cmd, DstState, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
 	{
 		return false;
 	}
 
-	VkCommandBuffer cmd = mVkRecordSession.CommandBuffer;
-	if (cmd == VK_NULL_HANDLE)
+	// 3) 최종 source 메타 정보 결정
+	VkFormat FinalSrcFormat = SubmitInfo.SrcFormat;
+	uint32 FinalSrcWidth = SubmitInfo.SrcWidth;
+	uint32 FinalSrcHeight = SubmitInfo.SrcHeight;
+
+	// intermediate를 쓴 경우에는 source 메타도 owned state 기준으로 교체
+	if (FrameState.FinalSrcOwnedState != nullptr)
 	{
-		return false;
+		FinalSrcFormat = FrameState.FinalSrcOwnedState->Format;
+		FinalSrcWidth = FrameState.FinalSrcOwnedState->Width;
+		FinalSrcHeight = FrameState.FinalSrcOwnedState->Height;
 	}
 
-	const VkImageLayout finalSrcOldLayout =
-		frameState.bNeedsIntermediate
-		? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-		: frameState.CacheEntry.SrcLayout;
+	// 4) 최종 source -> destination 복사/블릿
+	const bool bExactMatch =
+		(FinalSrcFormat == DstState.Format) &&
+		(FinalSrcWidth == DstState.Width) &&
+		(FinalSrcHeight == DstState.Height);
 
-	if (!frameState.bNeedsIntermediate)
+	if (bExactMatch)
 	{
-		TransitionImageLayout(
-			cmd,
-			frameState.FinalSrcImage,
-			frameState.CacheEntry.SrcFormat,
-			frameState.CacheEntry.SrcLayout,
-			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-	}
-
-	TransitionImageLayout(
-		cmd,
-		frameState.DstSwapchainImage,
-		mVkRecordSession.SwapchainFormat,
-		VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-	if (frameState.CacheEntry.SrcFormat == mVkRecordSession.SwapchainFormat
-		&& frameState.CacheEntry.SrcWidth == mVkRecordSession.SwapchainWidth
-		&& frameState.CacheEntry.SrcHeight == mVkRecordSession.SwapchainHeight)
-	{
-		VkImageCopy region{};
-		region.srcSubresource.aspectMask = GColorAspect;
-		region.srcSubresource.mipLevel = 0;
-		region.srcSubresource.baseArrayLayer = 0;
-		region.srcSubresource.layerCount = 1;
-		region.dstSubresource.aspectMask = GColorAspect;
-		region.dstSubresource.mipLevel = 0;
-		region.dstSubresource.baseArrayLayer = 0;
-		region.dstSubresource.layerCount = 1;
-		region.extent.width = frameState.CacheEntry.SrcWidth;
-		region.extent.height = frameState.CacheEntry.SrcHeight;
-		region.extent.depth = 1;
-
-		vkCmdCopyImage(
-			cmd,
-			frameState.FinalSrcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			frameState.DstSwapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			1,
-			&region);
+		RecordCopyImage(
+			Cmd,
+			FrameState.FinalSrcImage,
+			DstState.Image,
+			DstState.Width,
+			DstState.Height);
 	}
 	else
 	{
-		VkImageBlit blit{};
-		blit.srcSubresource.aspectMask = GColorAspect;
-		blit.srcSubresource.mipLevel = 0;
-		blit.srcSubresource.baseArrayLayer = 0;
-		blit.srcSubresource.layerCount = 1;
-		blit.dstSubresource.aspectMask = GColorAspect;
-		blit.dstSubresource.mipLevel = 0;
-		blit.dstSubresource.baseArrayLayer = 0;
-		blit.dstSubresource.layerCount = 1;
-		blit.srcOffsets[0] = { 0, 0, 0 };
-		blit.srcOffsets[1] = { (int32)frameState.CacheEntry.SrcWidth, (int32)frameState.CacheEntry.SrcHeight, 1 };
-		blit.dstOffsets[0] = { 0, 0, 0 };
-		blit.dstOffsets[1] = { (int32)mVkRecordSession.SwapchainWidth, (int32)mVkRecordSession.SwapchainHeight, 1 };
-
-		vkCmdBlitImage(
-			cmd,
-			frameState.FinalSrcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			frameState.DstSwapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-			1,
-			&blit,
-			VK_FILTER_LINEAR);
+		RecordBlitImage(
+			Cmd,
+			FrameState.FinalSrcImage,
+			FinalSrcWidth,
+			FinalSrcHeight,
+			DstState.Image,
+			DstState.Width,
+			DstState.Height);
 	}
 
-	TransitionImageLayout(
-		cmd,
-		frameState.DstSwapchainImage,
-		mVkRecordSession.SwapchainFormat,
-		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-		VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	// 5) destination을 present 가능 상태로 전이
+	if (!TransitionOwnedImage(Cmd, DstState, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR))
+	{
+		return false;
+	}
 
-	if (!frameState.bNeedsIntermediate)
+	// 6) 외부 source direct path였으면, 원래 가정 layout으로 되돌림
+	if (FrameState.FinalSrcOwnedState == nullptr)
 	{
 		TransitionImageLayout(
-			cmd,
-			frameState.FinalSrcImage,
-			frameState.CacheEntry.SrcFormat,
+			Cmd,
+			SubmitInfo.SrcImage,
+			SubmitInfo.SrcFormat,
 			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-			frameState.CacheEntry.SrcLayout);
+			AssumedExternalSrcLayout);
 	}
 
 	return true;

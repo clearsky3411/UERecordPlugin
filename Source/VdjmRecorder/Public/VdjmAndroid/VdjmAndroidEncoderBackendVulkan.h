@@ -9,6 +9,12 @@
 
 struct IVulkanDynamicRHI;
 class FVdjmAndroidEncoderBackendVulkan;
+/**
+ * @brief Vulkan 이미지 제출 과정에서 입력 이미지의 특성을 분석하여 제출 전략을 결정하는 클래스
+ * @note life time : FVdjmAndroidEncoderBackendVulkan 인스턴스 생성부터 소멸까지, 즉, Vulkan 백엔드가 활성화된 동안
+ * 
+ */
+
 
 
 
@@ -151,6 +157,9 @@ struct FVdjmVkRecordSessionState
 		SubmitFence = VK_NULL_HANDLE;
 		AcquireSemaphore = VK_NULL_HANDLE;
 		RenderCompleteSemaphore = VK_NULL_HANDLE;
+		
+		SwapchainImageStates.Empty();
+		RenderCompleteSemaphores.Empty();
 	}
 };
 
@@ -165,12 +174,21 @@ struct FVdjmVkFrameSubmitState
 	uint32 AcquiredImageIndex = UINT32_MAX;
 	FVdjmVkOwnedImageState* DstState;
 	VkImage FinalSrcImage = VK_NULL_HANDLE; // 최종 제출에 사용될 src image 핸들, intermediate가 필요한 경우 intermediate image로 설정
-	
+	FVdjmVkOwnedImageState* FinalSrcOwnedState = nullptr;
+
 	void Clear()
 	{
 		AcquiredImageIndex = UINT32_MAX;
 		DstState = nullptr;
 		FinalSrcImage = VK_NULL_HANDLE;
+		FinalSrcOwnedState = nullptr;
+	}
+
+	bool IsValid() const
+	{
+		return DstState != nullptr
+			&& DstState->IsValid()
+			&& FinalSrcImage != VK_NULL_HANDLE;
 	}
 };
 
@@ -339,6 +357,9 @@ public:
 
 	static uint32 FindMemoryType(VkPhysicalDevice physicalDevice, uint32 typeFilter, VkMemoryPropertyFlags properties);
 	static void TransitionImageLayout(VkCommandBuffer commandBuffer, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+	static bool TransitionOwnedImage(VkCommandBuffer Cmd,
+	FVdjmVkOwnedImageState& State,
+	VkImageLayout NewLayout);
 	static VkSurfaceFormatKHR ChooseSurfaceFormat(const FVdjmVkRuntimeContext& runtimeContext,const TArray<VkSurfaceFormatKHR>& availableFormats);
 	static VkPresentModeKHR ChoosePresentMode(const TArray<VkPresentModeKHR>& modes);
 	static VkCompositeAlphaFlagBitsKHR ChooseCompositeAlpha(VkCompositeAlphaFlagsKHR flags);
