@@ -13,6 +13,9 @@ class FVdjmAndroidEncoderBackendVulkan;
 
 struct FRecorderSessionContract
 {
+	/*
+	 * EnsureRuntimeReady 에서 확정이 되어야한다.
+	 */
 	uint32 EncodeWidth = 0;
 	uint32 EncodeHeight = 0;
 
