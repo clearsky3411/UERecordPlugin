@@ -808,7 +808,9 @@ bool FVdjmAndroidEncoderBackendVulkan::IsRunnable()
 
 bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec)
 {
-	
+	/*
+	 * 매 프레임 사실확인이 필요함. 소유하려는게 아님.
+	 */
 }
 
 
