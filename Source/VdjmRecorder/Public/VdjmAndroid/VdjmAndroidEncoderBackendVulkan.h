@@ -57,15 +57,47 @@ struct FVdjmVkFrameSubmitState
 
 struct FVdjmVkRecordSessionState
 {
+	ANativeWindow* InputWindow = nullptr;
+
+	VkSurfaceKHR CodecSurface = VK_NULL_HANDLE;
 	VkSwapchainKHR CodecSwapchain = VK_NULL_HANDLE;
+
+	TArray<VkImage> SwapchainImages;
+	TArray<VkImageLayout> SwapchainImageLayouts;
+
+	VkFormat SurfaceFormat = VK_FORMAT_UNDEFINED;
+	VkColorSpaceKHR SurfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+	VkExtent2D SurfaceExtent{0, 0};
+
+	VkCommandPool CommandPool = VK_NULL_HANDLE;
+	VkCommandBuffer CommandBuffer = VK_NULL_HANDLE;
+
+	VkFence SubmitFence = VK_NULL_HANDLE;
+	VkSemaphore AcquireSemaphore = VK_NULL_HANDLE;
 
 	FVdjmVkOwnedImageState IntermediateImageState;
 	bool bHasIntermediateImage = false;
 
-	bool bRuntimeReady = false;
+	bool bStarted = false;
 
-	// 네 기존 멤버들 유지
-	// Surface, Window, Format, Extent, etc...
+	void Clear()
+	{
+		InputWindow = nullptr;
+		CodecSurface = VK_NULL_HANDLE;
+		CodecSwapchain = VK_NULL_HANDLE;
+		SwapchainImages.Empty();
+		SwapchainImageLayouts.Empty();
+		SurfaceFormat = VK_FORMAT_UNDEFINED;
+		SurfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+		SurfaceExtent = {0, 0};
+		CommandPool = VK_NULL_HANDLE;
+		CommandBuffer = VK_NULL_HANDLE;
+		SubmitFence = VK_NULL_HANDLE;
+		AcquireSemaphore = VK_NULL_HANDLE;
+		IntermediateImageState.Clear();
+		bHasIntermediateImage = false;
+		bStarted = false;
+	}
 };
 
 
@@ -181,8 +213,8 @@ public:
 	const uint32_t* GetCurrentSwapchainImageIndexConst() const { return &mCurrentSwapchainImageIndex32; }
 	void SetCurrentSwapchainImageIndex(uint32 InIndex) { mCurrentSwapchainImageIndex32 = InIndex; }
 	
-
-	
+	void CreateRecordSessionVkResources();
+	void DestroyRecordSessionVkResources();
 	
 	bool TryExtractNativeVkImage(const FTextureRHIRef& srcTexture, VkImage& outImage) const;
 private:

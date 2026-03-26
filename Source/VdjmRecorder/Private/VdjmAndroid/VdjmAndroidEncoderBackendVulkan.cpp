@@ -234,18 +234,8 @@ FVdjmAndroidEncoderBackendVulkan::FVdjmAndroidEncoderBackendVulkan()
 
 bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow)
 {
-	//고정 입력 저장 + Vulkan 런타임 핸들 확보
-	//	config 저장, input window 저장, runtime handle 확보 및 초기화
-	UE_LOG(LogVdjmRecorderCore, Log, TEXT("FVdjmAndroidEncoderBackendVulkan::Init - start"));
-	if (!config.IsValidateEncoderArguments())
+	if (!config.IsValidateEncoderArguments() || inputWindow == nullptr)
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderBackendVulkan::Init - invalid config"));
-		return false;
-	}
-
-	if (inputWindow == nullptr)
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderBackendVulkan::Init - inputWindow is null"));
 		return false;
 	}
 
@@ -263,23 +253,12 @@ bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& 
 	mConfig = config;
 	mInputWindow = inputWindow;
 	ANativeWindow_acquire(mInputWindow);
-	
+
+	mVkRecordSession.Clear();
+
 	mInitialized = true;
 	mStarted = false;
 	mPaused = false;
-	mRuntimeReady = false;
-	
-	UE_LOG(LogVdjmRecorderCore, Log,
-	TEXT("Vulkan Init: Path=%s W=%d H=%d Bitrate=%d FPS=%d Interval=%d Backend=%d Window=%p"),
-		*mConfig.OutputFilePath,
-		mConfig.VideoWidth,
-		mConfig.VideoHeight,
-		mConfig.VideoBitrate,
-		mConfig.VideoFPS,
-		mConfig.VideoIntervalSec,
-		(int32)mConfig.GraphicBackend,
-		mInputWindow);
-	//	경로,계약,capability 분석
 	return true;
 }
 
@@ -336,21 +315,22 @@ void FVdjmAndroidEncoderBackendVulkan::ReleaseRecordSessionVkResources()
 
 bool FVdjmAndroidEncoderBackendVulkan::Start()
 {
-	//녹화 세션용 Vulkan 자원 생성
-	if (!mInitialized)
+	if (!mInitialized || mInputWindow == nullptr || !mVkRuntime.IsValid())
 	{
 		return false;
 	}
 
+	// 여기서 session용 Vulkan surface / swapchain / cmd / sync 생성
+	// EnsureRuntimeReady 같은 이름 말고 Start 책임 안에 넣는 편이 지금 구조에 맞음
 
 	mPaused = false;
 	mStarted = true;
+	mVkRecordSession.bStarted = true;
 	return true;
 }
 
 void FVdjmAndroidEncoderBackendVulkan::Stop()
 {
-	//세션 자원 정리
 	mStarted = false;
 	mPaused = false;
 
@@ -359,12 +339,12 @@ void FVdjmAndroidEncoderBackendVulkan::Stop()
 		vkDeviceWaitIdle(mVkRuntime.VkDevice);
 	}
 
-	ReleaseRecordSessionVkResources();
+	// Start에서 만든 세션 자원 해제
+	mVkRecordSession.Clear();
 }
 
 void FVdjmAndroidEncoderBackendVulkan::Terminate()
 {
-	//입력 window 참조 해제 + 런타임 상태 초기화
 	Stop();
 
 	if (mInputWindow != nullptr)
@@ -373,7 +353,6 @@ void FVdjmAndroidEncoderBackendVulkan::Terminate()
 		mInputWindow = nullptr;
 	}
 
-	// borrowed handle이므로 destroy 금지
 	mVkRuntime.Clear();
 	mInitialized = false;
 }
@@ -402,7 +381,24 @@ bool FVdjmAndroidEncoderBackendVulkan::IsRunnable()
 
 bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec)
 {
-	//프레임 해석 + 제출
+	if (!IsRunnable() || !srcTexture.IsValid())
+	{
+		return false;
+	}
+
+	FVdjmVkSubmitFrameInfo SubmitInfo{};
+	if (!mAnalyzer.Analyze(srcTexture, SubmitInfo))
+	{
+		return false;
+	}
+
+	FVdjmVkFrameSubmitState FrameState{};
+	if (!AcquireNextSwapchainImage(FrameState))
+	{
+		return false;
+	}
+
+	return SubmitTextureToCodecSurface(FrameState);
 }
 
 
