@@ -107,6 +107,11 @@ struct FVdjmVkRecordSessionState
 
 	bool bStarted = false;
 
+	bool IsReadyToStart() const
+	{
+		return CodecSurface != VK_NULL_HANDLE && CodecSwapchain != VK_NULL_HANDLE && CommandBuffer != VK_NULL_HANDLE;
+	}
+	
 	void Clear()
 	{
 		InputWindow = nullptr;
@@ -247,10 +252,9 @@ public:
 private:
 	
 	bool InitVkRuntimeContext();
-	void ReleaseRecordSessionVkResources();
-
+	
 	bool AcquireNextSwapchainImage(FVdjmVkFrameSubmitState& outFrameState);
-	bool SubmitTextureToCodecSurface(const FVdjmVkFrameSubmitState& frameState);
+	bool SubmitTextureToCodecSurface(const FVdjmVkSubmitFrameInfo& submitInfo, FVdjmVkFrameSubmitState& frameState);
 	
 	FVdjmAndroidEncoderConfigure mConfig;
 	

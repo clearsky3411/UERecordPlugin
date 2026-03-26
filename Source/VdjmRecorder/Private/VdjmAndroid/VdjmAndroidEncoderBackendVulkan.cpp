@@ -235,28 +235,33 @@ FVdjmAndroidEncoderBackendVulkan::FVdjmAndroidEncoderBackendVulkan()
 
 bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow)
 {
-	if (!config.IsValidateEncoderArguments() || inputWindow == nullptr)
+	if (not config.IsValidateEncoderArguments() || inputWindow == nullptr)
 	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Init: invalid config or input window"));
 		return false;
 	}
 
-	if (!InitVkRuntimeContext())
+	if (not InitVkRuntimeContext())
 	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Init: failed to initialize Vulkan runtime context"));
 		return false;
 	}
 
 	if (mInputWindow != nullptr && mInputWindow != inputWindow)
 	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Init: replacing existing input window"));
 		ANativeWindow_release(mInputWindow);
 		mInputWindow = nullptr;
 	}
 
+	UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Init: Vulkan runtime context initialized successfully"));
 	mConfig = config;
 	mInputWindow = inputWindow;
 	ANativeWindow_acquire(mInputWindow);
 
 	mVkRecordSession.Clear();
-
+	mCurrentSwapchainImageIndex32 = UINT32_MAX;
+	
 	mInitialized = true;
 	mStarted = false;
 	mPaused = false;
@@ -268,6 +273,7 @@ bool FVdjmAndroidEncoderBackendVulkan::InitVkRuntimeContext()
 	//	runtime handle 확보 및 초기화
 	if (mVkRuntime.bInitialized)
 	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("InitVkRuntimeContext: Vulkan runtime context already initialized"));
 		return true;
 	}
 
@@ -307,10 +313,6 @@ bool FVdjmAndroidEncoderBackendVulkan::InitVkRuntimeContext()
 	mVkRuntime.bInitialized = true;
 	return true;
 }
-void FVdjmAndroidEncoderBackendVulkan::ReleaseRecordSessionVkResources()
-{
-	
-}
 
 
 
@@ -321,12 +323,24 @@ bool FVdjmAndroidEncoderBackendVulkan::Start()
 		return false;
 	}
 
-	// 여기서 session용 Vulkan surface / swapchain / cmd / sync 생성
-	// EnsureRuntimeReady 같은 이름 말고 Start 책임 안에 넣는 편이 지금 구조에 맞음
+	if (mStarted)
+	{
+		return true;
+	}
+
+	CreateRecordSessionVkResources();
+
+	if (not mVkRecordSession.IsReadyToStart())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Start: record session is not ready to start"));
+		DestroyRecordSessionVkResources();
+		return false;
+	}
 
 	mPaused = false;
 	mStarted = true;
 	mVkRecordSession.bStarted = true;
+	UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Start: Vulkan encoder backend started successfully"));
 	return true;
 }
 
@@ -339,9 +353,7 @@ void FVdjmAndroidEncoderBackendVulkan::Stop()
 	{
 		vkDeviceWaitIdle(mVkRuntime.VkDevice);
 	}
-
-	// Start에서 만든 세션 자원 해제
-	mVkRecordSession.Clear();
+	DestroyRecordSessionVkResources();
 }
 
 void FVdjmAndroidEncoderBackendVulkan::Terminate()
@@ -393,25 +405,85 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 		return false;
 	}
 
+	const bool bExactSize =
+		SubmitInfo.SrcWidth == mVkRecordSession.SurfaceExtent.width &&
+		SubmitInfo.SrcHeight == mVkRecordSession.SurfaceExtent.height;
+
+	const bool bExactFormat =
+		SubmitInfo.SrcFormat == mVkRecordSession.SurfaceFormat;
+
+	SubmitInfo.bCanDirectCopy = bExactSize && bExactFormat;
+	SubmitInfo.bNeedsIntermediate = !SubmitInfo.bCanDirectCopy;
+
+	if (!SubmitInfo.bCanDirectCopy)
+	{
+		// 지금 단계에서는 direct copy만 허용
+		return false;
+	}
+
 	FVdjmVkFrameSubmitState FrameState{};
 	if (!AcquireNextSwapchainImage(FrameState))
 	{
 		return false;
 	}
 
-	return SubmitTextureToCodecSurface(FrameState);
+	return SubmitTextureToCodecSurface(SubmitInfo, FrameState);
 }
 
 
-
-bool FVdjmAndroidEncoderBackendVulkan::EnsureRuntimeReady()
-{
-	
-}
 
 bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSubmitState& outFrameState)
 {
 
+}
+
+void FVdjmAndroidEncoderBackendVulkan::CreateRecordSessionVkResources()
+{
+}
+
+void FVdjmAndroidEncoderBackendVulkan::DestroyRecordSessionVkResources()
+{
+	VkDevice Device = mVkRuntime.VkDevice;
+	if (Device == VK_NULL_HANDLE)
+	{
+		mVkRecordSession.Clear();
+		mCurrentSwapchainImageIndex32 = UINT32_MAX;
+		return;
+	}
+
+	if (mVkRecordSession.SubmitFence != VK_NULL_HANDLE)
+	{
+		vkDestroyFence(Device, mVkRecordSession.SubmitFence, nullptr);
+		mVkRecordSession.SubmitFence = VK_NULL_HANDLE;
+	}
+
+	if (mVkRecordSession.AcquireSemaphore != VK_NULL_HANDLE)
+	{
+		vkDestroySemaphore(Device, mVkRecordSession.AcquireSemaphore, nullptr);
+		mVkRecordSession.AcquireSemaphore = VK_NULL_HANDLE;
+	}
+
+	if (mVkRecordSession.CommandPool != VK_NULL_HANDLE)
+	{
+		vkDestroyCommandPool(Device, mVkRecordSession.CommandPool, nullptr);
+		mVkRecordSession.CommandPool = VK_NULL_HANDLE;
+		mVkRecordSession.CommandBuffer = VK_NULL_HANDLE;
+	}
+
+	if (mVkRecordSession.CodecSwapchain != VK_NULL_HANDLE)
+	{
+		vkDestroySwapchainKHR(Device, mVkRecordSession.CodecSwapchain, nullptr);
+		mVkRecordSession.CodecSwapchain = VK_NULL_HANDLE;
+	}
+
+	if (mVkRecordSession.CodecSurface != VK_NULL_HANDLE)
+	{
+		vkDestroySurfaceKHR(mVkRuntime.VkInstance, mVkRecordSession.CodecSurface, nullptr);
+		mVkRecordSession.CodecSurface = VK_NULL_HANDLE;
+	}
+
+	mVkRecordSession.Clear();
+	mCurrentSwapchainImageIndex32 = UINT32_MAX;
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::TryExtractNativeVkImage(const FTextureRHIRef& srcTexture,VkImage& outImage) const
@@ -419,7 +491,7 @@ bool FVdjmAndroidEncoderBackendVulkan::TryExtractNativeVkImage(const FTextureRHI
 	
 }
 
-bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVkFrameSubmitState& frameState)
+bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVkSubmitFrameInfo& submitInfo, FVdjmVkFrameSubmitState& frameState)
 {
 	
 	return true;
