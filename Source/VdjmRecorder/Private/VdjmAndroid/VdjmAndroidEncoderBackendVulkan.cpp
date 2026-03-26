@@ -1005,7 +1005,217 @@ bool FVdjmAndroidEncoderBackendVulkan::TryExtractNativeVkImage(const FTextureRHI
 
 bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVkSubmitFrameInfo& submitInfo, FVdjmVkFrameSubmitState& frameState)
 {
-	
+	/*
+	 * SubmitTextureToCodecSurface 역할
+	 *
+	 * 1. AcquireNextSwapchainImage()에서 확보한 destination swapchain image에
+	 *    현재 프레임 source image를 복사한다.
+	 *
+	 * 2. 이 함수가 담당하는 범위
+	 *    - command buffer reset / begin / end
+	 *    - destination image layout transition
+	 *    - image copy
+	 *    - queue submit
+	 *    - present
+	 *
+	 * 3. 현재 단계의 임시 정책
+	 *    - source image는 일단 VK_IMAGE_LAYOUT_GENERAL 상태라고 가정한다.
+	 *    - source layout 추적은 아직 하지 않는다.
+	 *    - submit 완료를 fence로 기다린 뒤 present를 호출한다.
+	 *    - render-complete semaphore는 아직 추가하지 않는다.
+	 *
+	 * 4. 나중에 반드시 고쳐야 하는 것
+	 *    - source image 실제 layout 추적
+	 *    - render-complete semaphore 기반 present 동기화
+	 *    - intermediate copy 경로
+	 */
+
+	if (!submitInfo.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("SubmitTextureToCodecSurface: submitInfo is invalid"));
+		return false;
+	}
+
+	if (!mVkRecordSession.SwapchainImages.IsValidIndex((int32)frameState.AcquiredImageIndex))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("SubmitTextureToCodecSurface: invalid acquired image index. Index=%u ImageCount=%d"),
+			frameState.AcquiredImageIndex,
+			mVkRecordSession.SwapchainImages.Num());
+		return false;
+	}
+
+	if (frameState.CommandBuffer == VK_NULL_HANDLE || frameState.SubmitFence == VK_NULL_HANDLE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("SubmitTextureToCodecSurface: frame state handles are invalid"));
+		return false;
+	}
+
+	VkImage DstImage = mVkRecordSession.SwapchainImages[frameState.AcquiredImageIndex];
+	VkImageLayout& DstLayoutRef = mVkRecordSession.SwapchainImageLayouts[frameState.AcquiredImageIndex];
+
+	if (DstImage == VK_NULL_HANDLE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("SubmitTextureToCodecSurface: destination swapchain image is null"));
+		return false;
+	}
+
+	VkResult Result = vkResetCommandBuffer(frameState.CommandBuffer, 0);
+	if (Result != VK_SUCCESS)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("SubmitTextureToCodecSurface: vkResetCommandBuffer failed. Result=%d"),
+			(int32)Result);
+		return false;
+	}
+
+	VkCommandBufferBeginInfo BeginInfo{};
+	BeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	BeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+	Result = vkBeginCommandBuffer(frameState.CommandBuffer, &BeginInfo);
+	if (Result != VK_SUCCESS)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("SubmitTextureToCodecSurface: vkBeginCommandBuffer failed. Result=%d"),
+			(int32)Result);
+		return false;
+	}
+
+	// destination만 우리가 확실히 추적한다.
+	FVdjmVkHelper::TransitionImageLayout(
+		frameState.CommandBuffer,
+		DstImage,
+		mVkRecordSession.SurfaceFormat,
+		DstLayoutRef,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+	VkImageCopy CopyRegion{};
+	CopyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	CopyRegion.srcSubresource.mipLevel = 0;
+	CopyRegion.srcSubresource.baseArrayLayer = 0;
+	CopyRegion.srcSubresource.layerCount = 1;
+
+	CopyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	CopyRegion.dstSubresource.mipLevel = 0;
+	CopyRegion.dstSubresource.baseArrayLayer = 0;
+	CopyRegion.dstSubresource.layerCount = 1;
+
+	CopyRegion.extent.width = submitInfo.SrcWidth;
+	CopyRegion.extent.height = submitInfo.SrcHeight;
+	CopyRegion.extent.depth = 1;
+
+	// 현재 단계의 임시 정책:
+	// source는 GENERAL이라고 가정하고 복사한다.
+	vkCmdCopyImage(
+		frameState.CommandBuffer,
+		submitInfo.SrcImage,
+		VK_IMAGE_LAYOUT_GENERAL,
+		DstImage,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		1,
+		&CopyRegion);
+
+	FVdjmVkHelper::TransitionImageLayout(
+		frameState.CommandBuffer,
+		DstImage,
+		mVkRecordSession.SurfaceFormat,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+	Result = vkEndCommandBuffer(frameState.CommandBuffer);
+	if (Result != VK_SUCCESS)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("SubmitTextureToCodecSurface: vkEndCommandBuffer failed. Result=%d"),
+			(int32)Result);
+		return false;
+	}
+
+	VkPipelineStageFlags WaitStages[] =
+	{
+		VK_PIPELINE_STAGE_TRANSFER_BIT
+	};
+
+	VkSubmitInfo SubmitInfoVk{};
+	SubmitInfoVk.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	SubmitInfoVk.waitSemaphoreCount = 1;
+	SubmitInfoVk.pWaitSemaphores = &frameState.AcquireCompleteSemaphore;
+	SubmitInfoVk.pWaitDstStageMask = WaitStages;
+	SubmitInfoVk.commandBufferCount = 1;
+	SubmitInfoVk.pCommandBuffers = &frameState.CommandBuffer;
+	SubmitInfoVk.signalSemaphoreCount = 0;
+	SubmitInfoVk.pSignalSemaphores = nullptr;
+
+	Result = vkQueueSubmit(
+		mVkRuntime.GraphicsQueue,
+		1,
+		&SubmitInfoVk,
+		frameState.SubmitFence);
+
+	if (Result != VK_SUCCESS)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("SubmitTextureToCodecSurface: vkQueueSubmit failed. Result=%d Queue=%p Cmd=%p Fence=%p AcquireSem=%p"),
+			(int32)Result,
+			mVkRuntime.GraphicsQueue,
+			frameState.CommandBuffer,
+			frameState.SubmitFence,
+			frameState.AcquireCompleteSemaphore);
+		return false;
+	}
+
+	// 임시 정책:
+	// render-complete semaphore 대신 host fence를 기다린 후 present를 호출한다.
+	Result = vkWaitForFences(
+		mVkRuntime.VkDevice,
+		1,
+		&frameState.SubmitFence,
+		VK_TRUE,
+		UINT64_MAX);
+
+	if (Result != VK_SUCCESS)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("SubmitTextureToCodecSurface: vkWaitForFences(after submit) failed. Result=%d"),
+			(int32)Result);
+		return false;
+	}
+
+	VkPresentInfoKHR PresentInfo{};
+	PresentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+	PresentInfo.waitSemaphoreCount = 0;
+	PresentInfo.pWaitSemaphores = nullptr;
+	PresentInfo.swapchainCount = 1;
+	PresentInfo.pSwapchains = &mVkRecordSession.CodecSwapchain;
+	PresentInfo.pImageIndices = &frameState.AcquiredImageIndex;
+	PresentInfo.pResults = nullptr;
+
+	Result = vkQueuePresentKHR(mVkRuntime.GraphicsQueue, &PresentInfo);
+
+	if (Result == VK_ERROR_OUT_OF_DATE_KHR)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("SubmitTextureToCodecSurface: vkQueuePresentKHR out of date"));
+		return false;
+	}
+
+	if (Result != VK_SUCCESS && Result != VK_SUBOPTIMAL_KHR)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("SubmitTextureToCodecSurface: vkQueuePresentKHR failed. Result=%d"),
+			(int32)Result);
+		return false;
+	}
+
+	DstLayoutRef = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+	UE_LOG(LogVdjmRecorderCore, VeryVerbose,
+		TEXT("SubmitTextureToCodecSurface: success. SrcImage=%p DstImage=%p ImageIndex=%u"),
+		submitInfo.SrcImage,
+		DstImage,
+		frameState.AcquiredImageIndex);
+
 	return true;
 }
 #endif
