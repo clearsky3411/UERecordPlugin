@@ -377,13 +377,13 @@ void FVdjmAndroidEncoderBackendVulkan::Terminate()
 
 bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec)
 {
-	if (!IsRunnable() || !srcTexture.IsValid())
+	if (not srcTexture.IsValid())
 	{
 		return false;
 	}
 
 	FVdjmVkSubmitFrameInfo SubmitInfo{};
-	if (!mAnalyzer.Analyze(srcTexture, SubmitInfo))
+	if (not mAnalyzer.Analyze(srcTexture, SubmitInfo))
 	{
 		return false;
 	}
@@ -421,7 +421,337 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 
 bool FVdjmAndroidEncoderBackendVulkan::CreateRecordSessionVkResources()
 {
-	
+	if (mInputWindow == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("CreateRecordSessionVkResources: input window is null"));
+		return false;
+	}
+
+	if (!mVkRuntime.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("CreateRecordSessionVkResources: Vulkan runtime is invalid"));
+		return false;
+	}
+
+	DestroyRecordSessionVkResources();
+
+	mVkRecordSession.InputWindow = mInputWindow;
+
+	VkAndroidSurfaceCreateInfoKHR SurfaceInfo{};
+	SurfaceInfo.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
+	SurfaceInfo.window = mInputWindow;
+
+	VkResult Result = vkCreateAndroidSurfaceKHR(
+		mVkRuntime.VkInstance,
+		&SurfaceInfo,
+		nullptr,
+		&mVkRecordSession.CodecSurface);
+
+	if (Result != VK_SUCCESS || mVkRecordSession.CodecSurface == VK_NULL_HANDLE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: vkCreateAndroidSurfaceKHR failed. Result=%d"),
+			(int32)Result);
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	VkBool32 bSurfaceSupported = VK_FALSE;
+	Result = vkGetPhysicalDeviceSurfaceSupportKHR(
+		mVkRuntime.VkPhysicalDevice,
+		mVkRuntime.GraphicsQueueFamilyIndex,
+		mVkRecordSession.CodecSurface,
+		&bSurfaceSupported);
+
+	if (Result != VK_SUCCESS || bSurfaceSupported != VK_TRUE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: surface present support check failed. Result=%d Supported=%d"),
+			(int32)Result,
+			(int32)bSurfaceSupported);
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	VkSurfaceCapabilitiesKHR SurfaceCaps{};
+	Result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+		mVkRuntime.VkPhysicalDevice,
+		mVkRecordSession.CodecSurface,
+		&SurfaceCaps);
+
+	if (Result != VK_SUCCESS)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed. Result=%d"),
+			(int32)Result);
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	if ((SurfaceCaps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) == 0)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: surface does not support VK_IMAGE_USAGE_TRANSFER_DST_BIT"));
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	uint32 FormatCount = 0;
+	Result = vkGetPhysicalDeviceSurfaceFormatsKHR(
+		mVkRuntime.VkPhysicalDevice,
+		mVkRecordSession.CodecSurface,
+		&FormatCount,
+		nullptr);
+
+	if (Result != VK_SUCCESS || FormatCount == 0)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: query surface format count failed. Result=%d Count=%u"),
+			(int32)Result,
+			FormatCount);
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	TArray<VkSurfaceFormatKHR> SurfaceFormats;
+	SurfaceFormats.SetNum(FormatCount);
+
+	Result = vkGetPhysicalDeviceSurfaceFormatsKHR(
+		mVkRuntime.VkPhysicalDevice,
+		mVkRecordSession.CodecSurface,
+		&FormatCount,
+		SurfaceFormats.GetData());
+
+	if (Result != VK_SUCCESS)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: fetch surface formats failed. Result=%d"),
+			(int32)Result);
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	uint32 PresentModeCount = 0;
+	Result = vkGetPhysicalDeviceSurfacePresentModesKHR(
+		mVkRuntime.VkPhysicalDevice,
+		mVkRecordSession.CodecSurface,
+		&PresentModeCount,
+		nullptr);
+
+	if (Result != VK_SUCCESS || PresentModeCount == 0)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: query present mode count failed. Result=%d Count=%u"),
+			(int32)Result,
+			PresentModeCount);
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	TArray<VkPresentModeKHR> PresentModes;
+	PresentModes.SetNum(PresentModeCount);
+
+	Result = vkGetPhysicalDeviceSurfacePresentModesKHR(
+		mVkRuntime.VkPhysicalDevice,
+		mVkRecordSession.CodecSurface,
+		&PresentModeCount,
+		PresentModes.GetData());
+
+	if (Result != VK_SUCCESS)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: fetch present modes failed. Result=%d"),
+			(int32)Result);
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	const VkSurfaceFormatKHR ChosenSurfaceFormat =
+		FVdjmVkHelper::ChooseSurfaceFormat(mVkRuntime, SurfaceFormats);
+	const VkPresentModeKHR ChosenPresentMode =
+		FVdjmVkHelper::ChoosePresentMode(PresentModes);
+	const VkExtent2D ChosenExtent =
+		FVdjmVkHelper::ChooseExtent(SurfaceCaps, mConfig.VideoWidth, mConfig.VideoHeight);
+
+	if (ChosenSurfaceFormat.format == VK_FORMAT_UNDEFINED ||
+		ChosenExtent.width == 0 ||
+		ChosenExtent.height == 0)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: invalid chosen surface contract. Format=%d Extent=(%u,%u)"),
+			(int32)ChosenSurfaceFormat.format,
+			ChosenExtent.width,
+			ChosenExtent.height);
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	mVkRecordSession.SurfaceFormat = ChosenSurfaceFormat.format;
+	mVkRecordSession.SurfaceColorSpace = ChosenSurfaceFormat.colorSpace;
+	mVkRecordSession.SurfaceExtent = ChosenExtent;
+
+	uint32 DesiredImageCount = SurfaceCaps.minImageCount + 1;
+	if (SurfaceCaps.maxImageCount > 0 && DesiredImageCount > SurfaceCaps.maxImageCount)
+	{
+		DesiredImageCount = SurfaceCaps.maxImageCount;
+	}
+
+	VkSwapchainCreateInfoKHR SwapchainInfo{};
+	SwapchainInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+	SwapchainInfo.surface = mVkRecordSession.CodecSurface;
+	SwapchainInfo.minImageCount = DesiredImageCount;
+	SwapchainInfo.imageFormat = mVkRecordSession.SurfaceFormat;
+	SwapchainInfo.imageColorSpace = mVkRecordSession.SurfaceColorSpace;
+	SwapchainInfo.imageExtent = mVkRecordSession.SurfaceExtent;
+	SwapchainInfo.imageArrayLayers = 1;
+	SwapchainInfo.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	SwapchainInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	SwapchainInfo.preTransform = SurfaceCaps.currentTransform;
+	SwapchainInfo.compositeAlpha = FVdjmVkHelper::ChooseCompositeAlpha(SurfaceCaps.supportedCompositeAlpha);
+	SwapchainInfo.presentMode = ChosenPresentMode;
+	SwapchainInfo.clipped = VK_TRUE;
+	SwapchainInfo.oldSwapchain = VK_NULL_HANDLE;
+
+	Result = vkCreateSwapchainKHR(
+		mVkRuntime.VkDevice,
+		&SwapchainInfo,
+		nullptr,
+		&mVkRecordSession.CodecSwapchain);
+
+	if (Result != VK_SUCCESS || mVkRecordSession.CodecSwapchain == VK_NULL_HANDLE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: vkCreateSwapchainKHR failed. Result=%d"),
+			(int32)Result);
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	uint32 SwapchainImageCount = 0;
+	Result = vkGetSwapchainImagesKHR(
+		mVkRuntime.VkDevice,
+		mVkRecordSession.CodecSwapchain,
+		&SwapchainImageCount,
+		nullptr);
+
+	if (Result != VK_SUCCESS || SwapchainImageCount == 0)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: query swapchain image count failed. Result=%d Count=%u"),
+			(int32)Result,
+			SwapchainImageCount);
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	mVkRecordSession.SwapchainImages.SetNum(SwapchainImageCount);
+
+	Result = vkGetSwapchainImagesKHR(
+		mVkRuntime.VkDevice,
+		mVkRecordSession.CodecSwapchain,
+		&SwapchainImageCount,
+		mVkRecordSession.SwapchainImages.GetData());
+
+	if (Result != VK_SUCCESS)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: fetch swapchain images failed. Result=%d"),
+			(int32)Result);
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	mVkRecordSession.SwapchainImageLayouts.Init(
+		VK_IMAGE_LAYOUT_UNDEFINED,
+		mVkRecordSession.SwapchainImages.Num());
+
+	VkCommandPoolCreateInfo PoolInfo{};
+	PoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	PoolInfo.queueFamilyIndex = mVkRuntime.GraphicsQueueFamilyIndex;
+	PoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+	Result = vkCreateCommandPool(
+		mVkRuntime.VkDevice,
+		&PoolInfo,
+		nullptr,
+		&mVkRecordSession.CommandPool);
+
+	if (Result != VK_SUCCESS || mVkRecordSession.CommandPool == VK_NULL_HANDLE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: vkCreateCommandPool failed. Result=%d"),
+			(int32)Result);
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	VkCommandBufferAllocateInfo CmdAllocInfo{};
+	CmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	CmdAllocInfo.commandPool = mVkRecordSession.CommandPool;
+	CmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	CmdAllocInfo.commandBufferCount = 1;
+
+	Result = vkAllocateCommandBuffers(
+		mVkRuntime.VkDevice,
+		&CmdAllocInfo,
+		&mVkRecordSession.CommandBuffer);
+
+	if (Result != VK_SUCCESS || mVkRecordSession.CommandBuffer == VK_NULL_HANDLE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: vkAllocateCommandBuffers failed. Result=%d"),
+			(int32)Result);
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	VkSemaphoreCreateInfo SemaphoreInfo{};
+	SemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+	Result = vkCreateSemaphore(
+		mVkRuntime.VkDevice,
+		&SemaphoreInfo,
+		nullptr,
+		&mVkRecordSession.AcquireSemaphore);
+
+	if (Result != VK_SUCCESS || mVkRecordSession.AcquireSemaphore == VK_NULL_HANDLE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: vkCreateSemaphore failed. Result=%d"),
+			(int32)Result);
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	VkFenceCreateInfo FenceInfo{};
+	FenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	FenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+	Result = vkCreateFence(
+		mVkRuntime.VkDevice,
+		&FenceInfo,
+		nullptr,
+		&mVkRecordSession.SubmitFence);
+
+	if (Result != VK_SUCCESS || mVkRecordSession.SubmitFence == VK_NULL_HANDLE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("CreateRecordSessionVkResources: vkCreateFence failed. Result=%d"),
+			(int32)Result);
+		DestroyRecordSessionVkResources();
+		return false;
+	}
+
+	mCurrentSwapchainImageIndex32 = UINT32_MAX;
+
+	UE_LOG(LogVdjmRecorderCore, Warning,
+		TEXT("CreateRecordSessionVkResources: success. Format=%d Extent=(%u,%u) Images=%d"),
+		(int32)mVkRecordSession.SurfaceFormat,
+		mVkRecordSession.SurfaceExtent.width,
+		mVkRecordSession.SurfaceExtent.height,
+		mVkRecordSession.SwapchainImages.Num());
+
+	return true;
 }
 
 void FVdjmAndroidEncoderBackendVulkan::DestroyRecordSessionVkResources()
