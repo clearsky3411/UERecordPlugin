@@ -230,7 +230,7 @@ VkExtent2D FVdjmVkHelper::ChooseExtent(const VkSurfaceCapabilitiesKHR& caps, uin
 
 FVdjmAndroidEncoderBackendVulkan::FVdjmAndroidEncoderBackendVulkan()
 	: mAnalyzer(this),
-	mInitialized(false), mStarted(false), mPaused(false), mRuntimeReady(false)
+	mInitialized(false), mStarted(false), mPaused(false)
 {}
 
 bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow)
@@ -416,7 +416,125 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 
 bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSubmitState& outFrameState)
 {
+	/*
+	 * AcquireNextSwapchainImage 역할
+	 *
+	 * 1. 이전 프레임 submit이 끝났는지 fence로 확인한다.
+	 *    - 지금 구현은 CommandBuffer / SubmitFence를 프레임마다 재사용하므로
+	 *      새 프레임 시작 전에 이전 submit 완료를 기다려야 한다.
+	 *
+	 * 2. 이번 프레임이 써야 할 codec surface용 swapchain image index를 획득한다.
+	 *    - swapchain은 이미지가 여러 장이므로, 매 프레임마다 현재 기록 가능한
+	 *      destination image를 vkAcquireNextImageKHR로 받아와야 한다.
+	 *
+	 * 3. submit 단계에서 바로 사용할 frame-local 상태를 묶어서 반환한다.
+	 *    - CommandBuffer
+	 *    - AcquireCompleteSemaphore
+	 *    - SubmitFence
+	 *    - AcquiredImageIndex
+	 *
+	 * 이 함수는 "목적지 이미지 확보"까지만 담당한다.
+	 * 실제 command recording / layout transition / copy / queue submit / present는
+	 * SubmitTextureToCodecSurface()에서 처리한다.
+	 */
+	outFrameState = FVdjmVkFrameSubmitState{};
 
+	if (mVkRuntime.VkDevice == VK_NULL_HANDLE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AcquireNextSwapchainImage: VkDevice is null"));
+		return false;
+	}
+
+	if (!mVkRecordSession.IsReadyToStart())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AcquireNextSwapchainImage: record session is not ready"));
+		return false;
+	}
+
+	if (mVkRecordSession.AcquireSemaphore == VK_NULL_HANDLE ||
+		mVkRecordSession.SubmitFence == VK_NULL_HANDLE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AcquireNextSwapchainImage: sync objects are invalid"));
+		return false;
+	}
+
+	// 이전 프레임 submit 완료 대기
+	VkResult Result = vkWaitForFences(
+		mVkRuntime.VkDevice,
+		1,
+		&mVkRecordSession.SubmitFence,
+		VK_TRUE,
+		UINT64_MAX);
+
+	if (Result != VK_SUCCESS)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("AcquireNextSwapchainImage: vkWaitForFences failed. Result=%d"),
+			(int32)Result);
+		return false;
+	}
+
+	// 새 프레임 submit을 위해 fence reset
+	Result = vkResetFences(
+		mVkRuntime.VkDevice,
+		1,
+		&mVkRecordSession.SubmitFence);
+
+	if (Result != VK_SUCCESS)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("AcquireNextSwapchainImage: vkResetFences failed. Result=%d"),
+			(int32)Result);
+		return false;
+	}
+
+	uint32 AcquiredImageIndex = UINT32_MAX;
+
+	Result = vkAcquireNextImageKHR(
+		mVkRuntime.VkDevice,
+		mVkRecordSession.CodecSwapchain,
+		UINT64_MAX,
+		mVkRecordSession.AcquireSemaphore,
+		VK_NULL_HANDLE,
+		&AcquiredImageIndex);
+
+	if (Result == VK_ERROR_OUT_OF_DATE_KHR)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("AcquireNextSwapchainImage: swapchain is out of date"));
+		return false;
+	}
+
+	if (Result != VK_SUCCESS && Result != VK_SUBOPTIMAL_KHR)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("AcquireNextSwapchainImage: vkAcquireNextImageKHR failed. Result=%d"),
+			(int32)Result);
+		return false;
+	}
+
+	if (!mVkRecordSession.SwapchainImages.IsValidIndex((int32)AcquiredImageIndex))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("AcquireNextSwapchainImage: acquired image index is invalid. Index=%u ImageCount=%d"),
+			AcquiredImageIndex,
+			mVkRecordSession.SwapchainImages.Num());
+		return false;
+	}
+
+	outFrameState.CommandBuffer = mVkRecordSession.CommandBuffer;
+	outFrameState.AcquireCompleteSemaphore = mVkRecordSession.AcquireSemaphore;
+	outFrameState.SubmitFence = mVkRecordSession.SubmitFence;
+	outFrameState.AcquiredImageIndex = AcquiredImageIndex;
+
+	mCurrentSwapchainImageIndex32 = AcquiredImageIndex;
+
+	UE_LOG(LogVdjmRecorderCore, VeryVerbose,
+		TEXT("AcquireNextSwapchainImage: success. Result=%d ImageIndex=%u"),
+		(int32)Result,
+		AcquiredImageIndex);
+
+	return true;
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::CreateRecordSessionVkResources()
