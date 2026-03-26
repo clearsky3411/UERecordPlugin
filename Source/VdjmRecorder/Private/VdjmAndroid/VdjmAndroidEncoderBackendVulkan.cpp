@@ -328,7 +328,12 @@ bool FVdjmAndroidEncoderBackendVulkan::Start()
 		return true;
 	}
 
-	CreateRecordSessionVkResources();
+	if (not CreateRecordSessionVkResources())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Start: failed to create Vulkan resources for record session"));
+		DestroyRecordSessionVkResources();
+		return false;
+	}
 
 	if (not mVkRecordSession.IsReadyToStart())
 	{
@@ -370,28 +375,6 @@ void FVdjmAndroidEncoderBackendVulkan::Terminate()
 	mInitialized = false;
 }
 
-bool FVdjmAndroidEncoderBackendVulkan::IsRunnable()
-{
-	if (!mInitialized)
-	{
-		return false;
-	}
-	if (!mStarted || mPaused)
-	{
-		return false;
-	}
-	if (mInputWindow == nullptr)
-	{
-		return false;
-	}
-	if (!mVkRuntime.IsValid())
-	{
-		return false;
-	}
-
-	return true;
-}
-
 bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec)
 {
 	if (!IsRunnable() || !srcTexture.IsValid())
@@ -417,7 +400,6 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 
 	if (!SubmitInfo.bCanDirectCopy)
 	{
-		// 지금 단계에서는 direct copy만 허용
 		return false;
 	}
 
@@ -437,8 +419,9 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 
 }
 
-void FVdjmAndroidEncoderBackendVulkan::CreateRecordSessionVkResources()
+bool FVdjmAndroidEncoderBackendVulkan::CreateRecordSessionVkResources()
 {
+	
 }
 
 void FVdjmAndroidEncoderBackendVulkan::DestroyRecordSessionVkResources()

@@ -231,7 +231,6 @@ public:
 	//	여기에서 orchestration 담당, Running이 호출될 때마다 제출 시도, 제출 과정에서 필요한 분석과 중간 단계 처리는 별도의 클래스에서 담당
 	virtual bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec) override;
 	
-	bool IsRunnable();
 	VkDevice GetVkDevice() const { return mVkRuntime.VkDevice; }
 	VkPhysicalDevice GetVkPhysicalDevice() const { return mVkRuntime.VkPhysicalDevice; }
 	VkQueue GetGraphicsQueue() const { return mVkRuntime.GraphicsQueue; }
@@ -245,7 +244,7 @@ public:
 	const uint32_t* GetCurrentSwapchainImageIndexConst() const { return &mCurrentSwapchainImageIndex32; }
 	void SetCurrentSwapchainImageIndex(uint32 InIndex) { mCurrentSwapchainImageIndex32 = InIndex; }
 	
-	void CreateRecordSessionVkResources();
+	bool CreateRecordSessionVkResources();
 	void DestroyRecordSessionVkResources();
 	
 	bool TryExtractNativeVkImage(const FTextureRHIRef& srcTexture, VkImage& outImage) const;
@@ -261,7 +260,7 @@ private:
 	bool mInitialized = false;
 	bool mStarted = false;
 	bool mPaused = false;
-	bool mRuntimeReady = false;
+	
 	
 	uint32_t mCurrentSwapchainImageIndex32;
 	
