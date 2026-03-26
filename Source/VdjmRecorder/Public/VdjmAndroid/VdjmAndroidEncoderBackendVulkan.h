@@ -54,7 +54,34 @@ struct FVdjmVkFrameSubmitState
 	bool bCommitIntermediateLayoutOnSubmitSuccess = false;
 	VkImageLayout PendingIntermediateLayoutAfterSubmit = VK_IMAGE_LAYOUT_UNDEFINED;
 };
+struct FVdjmVkSubmitFrameInfo
+{
+	VkImage SrcImage = VK_NULL_HANDLE;
+	VkFormat SrcFormat = VK_FORMAT_UNDEFINED;
+	uint32 SrcWidth = 0;
+	uint32 SrcHeight = 0;
 
+	bool bNeedsIntermediate = false;
+	bool bCanDirectCopy = false;
+
+	void Clear()
+	{
+		SrcImage = VK_NULL_HANDLE;
+		SrcFormat = VK_FORMAT_UNDEFINED;
+		SrcWidth = 0;
+		SrcHeight = 0;
+		bNeedsIntermediate = false;
+		bCanDirectCopy = false;
+	}
+
+	bool IsValid() const
+	{
+		return SrcImage != VK_NULL_HANDLE
+			&& SrcFormat != VK_FORMAT_UNDEFINED
+			&& SrcWidth > 0
+			&& SrcHeight > 0;
+	}
+};
 struct FVdjmVkRecordSessionState
 {
 	ANativeWindow* InputWindow = nullptr;

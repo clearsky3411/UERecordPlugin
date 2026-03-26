@@ -14,8 +14,6 @@ namespace
 
 bool FVdjmVkSubProcInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) 
 {
-	//	src image,format,extent,layout 분석
-	
 	outInfo.Clear();
 
 	if (mOwnerBackend == nullptr)
@@ -44,14 +42,17 @@ bool FVdjmVkSubProcInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdj
 	case PF_B8G8R8A8:
 		outInfo.SrcFormat = VK_FORMAT_B8G8R8A8_UNORM;
 		break;
+
 	case PF_R8G8B8A8:
 		outInfo.SrcFormat = VK_FORMAT_R8G8B8A8_UNORM;
 		break;
+
 	default:
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Analyze: unsupported UE pixel format = %d"), (int32)srcTexture->GetFormat());
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("Analyze: unsupported UE pixel format = %d"),
+			(int32)srcTexture->GetFormat());
 		return false;
 	}
-	
 
 	return true;
 }
