@@ -234,6 +234,7 @@ FVdjmAndroidEncoderBackendVulkan::FVdjmAndroidEncoderBackendVulkan()
 
 bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow)
 {
+	//고정 입력 저장 + Vulkan 런타임 핸들 확보
 	//	config 저장, input window 저장, runtime handle 확보 및 초기화
 	UE_LOG(LogVdjmRecorderCore, Log, TEXT("FVdjmAndroidEncoderBackendVulkan::Init - start"));
 	if (!config.IsValidateEncoderArguments())
@@ -335,15 +336,12 @@ void FVdjmAndroidEncoderBackendVulkan::ReleaseRecordSessionVkResources()
 
 bool FVdjmAndroidEncoderBackendVulkan::Start()
 {
+	//녹화 세션용 Vulkan 자원 생성
 	if (!mInitialized)
 	{
 		return false;
 	}
 
-	if (!EnsureRuntimeReady())
-	{
-		return false;
-	}
 
 	mPaused = false;
 	mStarted = true;
@@ -352,6 +350,7 @@ bool FVdjmAndroidEncoderBackendVulkan::Start()
 
 void FVdjmAndroidEncoderBackendVulkan::Stop()
 {
+	//세션 자원 정리
 	mStarted = false;
 	mPaused = false;
 
@@ -365,6 +364,7 @@ void FVdjmAndroidEncoderBackendVulkan::Stop()
 
 void FVdjmAndroidEncoderBackendVulkan::Terminate()
 {
+	//입력 window 참조 해제 + 런타임 상태 초기화
 	Stop();
 
 	if (mInputWindow != nullptr)
@@ -402,10 +402,7 @@ bool FVdjmAndroidEncoderBackendVulkan::IsRunnable()
 
 bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec)
 {
-	/*
-	 * 매 프레임 사실확인이 필요함. 소유하려는게 아님.
-	 * 매 프레임 들어온 현재 source 가 계약을 만족하는지.
-	 */
+	//프레임 해석 + 제출
 }
 
 

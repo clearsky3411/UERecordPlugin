@@ -11,75 +11,6 @@ struct IVulkanDynamicRHI;
 class FVdjmAndroidEncoderBackendVulkan;
 
 
-struct FRecorderSessionContract
-{
-	/*
-	 * EnsureRuntimeReady 에서 확정이 되어야한다.
-	 */
-	uint32 EncodeWidth = 0;
-	uint32 EncodeHeight = 0;
-
-	EPixelFormat RequiredSrcPixelFormat = PF_Unknown;
-	VkFormat RequiredSrcVkFormat = VK_FORMAT_UNDEFINED;
-
-	VkFormat EncoderSurfaceFormat = VK_FORMAT_UNDEFINED;
-	VkColorSpaceKHR EncoderSurfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-	VkExtent2D EncoderExtent{0, 0};
-
-	int32 WindowBufferFormat = 0;                 // ANativeWindow_getFormat()
-	int32 WindowBufferDataSpace = ADATASPACE_UNKNOWN; // ANativeWindow_getBuffersDataSpace()
-
-	uint32 GraphicsQueueFamilyIndex = UINT32_MAX;
-	VkImageUsageFlags EncoderImageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-
-	bool bRequireExactSourceExtent = true;
-	bool bRequireExactSourceFormat = true;
-	bool bAllowBlit = false;
-	bool bAllowIntermediate = false;
-	bool bValid = false;
-};
-struct FFrameSourceSnapshot
-{
-	FTextureRHIRef SrcTexture;
-	VkImage SrcImage = VK_NULL_HANDLE;
-
-	EPixelFormat SrcPixelFormat = PF_Unknown;
-	VkFormat SrcVkFormat = VK_FORMAT_UNDEFINED;
-
-	uint32 SrcWidth = 0;
-	uint32 SrcHeight = 0;
-};
-struct FEncoderSurfaceRuntimeState
-{
-	ANativeWindow* InputWindow = nullptr;
-
-	VkSurfaceKHR CodecSurface = VK_NULL_HANDLE;
-	VkSwapchainKHR CodecSwapchain = VK_NULL_HANDLE;
-
-	TArray<VkImage> SwapchainImages;
-	TArray<VkImageLayout> SwapchainImageLayouts;
-
-	VkCommandPool CommandPool = VK_NULL_HANDLE;
-	VkCommandBuffer CommandBuffer = VK_NULL_HANDLE;
-
-	VkFence SubmitFence = VK_NULL_HANDLE;
-	VkSemaphore AcquireSemaphore = VK_NULL_HANDLE;
-	TArray<VkSemaphore> RenderCompleteSemaphores;
-
-	bool bReady = false;
-};
-
-struct FVdjmVkSubmitFrameInfo
-{
-	VkImage SrcImage = VK_NULL_HANDLE;
-	VkFormat SrcFormat = VK_FORMAT_UNDEFINED;
-	uint32 SrcWidth = 0;
-	uint32 SrcHeight = 0;
-	bool bNeedsIntermediate = false;
-	bool bCanDirectCopy = false;
-	// SrcLayout 넣지 말 것
-};
-
 struct FVdjmVkOwnedImageState
 {
 	VkImage Image = VK_NULL_HANDLE;
@@ -212,20 +143,7 @@ public:
 		: FVdjmVkSubProcessContext(owner)
 	{}
 	
-	// Init 분석기
-	bool BuildSessionContract(
-		ANativeWindow* InputWindow,
-		FRecorderSessionContract& OutContract);
-
-	// Running 스냅샷
-	bool SnapshotFrameSource(
-		const FTextureRHIRef& SrcTexture,
-		FFrameSourceSnapshot& OutFrame);
-
-	// Running 검증기
-	bool ValidateFrameAgainstContract(
-		const FRecorderSessionContract& Contract,
-		const FFrameSourceSnapshot& Frame);
+	
 	
 	bool Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) ;
 };
@@ -259,10 +177,6 @@ public:
 	VkSwapchainKHR GetCodecSwapchain() const { return mVkRecordSession.CodecSwapchain; }
 	const VkSwapchainKHR* GetCodecSwapchainConst() const { return &mVkRecordSession.CodecSwapchain; }
 
-
-
-	
-
 	uint32 GetCurrentSwapchainImageIndex() const { return mCurrentSwapchainImageIndex32; }
 	const uint32_t* GetCurrentSwapchainImageIndexConst() const { return &mCurrentSwapchainImageIndex32; }
 	void SetCurrentSwapchainImageIndex(uint32 InIndex) { mCurrentSwapchainImageIndex32 = InIndex; }
@@ -275,7 +189,7 @@ private:
 	
 	bool InitVkRuntimeContext();
 	void ReleaseRecordSessionVkResources();
-	bool EnsureRuntimeReady();
+
 	bool AcquireNextSwapchainImage(FVdjmVkFrameSubmitState& outFrameState);
 	bool SubmitTextureToCodecSurface(const FVdjmVkFrameSubmitState& frameState);
 	
