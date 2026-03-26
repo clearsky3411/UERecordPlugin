@@ -9,11 +9,62 @@
 
 struct IVulkanDynamicRHI;
 class FVdjmAndroidEncoderBackendVulkan;
-/**
- * @brief Vulkan 이미지 제출 과정에서 입력 이미지의 특성을 분석하여 제출 전략을 결정하는 클래스
- * @note life time : FVdjmAndroidEncoderBackendVulkan 인스턴스 생성부터 소멸까지, 즉, Vulkan 백엔드가 활성화된 동안
- * 
- */
+
+
+struct FRecorderSessionContract
+{
+	uint32 EncodeWidth = 0;
+	uint32 EncodeHeight = 0;
+
+	EPixelFormat RequiredSrcPixelFormat = PF_Unknown;
+	VkFormat RequiredSrcVkFormat = VK_FORMAT_UNDEFINED;
+
+	VkFormat EncoderSurfaceFormat = VK_FORMAT_UNDEFINED;
+	VkColorSpaceKHR EncoderSurfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+	VkExtent2D EncoderExtent{0, 0};
+
+	int32 WindowBufferFormat = 0;                 // ANativeWindow_getFormat()
+	int32 WindowBufferDataSpace = ADATASPACE_UNKNOWN; // ANativeWindow_getBuffersDataSpace()
+
+	uint32 GraphicsQueueFamilyIndex = UINT32_MAX;
+	VkImageUsageFlags EncoderImageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+
+	bool bRequireExactSourceExtent = true;
+	bool bRequireExactSourceFormat = true;
+	bool bAllowBlit = false;
+	bool bAllowIntermediate = false;
+	bool bValid = false;
+};
+struct FFrameSourceSnapshot
+{
+	FTextureRHIRef SrcTexture;
+	VkImage SrcImage = VK_NULL_HANDLE;
+
+	EPixelFormat SrcPixelFormat = PF_Unknown;
+	VkFormat SrcVkFormat = VK_FORMAT_UNDEFINED;
+
+	uint32 SrcWidth = 0;
+	uint32 SrcHeight = 0;
+};
+struct FEncoderSurfaceRuntimeState
+{
+	ANativeWindow* InputWindow = nullptr;
+
+	VkSurfaceKHR CodecSurface = VK_NULL_HANDLE;
+	VkSwapchainKHR CodecSwapchain = VK_NULL_HANDLE;
+
+	TArray<VkImage> SwapchainImages;
+	TArray<VkImageLayout> SwapchainImageLayouts;
+
+	VkCommandPool CommandPool = VK_NULL_HANDLE;
+	VkCommandBuffer CommandBuffer = VK_NULL_HANDLE;
+
+	VkFence SubmitFence = VK_NULL_HANDLE;
+	VkSemaphore AcquireSemaphore = VK_NULL_HANDLE;
+	TArray<VkSemaphore> RenderCompleteSemaphores;
+
+	bool bReady = false;
+};
 
 struct FVdjmVkSubmitFrameInfo
 {
@@ -151,25 +202,29 @@ protected:
 class FVdjmVkSubProcInputAnalyzer : public FVdjmVkSubProcessContext
 {
 	friend class FVdjmAndroidEncoderBackendVulkan;
-	/**
-		SrcImage
-		SrcFormat
-		SrcWidth
-		SrcHeight
-		bFormatMatchesSwapchain
-		bExtentMatchesSwapchain
-		bCanDirectCopy
-		bNeedsIntermediate
-	*/
+	
 public:
 	
 	explicit FVdjmVkSubProcInputAnalyzer(FVdjmAndroidEncoderBackendVulkan* const owner)
 		: FVdjmVkSubProcessContext(owner)
-	{
-	}
+	{}
+	
+	// Init 분석기
+	bool BuildSessionContract(
+		ANativeWindow* InputWindow,
+		FRecorderSessionContract& OutContract);
 
+	// Running 스냅샷
+	bool SnapshotFrameSource(
+		const FTextureRHIRef& SrcTexture,
+		FFrameSourceSnapshot& OutFrame);
+
+	// Running 검증기
+	bool ValidateFrameAgainstContract(
+		const FRecorderSessionContract& Contract,
+		const FFrameSourceSnapshot& Frame);
+	
 	bool Analyze(const FTextureRHIRef& srcTexture, FVdjmVkSubmitFrameInfo& outInfo) ;
-
 };
 
 
