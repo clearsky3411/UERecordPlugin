@@ -375,16 +375,45 @@ void FVdjmAndroidEncoderBackendVulkan::Terminate()
 	mInitialized = false;
 }
 
+bool FVdjmAndroidEncoderBackendVulkan::IsRunnable() const
+{
+	if (!mInitialized || !mStarted || mPaused)
+	{
+		return false;
+	}
+	if (mInputWindow == nullptr)
+	{
+		return false;
+	}
+	if (!mVkRuntime.IsValid())
+	{
+		return false;
+	}
+	if (!mVkRecordSession.IsReadyToStart())
+	{
+		return false;
+	}
+	return true;
+}
+
 bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec)
 {
 	if (not srcTexture.IsValid())
 	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Running: srcTexture is invalid"));
+		return false;
+	}
+	
+	if (not IsRunnable())
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Running: encoder backend is not runnable"));
 		return false;
 	}
 
 	FVdjmVkSubmitFrameInfo SubmitInfo{};
 	if (not mAnalyzer.Analyze(srcTexture, SubmitInfo))
 	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Running: failed to analyze source texture for submission"));
 		return false;
 	}
 
@@ -919,7 +948,59 @@ void FVdjmAndroidEncoderBackendVulkan::DestroyRecordSessionVkResources()
 
 bool FVdjmAndroidEncoderBackendVulkan::TryExtractNativeVkImage(const FTextureRHIRef& srcTexture,VkImage& outImage) const
 {
-	
+	/*
+	 * TryExtractNativeVkImage 역할
+	 *
+	 * 1. UE가 넘겨준 FTextureRHIRef에서 Vulkan backend가 실제 submit에 사용할
+	 *    native VkImage 핸들을 꺼내는 단계다.
+	 *
+	 * 2. 이 함수는 "입력 해석"만 담당한다.
+	 *    - 세션 생성 아님
+	 *    - layout transition 아님
+	 *    - copy / submit 아님
+	 *
+	 * 3. 지금 단계에서는 가장 단순한 경로부터 확인한다.
+	 *    - srcTexture->GetNativeResource()를 받아
+	 *    - 그것이 곧바로 VkImage라고 가정하고 캐스팅한다.
+	 *
+	 * 4. 만약 런타임에서 이 가정이 틀리면
+	 *    - 여기서 null 또는 잘못된 handle 로그가 찍힐 것이고
+	 *    - 그때 UE Vulkan 내부 타입 경로로 다시 좁혀가면 된다.
+	 */
+
+	outImage = VK_NULL_HANDLE;
+
+	if (!srcTexture.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("TryExtractNativeVkImage: srcTexture is invalid"));
+		return false;
+	}
+
+	void* NativeResource = srcTexture->GetNativeResource();
+	if (NativeResource == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("TryExtractNativeVkImage: GetNativeResource returned null"));
+		return false;
+	}
+
+	outImage = reinterpret_cast<VkImage>(NativeResource);
+
+	if (outImage == VK_NULL_HANDLE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("TryExtractNativeVkImage: native resource cast produced null VkImage"));
+		return false;
+	}
+
+	UE_LOG(LogVdjmRecorderCore, VeryVerbose,
+		TEXT("TryExtractNativeVkImage: success. SrcTexture=%p NativeResource=%p VkImage=%p"),
+		srcTexture.GetReference(),
+		NativeResource,
+		outImage);
+
+	return true;
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVkSubmitFrameInfo& submitInfo, FVdjmVkFrameSubmitState& frameState)

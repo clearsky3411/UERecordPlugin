@@ -228,6 +228,7 @@ public:
 	virtual bool Start() override;
 	virtual void Stop() override;
 	virtual void Terminate() override;
+	bool IsRunnable() const;
 	//	여기에서 orchestration 담당, Running이 호출될 때마다 제출 시도, 제출 과정에서 필요한 분석과 중간 단계 처리는 별도의 클래스에서 담당
 	virtual bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec) override;
 	
