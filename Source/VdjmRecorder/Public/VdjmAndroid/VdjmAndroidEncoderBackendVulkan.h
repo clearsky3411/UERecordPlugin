@@ -38,6 +38,20 @@ struct FVdjmVkOwnedImageState
 	uint32 Width = 0;
 	uint32 Height = 0;
 	VkImageLayout CurrentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	
+	void Clear()
+	{
+		Image = VK_NULL_HANDLE;
+		View = VK_NULL_HANDLE;
+		Format = VK_FORMAT_UNDEFINED;
+		Width = 0;
+		Height = 0;
+		CurrentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	}
+	bool IsValid() const
+	{
+		return Image != VK_NULL_HANDLE && Format != VK_FORMAT_UNDEFINED && Width > 0 && Height > 0 && CurrentLayout != VK_IMAGE_LAYOUT_UNDEFINED;
+	}
 };
 
 
@@ -106,6 +120,18 @@ struct FVdjmVkRuntimeContext
 	}
 };
 
+struct FVdjmVkHelper
+{
+	static uint32 FindMemoryType(VkPhysicalDevice physicalDevice, uint32 typeFilter, VkMemoryPropertyFlags properties);
+	static void TransitionImageLayout(VkCommandBuffer commandBuffer, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+	static bool TransitionOwnedImage(VkCommandBuffer Cmd,
+	FVdjmVkOwnedImageState& State,
+	VkImageLayout NewLayout);
+	static VkSurfaceFormatKHR ChooseSurfaceFormat(const FVdjmVkRuntimeContext& runtimeContext,const TArray<VkSurfaceFormatKHR>& availableFormats);
+	static VkPresentModeKHR ChoosePresentMode(const TArray<VkPresentModeKHR>& modes);
+	static VkCompositeAlphaFlagBitsKHR ChooseCompositeAlpha(VkCompositeAlphaFlagsKHR flags);
+	static VkExtent2D ChooseExtent(	const VkSurfaceCapabilitiesKHR& caps,uint32 desiredWid,	uint32 desiredHei);
+};
 
 
 /**	
@@ -182,20 +208,9 @@ public:
 	uint32 GetCurrentSwapchainImageIndex() const { return mCurrentSwapchainImageIndex32; }
 	const uint32_t* GetCurrentSwapchainImageIndexConst() const { return &mCurrentSwapchainImageIndex32; }
 	void SetCurrentSwapchainImageIndex(uint32 InIndex) { mCurrentSwapchainImageIndex32 = InIndex; }
+	
 
-
-
-	VkImage GetIntermediateImage() const { return mIntermediateStage.GetIntermediateStateConst().Image; }
-
-	static uint32 FindMemoryType(VkPhysicalDevice physicalDevice, uint32 typeFilter, VkMemoryPropertyFlags properties);
-	static void TransitionImageLayout(VkCommandBuffer commandBuffer, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
-	static bool TransitionOwnedImage(VkCommandBuffer Cmd,
-	FVdjmVkOwnedImageState& State,
-	VkImageLayout NewLayout);
-	static VkSurfaceFormatKHR ChooseSurfaceFormat(const FVdjmVkRuntimeContext& runtimeContext,const TArray<VkSurfaceFormatKHR>& availableFormats);
-	static VkPresentModeKHR ChoosePresentMode(const TArray<VkPresentModeKHR>& modes);
-	static VkCompositeAlphaFlagBitsKHR ChooseCompositeAlpha(VkCompositeAlphaFlagsKHR flags);
-	static VkExtent2D ChooseExtent(	const VkSurfaceCapabilitiesKHR& caps,uint32 desiredWid,	uint32 desiredHei);
+	
 	
 	bool TryExtractNativeVkImage(const FTextureRHIRef& srcTexture, VkImage& outImage) const;
 private:
