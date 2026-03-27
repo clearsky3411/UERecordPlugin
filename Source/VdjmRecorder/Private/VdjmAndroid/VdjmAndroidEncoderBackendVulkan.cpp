@@ -329,8 +329,84 @@ bool FVdjmAndroidEncoderBackendVulkan::InitVkRuntimeContext()
 	mVkRuntime.bInitialized = true;
 	return true;
 }
+void FVdjmAndroidEncoderBackendVulkan::SetFailureReason(EVdjmVkFailureReason Reason)
+{
+	mLastFailureReason = Reason;
+}
+bool FVdjmAndroidEncoderBackendVulkan::TryResolveSourceState(
+	const FVdjmVkSubmitFrameInfo& SubmitInfo,
+	FVdjmVkObservedSourceState& OutState)
+{
+	OutState.Clear();
 
+	if (!SubmitInfo.IsValid())
+	{
+		SetFailureReason(EVdjmVkFailureReason::SourceHandleResolveFailed);
+		return false;
+	}
 
+	const uint64 SourceKey = (uint64)SubmitInfo.SrcImage;
+	FVdjmVkObservedSourceState* CachedState = mVkRecordSession.SourceStateCache.Find(SourceKey);
+
+	if (CachedState == nullptr)
+	{
+		FVdjmVkObservedSourceState SeedState{};
+		SeedState.Format = SubmitInfo.SrcFormat;
+		SeedState.Extent = { SubmitInfo.SrcWidth, SubmitInfo.SrcHeight };
+		SeedState.LastKnownLayout = VK_IMAGE_LAYOUT_GENERAL;	// 임시
+		SeedState.bLayoutKnown = true;						// 임시
+		SeedState.LastSeenSerial = mVkRecordSession.SubmissionSerial;
+
+		mVkRecordSession.SourceStateCache.Add(SourceKey, SeedState);
+		OutState = SeedState;
+		return true;
+	}
+
+	if (CachedState->Format != VK_FORMAT_UNDEFINED && CachedState->Format != SubmitInfo.SrcFormat)
+	{
+		SetFailureReason(EVdjmVkFailureReason::SourceFormatMismatch);
+		return false;
+	}
+
+	if (CachedState->Extent.width != 0 && CachedState->Extent.height != 0 &&
+		(CachedState->Extent.width != SubmitInfo.SrcWidth || CachedState->Extent.height != SubmitInfo.SrcHeight))
+	{
+		SetFailureReason(EVdjmVkFailureReason::SourceExtentMismatch);
+		return false;
+	}
+
+	if (!CachedState->bLayoutKnown || CachedState->LastKnownLayout == VK_IMAGE_LAYOUT_UNDEFINED)
+	{
+		SetFailureReason(EVdjmVkFailureReason::SourceLayoutUnknown);
+		return false;
+	}
+
+	CachedState->Format = SubmitInfo.SrcFormat;
+	CachedState->Extent = { SubmitInfo.SrcWidth, SubmitInfo.SrcHeight };
+	CachedState->LastSeenSerial = mVkRecordSession.SubmissionSerial;
+
+	OutState = *CachedState;
+	return true;
+}
+
+void FVdjmAndroidEncoderBackendVulkan::CommitSourceStateAfterSubmit(
+	const FVdjmVkSubmitFrameInfo& SubmitInfo,
+	VkImageLayout NewLayout)
+{
+	if (!SubmitInfo.IsValid() || NewLayout == VK_IMAGE_LAYOUT_UNDEFINED)
+	{
+		return;
+	}
+
+	const uint64 SourceKey = (uint64)SubmitInfo.SrcImage;
+	FVdjmVkObservedSourceState& State = mVkRecordSession.SourceStateCache.FindOrAdd(SourceKey);
+
+	State.Format = SubmitInfo.SrcFormat;
+	State.Extent = { SubmitInfo.SrcWidth, SubmitInfo.SrcHeight };
+	State.LastKnownLayout = NewLayout;
+	State.bLayoutKnown = true;
+	State.LastSeenSerial = ++mVkRecordSession.SubmissionSerial;
+}
 
 bool FVdjmAndroidEncoderBackendVulkan::Start()
 {
@@ -422,7 +498,9 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Running: encoder backend is not runnable"));
 		return false;
 	}
-
+	
+	SetFailureReason(EVdjmVkFailureReason::None);
+	
 	FVdjmVkSubmitFrameInfo SubmitInfo{};
 	if (not mAnalyzer.Analyze(srcTexture, SubmitInfo))
 	{
@@ -1072,6 +1150,14 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("SubmitTextureToCodecSurface: frame state handles are invalid"));
 		return false;
 	}
+	FVdjmVkObservedSourceState SourceState{};
+	if (!TryResolveSourceState(submitInfo, SourceState))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("SubmitTextureToCodecSurface: failed to resolve source state"));
+		return false;
+	}
+
+	const VkImageLayout OriginalSrcLayout = SourceState.LastKnownLayout;
 
 	VkImage DstImage = mVkRecordSession.SwapchainImages[frameState.AcquiredImageIndex];
 	VkImageLayout& DstLayoutRef = mVkRecordSession.SwapchainImageLayouts[frameState.AcquiredImageIndex];
@@ -1103,7 +1189,17 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 			(int32)vkResult);
 		return false;
 	}
-
+	
+	if (OriginalSrcLayout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+	{
+		FVdjmVkHelper::TransitionImageLayout(
+			frameState.CommandBuffer,
+			submitInfo.SrcImage,
+			submitInfo.SrcFormat,
+			OriginalSrcLayout,
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	}
+	
 	// destination만 우리가 확실히 추적한다.
 	FVdjmVkHelper::TransitionImageLayout(
 		frameState.CommandBuffer,
@@ -1132,12 +1228,22 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 	vkCmdCopyImage(
 		frameState.CommandBuffer,
 		submitInfo.SrcImage,
-		VK_IMAGE_LAYOUT_GENERAL,
+		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 		DstImage,
 		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 		1,
 		&CopyRegion);
-
+	
+	if (OriginalSrcLayout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+	{
+		FVdjmVkHelper::TransitionImageLayout(
+			frameState.CommandBuffer,
+			submitInfo.SrcImage,
+			submitInfo.SrcFormat,
+			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			OriginalSrcLayout);
+	}
+	
 	FVdjmVkHelper::TransitionImageLayout(
 		frameState.CommandBuffer,
 		DstImage,
@@ -1183,7 +1289,6 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 		1,
 		&SubmitInfoVk,
 		frameState.SubmitFence);
-
 	if (vkResult != VK_SUCCESS)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
@@ -1195,7 +1300,7 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 			frameState.AcquireCompleteSemaphore);
 		return false;
 	}
-	
+	CommitSourceStateAfterSubmit(submitInfo, OriginalSrcLayout);
 	mVkRecordSession.AdvanceToNextFrameContext();
 	
 	VkPresentInfoKHR PresentInfo{};
