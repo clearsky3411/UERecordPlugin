@@ -452,7 +452,7 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 	}
 
 	FVdjmVkFrameSubmitState FrameState{};
-	if (!AcquireNextSwapchainImage(FrameState))
+	if (not AcquireNextSwapchainImage(FrameState))
 	{
 		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Running: failed to acquire next swapchain image"));
 		return false;
