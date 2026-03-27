@@ -67,6 +67,11 @@ struct FVdjmVkFrameSubmitState
 
 	bool bCommitIntermediateLayoutOnSubmitSuccess = false;
 	VkImageLayout PendingIntermediateLayoutAfterSubmit = VK_IMAGE_LAYOUT_UNDEFINED;
+	
+	bool IsFrameStateHandlesValid() const
+	{
+		return CommandBuffer != VK_NULL_HANDLE && RenderCompleteSemaphore != VK_NULL_HANDLE && SubmitFence != VK_NULL_HANDLE;
+	}
 };
 //	transient
 struct FVdjmVkSubmitFrameInfo

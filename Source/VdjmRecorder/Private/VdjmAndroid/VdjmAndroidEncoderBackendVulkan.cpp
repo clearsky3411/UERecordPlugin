@@ -1080,7 +1080,7 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 		return false;
 	}
 
-	if (frameState.CommandBuffer == VK_NULL_HANDLE || frameState.SubmitFence == VK_NULL_HANDLE)
+	if (not frameState.IsFrameStateHandlesValid())
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("SubmitTextureToCodecSurface: frame state handles are invalid"));
 		return false;
@@ -1179,8 +1179,9 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 	SubmitInfoVk.pWaitDstStageMask = WaitStages;
 	SubmitInfoVk.commandBufferCount = 1;
 	SubmitInfoVk.pCommandBuffers = &frameState.CommandBuffer;
-	SubmitInfoVk.signalSemaphoreCount = 0;
-	SubmitInfoVk.pSignalSemaphores = nullptr;
+	SubmitInfoVk.signalSemaphoreCount = 1;
+	SubmitInfoVk.pSignalSemaphores = &frameState.RenderCompleteSemaphore;
+
 
 	Result = vkQueueSubmit(
 		mVkRuntime.GraphicsQueue,
@@ -1219,9 +1220,9 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 
 	VkPresentInfoKHR PresentInfo{};
 	PresentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-	PresentInfo.waitSemaphoreCount = 0;
-	PresentInfo.pWaitSemaphores = nullptr;
+	PresentInfo.pWaitSemaphores = &frameState.RenderCompleteSemaphore;
 	PresentInfo.swapchainCount = 1;
+	PresentInfo.waitSemaphoreCount = 1;
 	PresentInfo.pSwapchains = &mVkRecordSession.CodecSwapchain;
 	PresentInfo.pImageIndices = &frameState.AcquiredImageIndex;
 	PresentInfo.pResults = nullptr;
