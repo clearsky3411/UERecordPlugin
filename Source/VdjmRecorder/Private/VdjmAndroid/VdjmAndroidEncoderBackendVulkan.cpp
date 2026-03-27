@@ -518,6 +518,15 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 	SubmitInfo.bCanDirectCopy = bExactSize && bExactFormat;
 	SubmitInfo.bNeedsIntermediate = !SubmitInfo.bCanDirectCopy;
 
+	if (not bExactFormat)
+	{
+		SetFailureReason(EVdjmVkFailureReason::SourceFormatMismatch);
+	}
+	else if (not bExactSize)
+	{
+		SetFailureReason(EVdjmVkFailureReason::SourceExtentMismatch);
+	}
+	
 	if (!SubmitInfo.bCanDirectCopy)
 	{
 		UE_LOG(LogVdjmRecorderCore, Warning,
@@ -617,9 +626,19 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("AcquireNextSwapchainImage: swapchain is out of date"));
+		SetFailureReason(EVdjmVkFailureReason::SwapchainOutOfDate);
 		return false;
 	}
 
+	if (Result == VK_ERROR_DEVICE_LOST)
+	{
+		SetFailureReason(EVdjmVkFailureReason::DeviceLost);
+	}
+	else
+	{
+		SetFailureReason(EVdjmVkFailureReason::AcquireFailed);
+	}
+	
 	if (Result != VK_SUCCESS && Result != VK_SUBOPTIMAL_KHR)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
@@ -1150,6 +1169,8 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("SubmitTextureToCodecSurface: frame state handles are invalid"));
 		return false;
 	}
+	
+	
 	FVdjmVkObservedSourceState SourceState{};
 	if (!TryResolveSourceState(submitInfo, SourceState))
 	{
@@ -1226,13 +1247,13 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 	// 현재 단계의 임시 정책:
 	// source는 GENERAL이라고 가정하고 복사한다.
 	vkCmdCopyImage(
-		frameState.CommandBuffer,
-		submitInfo.SrcImage,
-		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-		DstImage,
-		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-		1,
-		&CopyRegion);
+	frameState.CommandBuffer,
+	submitInfo.SrcImage,
+	SourceState.LastKnownLayout,
+	DstImage,
+	VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	1,
+	&CopyRegion);
 	
 	if (OriginalSrcLayout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
 	{
@@ -1291,6 +1312,7 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 		frameState.SubmitFence);
 	if (vkResult != VK_SUCCESS)
 	{
+		SetFailureReason(EVdjmVkFailureReason::SubmitFailed);
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("SubmitTextureToCodecSurface: vkQueueSubmit failed. Result=%d Queue=%p Cmd=%p Fence=%p AcquireSem=%p"),
 			(int32)vkResult,
@@ -1313,9 +1335,17 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 	PresentInfo.pResults = nullptr;
 
 	vkResult = vkQueuePresentKHR(mVkRuntime.GraphicsQueue, &PresentInfo);
-
+	if (vkResult == VK_ERROR_DEVICE_LOST)
+	{
+		SetFailureReason(EVdjmVkFailureReason::DeviceLost);
+	}
+	else
+	{
+		SetFailureReason(EVdjmVkFailureReason::PresentFailed);
+	}
 	if (vkResult == VK_ERROR_OUT_OF_DATE_KHR)
 	{
+		SetFailureReason(EVdjmVkFailureReason::SwapchainOutOfDate);
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("SubmitTextureToCodecSurface: vkQueuePresentKHR out of date"));
 		return false;
@@ -1330,7 +1360,7 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 	}
 
 	DstLayoutRef = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
+	CommitSourceStateAfterSubmit(submitInfo, SourceState.LastKnownLayout);
 	UE_LOG(LogVdjmRecorderCore, VeryVerbose,
 		TEXT("SubmitTextureToCodecSurface: success. SrcImage=%p DstImage=%p ImageIndex=%u"),
 		submitInfo.SrcImage,
