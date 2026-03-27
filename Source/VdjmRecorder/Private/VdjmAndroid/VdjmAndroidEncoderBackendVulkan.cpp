@@ -57,6 +57,11 @@ bool FVdjmVkSubProcInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdj
 	return true;
 }
 
+void FVdjmVkRecordSessionState::CreateFrameContexts(uint32 DesiredCount)
+{
+	// TODO
+}
+
 /*
  *	class FVdjmAndroidEncoderBackendVulkan : public FVdjmAndroidEncoderBackend
  */
@@ -354,10 +359,7 @@ void FVdjmAndroidEncoderBackendVulkan::Stop()
 	mStarted = false;
 	mPaused = false;
 
-	if (mVkRuntime.VkDevice != VK_NULL_HANDLE)
-	{
-		vkDeviceWaitIdle(mVkRuntime.VkDevice);
-	}
+	DrainInFlightFrames();
 	DestroyRecordSessionVkResources();
 }
 
@@ -1229,7 +1231,27 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 bool FVdjmAndroidEncoderBackendVulkan::DrainInFlightFrames()
 {
 	mVkRecordSession.bStopRequested = true;
-	DrainInFlightFrames();
-	DestroyRecordSessionVkResources();
+
+	for (FVdjmVkFrameContext& FrameCtx : mVkRecordSession.FrameContexts)
+	{
+		if (FrameCtx.SubmitFence != VK_NULL_HANDLE)
+		{
+			VkResult Result = vkWaitForFences(
+				mVkRuntime.VkDevice,
+				1,
+				&FrameCtx.SubmitFence,
+				VK_TRUE,
+				UINT64_MAX);
+
+			if (Result != VK_SUCCESS)
+			{
+				return false;
+			}
+
+			FrameCtx.bInFlight = false;
+		}
+	}
+
+	return true;
 }
 #endif

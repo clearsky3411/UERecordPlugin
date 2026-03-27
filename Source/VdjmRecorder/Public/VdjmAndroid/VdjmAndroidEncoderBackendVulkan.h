@@ -177,37 +177,9 @@ struct FVdjmVkObservedSourceState
 		LastSeenSerial = 0;
 	}
 };
-struct FVdjmVkRecordSessionState
+class FVdjmVkRecordSessionState
 {
-	ANativeWindow* InputWindow = nullptr;
-
-	VkSurfaceKHR CodecSurface = VK_NULL_HANDLE;
-	VkSwapchainKHR CodecSwapchain = VK_NULL_HANDLE;
-
-	TArray<VkImage> SwapchainImages;
-	TArray<VkImageLayout> SwapchainImageLayouts;
-
-	VkFormat SurfaceFormat = VK_FORMAT_UNDEFINED;
-	VkColorSpaceKHR SurfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-	VkExtent2D SurfaceExtent{0, 0};
-
-	TArray<FVdjmVkFrameContext> FrameContexts;
-	uint32 NextFrameContextIndex = 0;
-	bool bStopRequested = false;
-	uint64 SubmissionSerial = 0;
-	
-	TMap<uint64, FVdjmVkObservedSourceState> SourceStateCache;
-
-	FVdjmVkOwnedImageState IntermediateImageState;
-	bool bHasIntermediateImage = false;
-
-	bool bStarted = false;
-	
-	uint64 CreatedFrameContextCount = 0;
-	uint64 DestroyedFrameContextCount = 0;
-	uint64 SubmittedFrameCount = 0;
-	uint64 PresentedFrameCount = 0;
-
+public:
 	bool IsReadyToStart() const
 	{
 		return CodecSurface != VK_NULL_HANDLE && CodecSwapchain != VK_NULL_HANDLE && FVdjmVkFrameContext::IsReadies(FrameContexts);
@@ -236,6 +208,71 @@ struct FVdjmVkRecordSessionState
 	 * 서비스 수준에서는 녹화 성공/실패 판정을 여기서 내린다.
 	 */
 	bool ValidateRecordedOutputFile() const;
+	
+	void CreateFrameContexts(uint32 DesiredCount);
+	int32 AdvanceToNextFrameContext(int32* OutPreviousIndex = nullptr)
+	{
+		if (FrameContexts.Num() == 0)	
+		{
+			return -1;
+		}
+		int32 PreviousIndex = CurrentFrameContextIndex;
+		CurrentFrameContextIndex = (CurrentFrameContextIndex + 1) % FrameContexts.Num();
+		if (OutPreviousIndex != nullptr)
+		{
+			*OutPreviousIndex = PreviousIndex;
+		}
+		return CurrentFrameContextIndex;
+	}
+	int32 GetCurrentFrameContextIndex() const
+	{
+		if (FrameContexts.Num() == 0)
+		{
+			return -1;
+		}
+		return CurrentFrameContextIndex;
+	}
+	int32 GetFrameContextCount() const
+	{
+		return FrameContexts.Num();
+	}
+	FVdjmVkFrameContext& GetCurrentFrameContext()
+	{
+		int32 Index = GetCurrentFrameContextIndex();
+		check(Index >= 0 && Index < FrameContexts.Num());
+		return FrameContexts[Index];
+	}
+	
+	ANativeWindow* InputWindow = nullptr;
+
+	VkSurfaceKHR CodecSurface = VK_NULL_HANDLE;
+	VkSwapchainKHR CodecSwapchain = VK_NULL_HANDLE;
+
+	TArray<VkImage> SwapchainImages;
+	TArray<VkImageLayout> SwapchainImageLayouts;
+
+	VkFormat SurfaceFormat = VK_FORMAT_UNDEFINED;
+	VkColorSpaceKHR SurfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+	VkExtent2D SurfaceExtent{0, 0};
+
+	TArray<FVdjmVkFrameContext> FrameContexts;
+	uint32 CurrentFrameContextIndex = 0;
+	bool bStopRequested = false;
+	uint64 SubmissionSerial = 0;
+	
+	TMap<uint64, FVdjmVkObservedSourceState> SourceStateCache;
+
+	FVdjmVkOwnedImageState IntermediateImageState;
+	bool bHasIntermediateImage = false;
+
+	bool bStarted = false;
+	
+	uint64 CreatedFrameContextCount = 0;
+	uint64 DestroyedFrameContextCount = 0;
+	uint64 SubmittedFrameCount = 0;
+	uint64 PresentedFrameCount = 0;
+
+	
 };
 
 
