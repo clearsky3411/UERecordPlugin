@@ -330,6 +330,7 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 		return;
 	if (bEndOfStream && !mEosSent)
 	{
+		UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidRecordSession::Drain - Signaling end of input stream to codec."));
 		AMediaCodec_signalEndOfInputStream(mCodec);
 		mEosSent = true;
 	}
@@ -399,12 +400,13 @@ bool FVdjmAndroidRecordSession::Running(FRHICommandList& RHICmdList, const FText
 	{
 		return false;
 	}
-
+	
 	if (not mGraphicBackend->Running(RHICmdList, srcTexture, timeStampSec))
 	{
+		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::Running - Graphic backend is not running."));
 		return false;
 	}
-
+	
 	Drain(false);
 	return true;
 }

@@ -429,12 +429,19 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 
 	if (!SubmitInfo.bCanDirectCopy)
 	{
+		UE_LOG(LogVdjmRecorderCore, Warning,
+			TEXT("Running: source texture format/size does not match swapchain. Direct copy not possible. SrcFormat=%d SrcSize=(%d,%d) SwapchainFormat=%d SwapchainSize=(%d,%d)"),
+			(int32)SubmitInfo.SrcFormat,
+			SubmitInfo.SrcWidth, SubmitInfo.SrcHeight,
+			mVkRecordSession.SurfaceFormat,
+			mVkRecordSession.SurfaceExtent.width, mVkRecordSession.SurfaceExtent.height);
 		return false;
 	}
 
 	FVdjmVkFrameSubmitState FrameState{};
 	if (!AcquireNextSwapchainImage(FrameState))
 	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Running: failed to acquire next swapchain image"));
 		return false;
 	}
 
@@ -1217,5 +1224,12 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 		frameState.AcquiredImageIndex);
 
 	return true;
+}
+
+bool FVdjmAndroidEncoderBackendVulkan::DrainInFlightFrames()
+{
+	mVkRecordSession.bStopRequested = true;
+	DrainInFlightFrames();
+	DestroyRecordSessionVkResources();
 }
 #endif

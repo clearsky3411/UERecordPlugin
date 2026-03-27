@@ -11,6 +11,20 @@ struct IVulkanDynamicRHI;
 class FVdjmAndroidEncoderBackendVulkan;
 
 
+enum class EVdjmVkFailureReason : uint8
+{
+	None,
+	SourceHandleResolveFailed,
+	SourceLayoutUnknown,
+	SourceFormatMismatch,
+	SourceExtentMismatch,
+	AcquireFailed,
+	SubmitFailed,
+	PresentFailed,
+	SwapchainOutOfDate,
+	DeviceLost
+};
+
 struct FVdjmVkOwnedImageState
 {
 	VkImage Image = VK_NULL_HANDLE;
@@ -39,7 +53,6 @@ struct FVdjmVkOwnedImageState
 	}
 };
 
-
 struct FVdjmVkFrameSubmitState
 {
 	VkCommandBuffer CommandBuffer = VK_NULL_HANDLE;
@@ -54,6 +67,7 @@ struct FVdjmVkFrameSubmitState
 	bool bCommitIntermediateLayoutOnSubmitSuccess = false;
 	VkImageLayout PendingIntermediateLayoutAfterSubmit = VK_IMAGE_LAYOUT_UNDEFINED;
 };
+//	transient
 struct FVdjmVkSubmitFrameInfo
 {
 	VkImage SrcImage = VK_NULL_HANDLE;
@@ -82,6 +96,87 @@ struct FVdjmVkSubmitFrameInfo
 			&& SrcHeight > 0;
 	}
 };
+struct FVdjmVkFrameContext
+{
+	/*
+	 * 프레임 슬롯 하나의 lifetime
+	 * - Start에서 생성
+	 * - Running에서 acquire / record / submit / present에 사용
+	 * - fence signaled 이후 재사용
+	 * - Stop에서 drain 후 해제
+	 */
+	VkCommandPool CommandPool = VK_NULL_HANDLE;
+	VkCommandBuffer CommandBuffer = VK_NULL_HANDLE;
+
+	VkSemaphore AcquireCompleteSemaphore = VK_NULL_HANDLE;
+	VkSemaphore RenderCompleteSemaphore = VK_NULL_HANDLE;
+	VkFence SubmitFence = VK_NULL_HANDLE;
+
+	bool bInFlight = false;
+	uint64 SubmissionSerial = 0;
+
+	void Clear()
+	{
+		CommandPool = VK_NULL_HANDLE;
+		CommandBuffer = VK_NULL_HANDLE;
+		AcquireCompleteSemaphore = VK_NULL_HANDLE;
+		RenderCompleteSemaphore = VK_NULL_HANDLE;
+		SubmitFence = VK_NULL_HANDLE;
+		bInFlight = false;
+		SubmissionSerial = 0;
+	}
+
+	bool IsReady() const
+	{
+		return CommandPool != VK_NULL_HANDLE
+			&& CommandBuffer != VK_NULL_HANDLE
+			&& AcquireCompleteSemaphore != VK_NULL_HANDLE
+			&& RenderCompleteSemaphore != VK_NULL_HANDLE
+			&& SubmitFence != VK_NULL_HANDLE;
+	}
+	static bool IsReadies(const TArray<FVdjmVkFrameContext>& FrameContexts)
+	{
+		for (const FVdjmVkFrameContext& Context : FrameContexts)
+		{
+			if (!Context.IsReady())
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+	static bool ClearAll(TArray<FVdjmVkFrameContext>& FrameContexts)
+	{
+		for (FVdjmVkFrameContext& Context : FrameContexts)
+		{
+			Context.Clear();
+		}
+		return true;
+	}
+
+};
+
+struct FVdjmVkObservedSourceState
+{
+	/*
+	 * source image의 마지막 known 상태를 session 동안 추적한다.
+	 * layout을 고정 상수로 두지 않고, 프레임별 실제 상태를 누적 관리한다.
+	 */
+	VkFormat Format = VK_FORMAT_UNDEFINED;
+	VkExtent2D Extent{0, 0};
+	VkImageLayout LastKnownLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	bool bLayoutKnown = false;
+	uint64 LastSeenSerial = 0;
+
+	void Clear()
+	{
+		Format = VK_FORMAT_UNDEFINED;
+		Extent = {0, 0};
+		LastKnownLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		bLayoutKnown = false;
+		LastSeenSerial = 0;
+	}
+};
 struct FVdjmVkRecordSessionState
 {
 	ANativeWindow* InputWindow = nullptr;
@@ -96,20 +191,26 @@ struct FVdjmVkRecordSessionState
 	VkColorSpaceKHR SurfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 	VkExtent2D SurfaceExtent{0, 0};
 
-	VkCommandPool CommandPool = VK_NULL_HANDLE;
-	VkCommandBuffer CommandBuffer = VK_NULL_HANDLE;
-
-	VkFence SubmitFence = VK_NULL_HANDLE;
-	VkSemaphore AcquireSemaphore = VK_NULL_HANDLE;
+	TArray<FVdjmVkFrameContext> FrameContexts;
+	uint32 NextFrameContextIndex = 0;
+	bool bStopRequested = false;
+	uint64 SubmissionSerial = 0;
+	
+	TMap<uint64, FVdjmVkObservedSourceState> SourceStateCache;
 
 	FVdjmVkOwnedImageState IntermediateImageState;
 	bool bHasIntermediateImage = false;
 
 	bool bStarted = false;
+	
+	uint64 CreatedFrameContextCount = 0;
+	uint64 DestroyedFrameContextCount = 0;
+	uint64 SubmittedFrameCount = 0;
+	uint64 PresentedFrameCount = 0;
 
 	bool IsReadyToStart() const
 	{
-		return CodecSurface != VK_NULL_HANDLE && CodecSwapchain != VK_NULL_HANDLE && CommandBuffer != VK_NULL_HANDLE;
+		return CodecSurface != VK_NULL_HANDLE && CodecSwapchain != VK_NULL_HANDLE && FVdjmVkFrameContext::IsReadies(FrameContexts);
 	}
 	
 	void Clear()
@@ -122,10 +223,9 @@ struct FVdjmVkRecordSessionState
 		SurfaceFormat = VK_FORMAT_UNDEFINED;
 		SurfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 		SurfaceExtent = {0, 0};
-		CommandPool = VK_NULL_HANDLE;
-		CommandBuffer = VK_NULL_HANDLE;
-		SubmitFence = VK_NULL_HANDLE;
-		AcquireSemaphore = VK_NULL_HANDLE;
+		FVdjmVkFrameContext::ClearAll(FrameContexts);
+		FrameContexts.Empty();
+		
 		IntermediateImageState.Clear();
 		bHasIntermediateImage = false;
 		bStarted = false;
@@ -136,6 +236,7 @@ struct FVdjmVkRecordSessionState
 /**
  * @brief Vulkan 관련 리소스와 상태를 관리하는 런타임 컨텍스트 구조체
  * @note life time : FVdjmAndroidEncoderBackendVulkan 인스턴스 생성부터 소멸까지
+ * @details shared,flyweight
  */
 struct FVdjmVkRuntimeContext
 {
@@ -168,6 +269,7 @@ struct FVdjmVkRuntimeContext
 		return bInitialized && IsInitValid();
 	}
 };
+
 
 struct FVdjmVkHelper
 {
@@ -249,12 +351,54 @@ public:
 	void DestroyRecordSessionVkResources();
 	
 	bool TryExtractNativeVkImage(const FTextureRHIRef& srcTexture, VkImage& outImage) const;
+	bool ResolveNativeVkImag(const FTextureRHIRef& srcTexture, FVdjmVkOwnedImageState& outImageState) const;
+	/*
+ * source와 encoder surface가 exact-match가 아닐 때 사용할 중간 이미지 경로를 준비한다.
+ * 서비스 수준에서는 resize / format normalize / blit / shader copy를 이 경로로 보낸다.
+ */
+	bool EnsureIntermediateForFrame(const FVdjmVkSubmitFrameInfo& SubmitInfo);
+
+	/*
+	 * 현재 프레임을 intermediate image를 거쳐 encoder surface에 넣는다.
+	 */
+	bool SubmitTextureViaIntermediate(
+		const FVdjmVkSubmitFrameInfo& SubmitInfo,
+		FVdjmVkFrameContext& FrameCtx,
+		const FVdjmVkObservedSourceState& SourceState);
+	/*
+ * Stop 이후 생성된 출력 파일이 실제로 존재하고,
+ * 크기가 0이 아니며, 최소한의 기록이 있었는지 확인한다.
+ * 서비스 수준에서는 녹화 성공/실패 판정을 여기서 내린다.
+ */
+	bool ValidateRecordedOutputFile() const;
 private:
 	
 	bool InitVkRuntimeContext();
 	
 	bool AcquireNextSwapchainImage(FVdjmVkFrameSubmitState& outFrameState);
 	bool SubmitTextureToCodecSurface(const FVdjmVkSubmitFrameInfo& submitInfo, FVdjmVkFrameSubmitState& frameState);
+	
+	bool DrainInFlightFrames();
+	/*
+ * 현재 source image의 실제 사용 가능한 상태를 해석한다.
+ * - cache hit면 LastKnownLayout 사용
+ * - cache miss면 unresolved로 반환
+ * 서비스 수준에서는 GENERAL 고정 가정을 없애는 함수다.
+ */
+	bool TryResolveSourceState(
+		const FVdjmVkSubmitFrameInfo& SubmitInfo,
+		FVdjmVkObservedSourceState& OutState);
+
+	void CommitSourceStateAfterSubmit(
+		const FVdjmVkSubmitFrameInfo& SubmitInfo,
+		VkImageLayout NewLayout);
+	void SetFailureReason(EVdjmVkFailureReason Reason);
+	
+	EVdjmVkFailureReason mLastFailureReason = EVdjmVkFailureReason::None;
+	/*
+	 * Vulkan 경로 실패를 분류해 상위 session/manager가 정책 판단을 할 수 있게 한다.
+	 * backend는 "무엇이 실패했는지"만 말하고, fallback 자체는 상위에서 결정한다.
+	 */
 	
 	FVdjmAndroidEncoderConfigure mConfig;
 	
