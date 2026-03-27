@@ -70,7 +70,7 @@ struct FVdjmVkFrameSubmitState
 	
 	bool IsFrameStateHandlesValid() const
 	{
-		return CommandBuffer != VK_NULL_HANDLE && RenderCompleteSemaphore != VK_NULL_HANDLE && SubmitFence != VK_NULL_HANDLE;
+		return CommandBuffer != VK_NULL_HANDLE && RenderCompleteSemaphore != VK_NULL_HANDLE && SubmitFence != VK_NULL_HANDLE && AcquireCompleteSemaphore != VK_NULL_HANDLE;
 	}
 };
 //	transient

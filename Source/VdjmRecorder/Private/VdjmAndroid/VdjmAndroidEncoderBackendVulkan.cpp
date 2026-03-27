@@ -523,20 +523,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 			(int32)Result);
 		return false;
 	}
-
-	// 새 프레임 submit을 위해 fence reset
-	Result = vkResetFences(
-		mVkRuntime.VkDevice,
-		1,
-		&FrameCtx.SubmitFence);
-
-	if (Result != VK_SUCCESS)
-	{
-		UE_LOG(LogVdjmRecorderCore, Error,
-			TEXT("AcquireNextSwapchainImage: vkResetFences failed. Result=%d"),
-			(int32)Result);
-		return false;
-	}
+	
 
 	uint32 AcquiredImageIndex = UINT32_MAX;
 
@@ -584,7 +571,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 		TEXT("AcquireNextSwapchainImage: success. Result=%d ImageIndex=%u"),
 		(int32)Result,
 		AcquiredImageIndex);
-	mVkRecordSession.AdvanceToNextFrameContext();
+	//mVkRecordSession.AdvanceToNextFrameContext();
 	return true;
 }
 
@@ -1166,6 +1153,21 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 			(int32)Result);
 		return false;
 	}
+	
+	Result = vkResetFences(
+	mVkRuntime.VkDevice,
+	1,
+	&frameState.SubmitFence);
+	
+	mVkRecordSession.AdvanceToNextFrameContext();
+
+	if (Result != VK_SUCCESS)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("SubmitTextureToCodecSurface: vkResetFences failed. Result=%d"),
+			(int32)Result);
+		return false;
+	}
 
 	VkPipelineStageFlags WaitStages[] =
 	{
@@ -1198,23 +1200,6 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 			frameState.CommandBuffer,
 			frameState.SubmitFence,
 			frameState.AcquireCompleteSemaphore);
-		return false;
-	}
-
-	// 임시 정책:
-	// render-complete semaphore 대신 host fence를 기다린 후 present를 호출한다.
-	Result = vkWaitForFences(
-		mVkRuntime.VkDevice,
-		1,
-		&frameState.SubmitFence,
-		VK_TRUE,
-		UINT64_MAX);
-
-	if (Result != VK_SUCCESS)
-	{
-		UE_LOG(LogVdjmRecorderCore, Error,
-			TEXT("SubmitTextureToCodecSurface: vkWaitForFences(after submit) failed. Result=%d"),
-			(int32)Result);
 		return false;
 	}
 
