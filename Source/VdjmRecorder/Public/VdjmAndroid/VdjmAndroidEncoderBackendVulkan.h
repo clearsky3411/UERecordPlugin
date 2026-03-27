@@ -57,6 +57,7 @@ struct FVdjmVkFrameSubmitState
 {
 	VkCommandBuffer CommandBuffer = VK_NULL_HANDLE;
 	VkSemaphore AcquireCompleteSemaphore = VK_NULL_HANDLE;
+	VkSemaphore RenderCompleteSemaphore = VK_NULL_HANDLE;
 	VkFence SubmitFence = VK_NULL_HANDLE;
 	uint32 AcquiredImageIndex = UINT32_MAX;
 
@@ -180,6 +181,8 @@ struct FVdjmVkObservedSourceState
 class FVdjmVkRecordSessionState
 {
 public:
+	FVdjmVkRecordSessionState();
+	
 	bool IsReadyToStart() const
 	{
 		return CodecSurface != VK_NULL_HANDLE && CodecSwapchain != VK_NULL_HANDLE && FVdjmVkFrameContext::IsReadies(FrameContexts);
@@ -187,20 +190,26 @@ public:
 	
 	void Clear()
 	{
-		InputWindow = nullptr;
-		CodecSurface = VK_NULL_HANDLE;
-		CodecSwapchain = VK_NULL_HANDLE;
-		SwapchainImages.Empty();
-		SwapchainImageLayouts.Empty();
 		SurfaceFormat = VK_FORMAT_UNDEFINED;
 		SurfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 		SurfaceExtent = {0, 0};
+
 		FVdjmVkFrameContext::ClearAll(FrameContexts);
-		FrameContexts.Empty();
 		
+		CurrentFrameContextIndex = 0;
+
+		bStopRequested = false;
+		SubmissionSerial = 0;
+		SourceStateCache.Empty();
+
 		IntermediateImageState.Clear();
 		bHasIntermediateImage = false;
 		bStarted = false;
+
+		CreatedFrameContextCount = 0;
+		DestroyedFrameContextCount = 0;
+		SubmittedFrameCount = 0;
+		PresentedFrameCount = 0;
 	}
 	/*
 	 * Stop 이후 생성된 출력 파일이 실제로 존재하고,
@@ -209,7 +218,7 @@ public:
 	 */
 	bool ValidateRecordedOutputFile() const;
 	
-	void CreateFrameContexts(uint32 DesiredCount);
+	
 	int32 AdvanceToNextFrameContext(int32* OutPreviousIndex = nullptr)
 	{
 		if (FrameContexts.Num() == 0)	
@@ -259,6 +268,7 @@ public:
 	uint32 CurrentFrameContextIndex = 0;
 	bool bStopRequested = false;
 	uint64 SubmissionSerial = 0;
+	const int32 MaxInFlightFrames = 3;
 	
 	TMap<uint64, FVdjmVkObservedSourceState> SourceStateCache;
 

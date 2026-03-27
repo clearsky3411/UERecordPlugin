@@ -57,17 +57,28 @@ bool FVdjmVkSubProcInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdj
 	return true;
 }
 
-void FVdjmVkRecordSessionState::CreateFrameContexts(uint32 DesiredCount)
+FVdjmVkRecordSessionState::FVdjmVkRecordSessionState():
+	InputWindow(nullptr)
+	, CodecSurface(VK_NULL_HANDLE)
+	, CodecSwapchain(VK_NULL_HANDLE)
+	, SwapchainImages()
+	, FrameContexts()
+	,SurfaceFormat(VK_FORMAT_UNDEFINED)
+	, SurfaceColorSpace(VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+	,SurfaceExtent{0, 0}
+	, CurrentFrameContextIndex(0)
+	,bStopRequested(false)
+	, SubmissionSerial(0)
+	, bHasIntermediateImage(false), bStarted(false), CreatedFrameContextCount(0), DestroyedFrameContextCount(0), SubmittedFrameCount(0), PresentedFrameCount(0),IntermediateImageState(),SourceStateCache()
 {
-	// TODO
+	FrameContexts.SetNum(MaxInFlightFrames);
+	FVdjmVkFrameContext::ClearAll(FrameContexts);
 }
 
 /*
  *	class FVdjmAndroidEncoderBackendVulkan : public FVdjmAndroidEncoderBackend
  */
-/*
- * Backend helpers
- */
+
 uint32 FVdjmVkHelper::FindMemoryType(VkPhysicalDevice physicalDevice, uint32 typeFilter,VkMemoryPropertyFlags properties)
 {
 	VkPhysicalDeviceMemoryProperties MemProps{};
@@ -590,6 +601,11 @@ bool FVdjmAndroidEncoderBackendVulkan::CreateRecordSessionVkResources()
 	}
 
 	DestroyRecordSessionVkResources();
+	
+	
+	
+	
+	
 
 	mVkRecordSession.InputWindow = mInputWindow;
 
