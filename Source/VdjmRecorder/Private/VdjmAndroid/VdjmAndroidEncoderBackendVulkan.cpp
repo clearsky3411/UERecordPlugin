@@ -1082,12 +1082,12 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 		return false;
 	}
 
-	VkResult Result = vkResetCommandBuffer(frameState.CommandBuffer, 0);
-	if (Result != VK_SUCCESS)
+	VkResult vkResult = vkResetCommandBuffer(frameState.CommandBuffer, 0);
+	if (vkResult != VK_SUCCESS)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("SubmitTextureToCodecSurface: vkResetCommandBuffer failed. Result=%d"),
-			(int32)Result);
+			(int32)vkResult);
 		return false;
 	}
 
@@ -1095,12 +1095,12 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 	BeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	BeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-	Result = vkBeginCommandBuffer(frameState.CommandBuffer, &BeginInfo);
-	if (Result != VK_SUCCESS)
+	vkResult = vkBeginCommandBuffer(frameState.CommandBuffer, &BeginInfo);
+	if (vkResult != VK_SUCCESS)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("SubmitTextureToCodecSurface: vkBeginCommandBuffer failed. Result=%d"),
-			(int32)Result);
+			(int32)vkResult);
 		return false;
 	}
 
@@ -1145,27 +1145,20 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 		VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
-	Result = vkEndCommandBuffer(frameState.CommandBuffer);
-	if (Result != VK_SUCCESS)
+	vkResult = vkEndCommandBuffer(frameState.CommandBuffer);
+	if (vkResult != VK_SUCCESS)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("SubmitTextureToCodecSurface: vkEndCommandBuffer failed. Result=%d"),
-			(int32)Result);
+			(int32)vkResult);
 		return false;
 	}
 	
-	Result = vkResetFences(
-	mVkRuntime.VkDevice,
-	1,
-	&frameState.SubmitFence);
-	
-	mVkRecordSession.AdvanceToNextFrameContext();
-
-	if (Result != VK_SUCCESS)
+	vkResult = vkResetFences(	mVkRuntime.VkDevice,1,	&frameState.SubmitFence);
+	if (vkResult != VK_SUCCESS)
 	{
-		UE_LOG(LogVdjmRecorderCore, Error,
-			TEXT("SubmitTextureToCodecSurface: vkResetFences failed. Result=%d"),
-			(int32)Result);
+		UE_LOG(LogVdjmRecorderCore, Error,TEXT("SubmitTextureToCodecSurface: vkResetFences failed. Result=%d"),
+			(int32)vkResult);
 		return false;
 	}
 
@@ -1185,24 +1178,26 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 	SubmitInfoVk.pSignalSemaphores = &frameState.RenderCompleteSemaphore;
 
 
-	Result = vkQueueSubmit(
+	vkResult = vkQueueSubmit(
 		mVkRuntime.GraphicsQueue,
 		1,
 		&SubmitInfoVk,
 		frameState.SubmitFence);
 
-	if (Result != VK_SUCCESS)
+	if (vkResult != VK_SUCCESS)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("SubmitTextureToCodecSurface: vkQueueSubmit failed. Result=%d Queue=%p Cmd=%p Fence=%p AcquireSem=%p"),
-			(int32)Result,
+			(int32)vkResult,
 			mVkRuntime.GraphicsQueue,
 			frameState.CommandBuffer,
 			frameState.SubmitFence,
 			frameState.AcquireCompleteSemaphore);
 		return false;
 	}
-
+	
+	mVkRecordSession.AdvanceToNextFrameContext();
+	
 	VkPresentInfoKHR PresentInfo{};
 	PresentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 	PresentInfo.pWaitSemaphores = &frameState.RenderCompleteSemaphore;
@@ -1212,20 +1207,20 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 	PresentInfo.pImageIndices = &frameState.AcquiredImageIndex;
 	PresentInfo.pResults = nullptr;
 
-	Result = vkQueuePresentKHR(mVkRuntime.GraphicsQueue, &PresentInfo);
+	vkResult = vkQueuePresentKHR(mVkRuntime.GraphicsQueue, &PresentInfo);
 
-	if (Result == VK_ERROR_OUT_OF_DATE_KHR)
+	if (vkResult == VK_ERROR_OUT_OF_DATE_KHR)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("SubmitTextureToCodecSurface: vkQueuePresentKHR out of date"));
 		return false;
 	}
 
-	if (Result != VK_SUCCESS && Result != VK_SUBOPTIMAL_KHR)
+	if (vkResult != VK_SUCCESS && vkResult != VK_SUBOPTIMAL_KHR)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("SubmitTextureToCodecSurface: vkQueuePresentKHR failed. Result=%d"),
-			(int32)Result);
+			(int32)vkResult);
 		return false;
 	}
 
