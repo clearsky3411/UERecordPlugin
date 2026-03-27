@@ -486,6 +486,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 	 * 실제 command recording / layout transition / copy / queue submit / present는
 	 * SubmitTextureToCodecSurface()에서 처리한다.
 	 */
+	FVdjmVkFrameContext& FrameCtx = mVkRecordSession.GetCurrentFrameContext();
 	outFrameState = FVdjmVkFrameSubmitState{};
 
 	if (mVkRuntime.VkDevice == VK_NULL_HANDLE)
@@ -500,8 +501,8 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 		return false;
 	}
 
-	if (mVkRecordSession.AcquireSemaphore == VK_NULL_HANDLE ||
-		mVkRecordSession.SubmitFence == VK_NULL_HANDLE)
+	if (FrameCtx.AcquireCompleteSemaphore == VK_NULL_HANDLE ||
+		FrameCtx.SubmitFence == VK_NULL_HANDLE)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AcquireNextSwapchainImage: sync objects are invalid"));
 		return false;
@@ -511,7 +512,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 	VkResult Result = vkWaitForFences(
 		mVkRuntime.VkDevice,
 		1,
-		&mVkRecordSession.SubmitFence,
+		&FrameCtx.SubmitFence,
 		VK_TRUE,
 		UINT64_MAX);
 
@@ -527,7 +528,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 	Result = vkResetFences(
 		mVkRuntime.VkDevice,
 		1,
-		&mVkRecordSession.SubmitFence);
+		&FrameCtx.SubmitFence);
 
 	if (Result != VK_SUCCESS)
 	{
@@ -543,7 +544,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 		mVkRuntime.VkDevice,
 		mVkRecordSession.CodecSwapchain,
 		UINT64_MAX,
-		mVkRecordSession.AcquireSemaphore,
+		FrameCtx.AcquireCompleteSemaphore,
 		VK_NULL_HANDLE,
 		&AcquiredImageIndex);
 
@@ -571,9 +572,10 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 		return false;
 	}
 
-	outFrameState.CommandBuffer = mVkRecordSession.CommandBuffer;
-	outFrameState.AcquireCompleteSemaphore = mVkRecordSession.AcquireSemaphore;
-	outFrameState.SubmitFence = mVkRecordSession.SubmitFence;
+	outFrameState.CommandBuffer = FrameCtx.CommandBuffer;
+	outFrameState.AcquireCompleteSemaphore = FrameCtx.AcquireCompleteSemaphore;
+	outFrameState.RenderCompleteSemaphore = FrameCtx.RenderCompleteSemaphore;
+	outFrameState.SubmitFence = FrameCtx.SubmitFence;
 	outFrameState.AcquiredImageIndex = AcquiredImageIndex;
 
 	mCurrentSwapchainImageIndex32 = AcquiredImageIndex;
@@ -582,7 +584,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 		TEXT("AcquireNextSwapchainImage: success. Result=%d ImageIndex=%u"),
 		(int32)Result,
 		AcquiredImageIndex);
-
+	mVkRecordSession.AdvanceToNextFrameContext();
 	return true;
 }
 
@@ -601,11 +603,6 @@ bool FVdjmAndroidEncoderBackendVulkan::CreateRecordSessionVkResources()
 	}
 
 	DestroyRecordSessionVkResources();
-	
-	
-	
-	
-	
 
 	mVkRecordSession.InputWindow = mInputWindow;
 
@@ -837,83 +834,83 @@ bool FVdjmAndroidEncoderBackendVulkan::CreateRecordSessionVkResources()
 		VK_IMAGE_LAYOUT_UNDEFINED,
 		mVkRecordSession.SwapchainImages.Num());
 
-	VkCommandPoolCreateInfo PoolInfo{};
-	PoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-	PoolInfo.queueFamilyIndex = mVkRuntime.GraphicsQueueFamilyIndex;
-	PoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-
-	Result = vkCreateCommandPool(
-		mVkRuntime.VkDevice,
-		&PoolInfo,
-		nullptr,
-		&mVkRecordSession.CommandPool);
-
-	if (Result != VK_SUCCESS || mVkRecordSession.CommandPool == VK_NULL_HANDLE)
+	for (FVdjmVkFrameContext& FrameCtx : mVkRecordSession.FrameContexts)
 	{
-		UE_LOG(LogVdjmRecorderCore, Error,
-			TEXT("CreateRecordSessionVkResources: vkCreateCommandPool failed. Result=%d"),
-			(int32)Result);
-		DestroyRecordSessionVkResources();
-		return false;
+	    VkCommandPoolCreateInfo PoolInfo{};
+	    PoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	    PoolInfo.queueFamilyIndex = mVkRuntime.GraphicsQueueFamilyIndex;
+	    PoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+	    Result = vkCreateCommandPool(
+	        mVkRuntime.VkDevice,
+	        &PoolInfo,
+	        nullptr,
+	        &FrameCtx.CommandPool);
+	    if (Result != VK_SUCCESS || FrameCtx.CommandPool == VK_NULL_HANDLE)
+	    {
+	        DestroyRecordSessionVkResources();
+	        return false;
+	    }
+
+	    VkCommandBufferAllocateInfo CmdAllocInfo{};
+	    CmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	    CmdAllocInfo.commandPool = FrameCtx.CommandPool;
+	    CmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	    CmdAllocInfo.commandBufferCount = 1;
+
+	    Result = vkAllocateCommandBuffers(
+	        mVkRuntime.VkDevice,
+	        &CmdAllocInfo,
+	        &FrameCtx.CommandBuffer);
+	    if (Result != VK_SUCCESS || FrameCtx.CommandBuffer == VK_NULL_HANDLE)
+	    {
+	        DestroyRecordSessionVkResources();
+	        return false;
+	    }
+
+	    VkSemaphoreCreateInfo SemaphoreInfo{};
+	    SemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+	    Result = vkCreateSemaphore(
+	        mVkRuntime.VkDevice,
+	        &SemaphoreInfo,
+	        nullptr,
+	        &FrameCtx.AcquireCompleteSemaphore);
+	    if (Result != VK_SUCCESS || FrameCtx.AcquireCompleteSemaphore == VK_NULL_HANDLE)
+	    {
+	        DestroyRecordSessionVkResources();
+	        return false;
+	    }
+
+	    Result = vkCreateSemaphore(
+	        mVkRuntime.VkDevice,
+	        &SemaphoreInfo,
+	        nullptr,
+	        &FrameCtx.RenderCompleteSemaphore);
+	    if (Result != VK_SUCCESS || FrameCtx.RenderCompleteSemaphore == VK_NULL_HANDLE)
+	    {
+	        DestroyRecordSessionVkResources();
+	        return false;
+	    }
+
+	    VkFenceCreateInfo FenceInfo{};
+	    FenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	    FenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+	    Result = vkCreateFence(
+	        mVkRuntime.VkDevice,
+	        &FenceInfo,
+	        nullptr,
+	        &FrameCtx.SubmitFence);
+	    if (Result != VK_SUCCESS || FrameCtx.SubmitFence == VK_NULL_HANDLE)
+	    {
+	        DestroyRecordSessionVkResources();
+	        return false;
+	    }
+
+	    ++mVkRecordSession.CreatedFrameContextCount;
 	}
-
-	VkCommandBufferAllocateInfo CmdAllocInfo{};
-	CmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-	CmdAllocInfo.commandPool = mVkRecordSession.CommandPool;
-	CmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-	CmdAllocInfo.commandBufferCount = 1;
-
-	Result = vkAllocateCommandBuffers(
-		mVkRuntime.VkDevice,
-		&CmdAllocInfo,
-		&mVkRecordSession.CommandBuffer);
-
-	if (Result != VK_SUCCESS || mVkRecordSession.CommandBuffer == VK_NULL_HANDLE)
-	{
-		UE_LOG(LogVdjmRecorderCore, Error,
-			TEXT("CreateRecordSessionVkResources: vkAllocateCommandBuffers failed. Result=%d"),
-			(int32)Result);
-		DestroyRecordSessionVkResources();
-		return false;
-	}
-
-	VkSemaphoreCreateInfo SemaphoreInfo{};
-	SemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-	Result = vkCreateSemaphore(
-		mVkRuntime.VkDevice,
-		&SemaphoreInfo,
-		nullptr,
-		&mVkRecordSession.AcquireSemaphore);
-
-	if (Result != VK_SUCCESS || mVkRecordSession.AcquireSemaphore == VK_NULL_HANDLE)
-	{
-		UE_LOG(LogVdjmRecorderCore, Error,
-			TEXT("CreateRecordSessionVkResources: vkCreateSemaphore failed. Result=%d"),
-			(int32)Result);
-		DestroyRecordSessionVkResources();
-		return false;
-	}
-
-	VkFenceCreateInfo FenceInfo{};
-	FenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-	FenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-	Result = vkCreateFence(
-		mVkRuntime.VkDevice,
-		&FenceInfo,
-		nullptr,
-		&mVkRecordSession.SubmitFence);
-
-	if (Result != VK_SUCCESS || mVkRecordSession.SubmitFence == VK_NULL_HANDLE)
-	{
-		UE_LOG(LogVdjmRecorderCore, Error,
-			TEXT("CreateRecordSessionVkResources: vkCreateFence failed. Result=%d"),
-			(int32)Result);
-		DestroyRecordSessionVkResources();
-		return false;
-	}
-
+	
 	mCurrentSwapchainImageIndex32 = UINT32_MAX;
 
 	UE_LOG(LogVdjmRecorderCore, Warning,
@@ -936,25 +933,38 @@ void FVdjmAndroidEncoderBackendVulkan::DestroyRecordSessionVkResources()
 		return;
 	}
 
-	if (mVkRecordSession.SubmitFence != VK_NULL_HANDLE)
+	for (FVdjmVkFrameContext& FrameCtx : mVkRecordSession.FrameContexts)
 	{
-		vkDestroyFence(Device, mVkRecordSession.SubmitFence, nullptr);
-		mVkRecordSession.SubmitFence = VK_NULL_HANDLE;
-	}
+		if (FrameCtx.SubmitFence != VK_NULL_HANDLE)
+		{
+			vkDestroyFence(Device, FrameCtx.SubmitFence, nullptr);
+			FrameCtx.SubmitFence = VK_NULL_HANDLE;
+		}
 
-	if (mVkRecordSession.AcquireSemaphore != VK_NULL_HANDLE)
-	{
-		vkDestroySemaphore(Device, mVkRecordSession.AcquireSemaphore, nullptr);
-		mVkRecordSession.AcquireSemaphore = VK_NULL_HANDLE;
-	}
+		if (FrameCtx.AcquireCompleteSemaphore != VK_NULL_HANDLE)
+		{
+			vkDestroySemaphore(Device, FrameCtx.AcquireCompleteSemaphore, nullptr);
+			FrameCtx.AcquireCompleteSemaphore = VK_NULL_HANDLE;
+		}
 
-	if (mVkRecordSession.CommandPool != VK_NULL_HANDLE)
-	{
-		vkDestroyCommandPool(Device, mVkRecordSession.CommandPool, nullptr);
-		mVkRecordSession.CommandPool = VK_NULL_HANDLE;
-		mVkRecordSession.CommandBuffer = VK_NULL_HANDLE;
-	}
+		if (FrameCtx.RenderCompleteSemaphore != VK_NULL_HANDLE)
+		{
+			vkDestroySemaphore(Device, FrameCtx.RenderCompleteSemaphore, nullptr);
+			FrameCtx.RenderCompleteSemaphore = VK_NULL_HANDLE;
+		}
 
+		if (FrameCtx.CommandPool != VK_NULL_HANDLE)
+		{
+			vkDestroyCommandPool(Device, FrameCtx.CommandPool, nullptr);
+			FrameCtx.CommandPool = VK_NULL_HANDLE;
+			FrameCtx.CommandBuffer = VK_NULL_HANDLE;
+		}
+
+		FrameCtx.bInFlight = false;
+		FrameCtx.SubmissionSerial = 0;
+		++mVkRecordSession.DestroyedFrameContextCount;
+	}
+	
 	if (mVkRecordSession.CodecSwapchain != VK_NULL_HANDLE)
 	{
 		vkDestroySwapchainKHR(Device, mVkRecordSession.CodecSwapchain, nullptr);

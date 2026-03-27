@@ -137,6 +137,10 @@ struct FVdjmVkFrameContext
 	}
 	static bool IsReadies(const TArray<FVdjmVkFrameContext>& FrameContexts)
 	{
+		if (FrameContexts.Num() < 1)
+		{
+			return false;
+		}
 		for (const FVdjmVkFrameContext& Context : FrameContexts)
 		{
 			if (!Context.IsReady())
@@ -190,12 +194,18 @@ public:
 	
 	void Clear()
 	{
+		InputWindow = nullptr;
+		CodecSurface = VK_NULL_HANDLE;
+		CodecSwapchain = VK_NULL_HANDLE;
+		SwapchainImages.Empty();
+		SwapchainImageLayouts.Empty();
+
 		SurfaceFormat = VK_FORMAT_UNDEFINED;
 		SurfaceColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 		SurfaceExtent = {0, 0};
 
 		FVdjmVkFrameContext::ClearAll(FrameContexts);
-		
+
 		CurrentFrameContextIndex = 0;
 
 		bStopRequested = false;
@@ -281,8 +291,6 @@ public:
 	uint64 DestroyedFrameContextCount = 0;
 	uint64 SubmittedFrameCount = 0;
 	uint64 PresentedFrameCount = 0;
-
-	
 };
 
 
