@@ -230,6 +230,12 @@ struct FVdjmVkRecordSessionState
 		bHasIntermediateImage = false;
 		bStarted = false;
 	}
+	/*
+	 * Stop 이후 생성된 출력 파일이 실제로 존재하고,
+	 * 크기가 0이 아니며, 최소한의 기록이 있었는지 확인한다.
+	 * 서비스 수준에서는 녹화 성공/실패 판정을 여기서 내린다.
+	 */
+	bool ValidateRecordedOutputFile() const;
 };
 
 
@@ -351,7 +357,8 @@ public:
 	void DestroyRecordSessionVkResources();
 	
 	bool TryExtractNativeVkImage(const FTextureRHIRef& srcTexture, VkImage& outImage) const;
-	bool ResolveNativeVkImag(const FTextureRHIRef& srcTexture, FVdjmVkOwnedImageState& outImageState) const;
+	
+	bool ResolveNativeVkImage(const FTextureRHIRef& srcTexture, FVdjmVkOwnedImageState& outImageState) const;
 	/*
  * source와 encoder surface가 exact-match가 아닐 때 사용할 중간 이미지 경로를 준비한다.
  * 서비스 수준에서는 resize / format normalize / blit / shader copy를 이 경로로 보낸다.
@@ -365,12 +372,7 @@ public:
 		const FVdjmVkSubmitFrameInfo& SubmitInfo,
 		FVdjmVkFrameContext& FrameCtx,
 		const FVdjmVkObservedSourceState& SourceState);
-	/*
- * Stop 이후 생성된 출력 파일이 실제로 존재하고,
- * 크기가 0이 아니며, 최소한의 기록이 있었는지 확인한다.
- * 서비스 수준에서는 녹화 성공/실패 판정을 여기서 내린다.
- */
-	bool ValidateRecordedOutputFile() const;
+	
 private:
 	
 	bool InitVkRuntimeContext();
