@@ -101,6 +101,7 @@ struct FVdjmVkSubmitFrameInfo
 			&& SrcWidth > 0
 			&& SrcHeight > 0;
 	}
+	FString ToString() const;
 };
 struct FVdjmVkFrameContext
 {
@@ -337,8 +338,9 @@ struct FVdjmVkRuntimeContext
 };
 
 
-struct FVdjmVkHelper
+class FVdjmVkHelper
 {
+public:
 	static uint32 FindMemoryType(VkPhysicalDevice physicalDevice, uint32 typeFilter, VkMemoryPropertyFlags properties);
 	static void TransitionImageLayout(VkCommandBuffer commandBuffer, VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
 	static bool TransitionOwnedImage(VkCommandBuffer Cmd,
@@ -348,6 +350,8 @@ struct FVdjmVkHelper
 	static VkPresentModeKHR ChoosePresentMode(const TArray<VkPresentModeKHR>& modes);
 	static VkCompositeAlphaFlagBitsKHR ChooseCompositeAlpha(VkCompositeAlphaFlagsKHR flags);
 	static VkExtent2D ChooseExtent(	const VkSurfaceCapabilitiesKHR& caps,uint32 desiredWid,	uint32 desiredHei);
+	
+	static FString ConvertVkFormatToString(VkFormat format);
 };
 
 
