@@ -436,7 +436,21 @@ void FVdjmAndroidRecordSession::Stop()
 		AMediaMuxer_stop(mMuxer);
 		mMuxerStarted = false;
 	}
+	
+	const FString FinalOutputPath = FPaths::ConvertRelativePathToFull(mConfig.OutputFilePath);
+	const int64 OutputFileSize = IFileManager::Get().FileSize(*FinalOutputPath);
 
+	UE_LOG(LogTemp, Warning,
+		TEXT("FVdjmAndroidRecordSession::Stop - Output file path=%s size=%lld"),
+		*FinalOutputPath,
+		OutputFileSize);
+
+	if (OutputFileSize <= 0)
+	{
+		UE_LOG(LogTemp, Error,
+			TEXT("FVdjmAndroidRecordSession::Stop - Recorded output file is missing or empty."));
+	}
+	
 	mRunning = false;
 }
 

@@ -4,6 +4,7 @@
 #include "VdjmAndroid/VdjmAndroidEncoderBackendVulkan.h"
 
 #if PLATFORM_ANDROID || defined(__RESHARPER__)
+#include "AnimationEditorUtils.h"
 #include "vulkan_android.h"
 #include "IVulkanDynamicRHI.h"
 
@@ -73,6 +74,11 @@ FVdjmVkRecordSessionState::FVdjmVkRecordSessionState():
 {
 	FrameContexts.SetNum(MaxInFlightFrames);
 	FVdjmVkFrameContext::ClearAll(FrameContexts);
+}
+
+bool FVdjmVkRecordSessionState::ValidateRecordedOutputFile() const
+{
+	return false;
 }
 
 /*
@@ -425,7 +431,7 @@ bool FVdjmAndroidEncoderBackendVulkan::Start()
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Start: failed to create Vulkan resources for record session"));
 		DestroyRecordSessionVkResources();
 		return false;
-	}
+	}FVdjmAndroidRecordSession
 
 	if (not mVkRecordSession.IsReadyToStart())
 	{
@@ -596,25 +602,25 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 	}
 
 	// 이전 프레임 submit 완료 대기
-	VkResult Result = vkWaitForFences(
+	VkResult vkResult = vkWaitForFences(
 		mVkRuntime.VkDevice,
 		1,
 		&FrameCtx.SubmitFence,
 		VK_TRUE,
 		UINT64_MAX);
 
-	if (Result != VK_SUCCESS)
+	if (vkResult != VK_SUCCESS)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("AcquireNextSwapchainImage: vkWaitForFences failed. Result=%d"),
-			(int32)Result);
+			(int32)vkResult);
 		return false;
 	}
 	
 
 	uint32 AcquiredImageIndex = UINT32_MAX;
 
-	Result = vkAcquireNextImageKHR(
+	vkResult = vkAcquireNextImageKHR(
 		mVkRuntime.VkDevice,
 		mVkRecordSession.CodecSwapchain,
 		UINT64_MAX,
@@ -622,7 +628,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 		VK_NULL_HANDLE,
 		&AcquiredImageIndex);
 
-	if (Result == VK_ERROR_OUT_OF_DATE_KHR)
+	if (vkResult == VK_ERROR_OUT_OF_DATE_KHR)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("AcquireNextSwapchainImage: swapchain is out of date"));
@@ -630,7 +636,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 		return false;
 	}
 
-	if (Result == VK_ERROR_DEVICE_LOST)
+	if (vkResult == VK_ERROR_DEVICE_LOST)
 	{
 		SetFailureReason(EVdjmVkFailureReason::DeviceLost);
 	}
@@ -639,14 +645,24 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 		SetFailureReason(EVdjmVkFailureReason::AcquireFailed);
 	}
 	
-	if (Result != VK_SUCCESS && Result != VK_SUBOPTIMAL_KHR)
+	if (vkResult == VK_ERROR_DEVICE_LOST)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("AcquireNextSwapchainImage: device lost"));
+		SetFailureReason(EVdjmVkFailureReason::DeviceLost);
+		return false;
+	}
+	
+	if (vkResult != VK_SUCCESS && vkResult != VK_SUBOPTIMAL_KHR)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("AcquireNextSwapchainImage: vkAcquireNextImageKHR failed. Result=%d"),
-			(int32)Result);
+			(int32)vkResult);
 		return false;
 	}
-
+	
+	SetFailureReason(EVdjmVkFailureReason::None);
+	
 	if (!mVkRecordSession.SwapchainImages.IsValidIndex((int32)AcquiredImageIndex))
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
@@ -666,7 +682,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 
 	UE_LOG(LogVdjmRecorderCore, VeryVerbose,
 		TEXT("AcquireNextSwapchainImage: success. Result=%d ImageIndex=%u"),
-		(int32)Result,
+		(int32)vkResult,
 		AcquiredImageIndex);
 	//mVkRecordSession.AdvanceToNextFrameContext();
 	return true;
@@ -1179,6 +1195,7 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 	}
 
 	const VkImageLayout OriginalSrcLayout = SourceState.LastKnownLayout;
+	const VkImageLayout CopySrcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 
 	VkImage DstImage = mVkRecordSession.SwapchainImages[frameState.AcquiredImageIndex];
 	VkImageLayout& DstLayoutRef = mVkRecordSession.SwapchainImageLayouts[frameState.AcquiredImageIndex];
@@ -1211,14 +1228,14 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 		return false;
 	}
 	
-	if (OriginalSrcLayout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+	if (OriginalSrcLayout != CopySrcLayout)
 	{
 		FVdjmVkHelper::TransitionImageLayout(
 			frameState.CommandBuffer,
 			submitInfo.SrcImage,
 			submitInfo.SrcFormat,
 			OriginalSrcLayout,
-			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+			CopySrcLayout);
 	}
 	
 	// destination만 우리가 확실히 추적한다.
@@ -1255,13 +1272,13 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 	1,
 	&CopyRegion);
 	
-	if (OriginalSrcLayout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+	if (OriginalSrcLayout != CopySrcLayout)
 	{
 		FVdjmVkHelper::TransitionImageLayout(
 			frameState.CommandBuffer,
 			submitInfo.SrcImage,
 			submitInfo.SrcFormat,
-			VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+			CopySrcLayout,
 			OriginalSrcLayout);
 	}
 	
@@ -1335,14 +1352,32 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 	PresentInfo.pResults = nullptr;
 
 	vkResult = vkQueuePresentKHR(mVkRuntime.GraphicsQueue, &PresentInfo);
+	
+	if (vkResult == VK_ERROR_OUT_OF_DATE_KHR)
+	{
+		SetFailureReason(EVdjmVkFailureReason::SwapchainOutOfDate);
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("SubmitTextureToCodecSurface: vkQueuePresentKHR out of date"));
+		return false;
+	}
+	
 	if (vkResult == VK_ERROR_DEVICE_LOST)
 	{
 		SetFailureReason(EVdjmVkFailureReason::DeviceLost);
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("SubmitTextureToCodecSurface: device lost during present"));
+		return false;
 	}
-	else
+	
+	if (vkResult != VK_SUCCESS && vkResult != VK_SUBOPTIMAL_KHR)
 	{
 		SetFailureReason(EVdjmVkFailureReason::PresentFailed);
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("SubmitTextureToCodecSurface: vkQueuePresentKHR failed. Result=%d"),
+			(int32)vkResult);
+		return false;
 	}
+	
 	if (vkResult == VK_ERROR_OUT_OF_DATE_KHR)
 	{
 		SetFailureReason(EVdjmVkFailureReason::SwapchainOutOfDate);
@@ -1360,7 +1395,8 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 	}
 
 	DstLayoutRef = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-	CommitSourceStateAfterSubmit(submitInfo, SourceState.LastKnownLayout);
+	SetFailureReason(EVdjmVkFailureReason::None);
+	//CommitSourceStateAfterSubmit(submitInfo, SourceState.LastKnownLayout);
 	UE_LOG(LogVdjmRecorderCore, VeryVerbose,
 		TEXT("SubmitTextureToCodecSurface: success. SrcImage=%p DstImage=%p ImageIndex=%u"),
 		submitInfo.SrcImage,
