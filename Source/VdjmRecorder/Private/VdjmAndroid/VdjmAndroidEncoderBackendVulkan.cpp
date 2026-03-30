@@ -4,7 +4,7 @@
 #include "VdjmAndroid/VdjmAndroidEncoderBackendVulkan.h"
 
 #if PLATFORM_ANDROID || defined(__RESHARPER__)
-#include "AnimationEditorUtils.h"
+
 #include "vulkan_android.h"
 #include "IVulkanDynamicRHI.h"
 
@@ -431,7 +431,7 @@ bool FVdjmAndroidEncoderBackendVulkan::Start()
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("Start: failed to create Vulkan resources for record session"));
 		DestroyRecordSessionVkResources();
 		return false;
-	}FVdjmAndroidRecordSession
+	}
 
 	if (not mVkRecordSession.IsReadyToStart())
 	{
@@ -635,15 +635,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 		SetFailureReason(EVdjmVkFailureReason::SwapchainOutOfDate);
 		return false;
 	}
-
-	if (vkResult == VK_ERROR_DEVICE_LOST)
-	{
-		SetFailureReason(EVdjmVkFailureReason::DeviceLost);
-	}
-	else
-	{
-		SetFailureReason(EVdjmVkFailureReason::AcquireFailed);
-	}
+	
 	
 	if (vkResult == VK_ERROR_DEVICE_LOST)
 	{
@@ -1266,7 +1258,7 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 	vkCmdCopyImage(
 	frameState.CommandBuffer,
 	submitInfo.SrcImage,
-	SourceState.LastKnownLayout,
+	CopySrcLayout,
 	DstImage,
 	VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 	1,
@@ -1375,14 +1367,6 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("SubmitTextureToCodecSurface: vkQueuePresentKHR failed. Result=%d"),
 			(int32)vkResult);
-		return false;
-	}
-	
-	if (vkResult == VK_ERROR_OUT_OF_DATE_KHR)
-	{
-		SetFailureReason(EVdjmVkFailureReason::SwapchainOutOfDate);
-		UE_LOG(LogVdjmRecorderCore, Error,
-			TEXT("SubmitTextureToCodecSurface: vkQueuePresentKHR out of date"));
 		return false;
 	}
 
