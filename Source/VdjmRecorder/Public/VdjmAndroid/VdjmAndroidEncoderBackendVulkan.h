@@ -22,7 +22,7 @@ enum class EVdjmVkFailureReason : uint8
 	SubmitFailed,
 	PresentFailed,
 	SwapchainOutOfDate,
-	DeviceLost
+	DeviceLost, SessionNotReady, SyncObjectsInvalid, FenceWaitFailed
 };
 
 struct FVdjmVkOwnedImageState

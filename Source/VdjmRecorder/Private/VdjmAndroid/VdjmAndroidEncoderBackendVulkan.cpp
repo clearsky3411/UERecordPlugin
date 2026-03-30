@@ -585,12 +585,14 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 	if (mVkRuntime.VkDevice == VK_NULL_HANDLE)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AcquireNextSwapchainImage: VkDevice is null"));
+		SetFailureReason(EVdjmVkFailureReason::DeviceLost);
 		return false;
 	}
 
 	if (!mVkRecordSession.IsReadyToStart())
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AcquireNextSwapchainImage: record session is not ready"));
+		SetFailureReason(EVdjmVkFailureReason::SessionNotReady);
 		return false;
 	}
 
@@ -598,6 +600,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 		FrameCtx.SubmitFence == VK_NULL_HANDLE)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AcquireNextSwapchainImage: sync objects are invalid"));
+		SetFailureReason(EVdjmVkFailureReason::SyncObjectsInvalid);
 		return false;
 	}
 
@@ -614,6 +617,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("AcquireNextSwapchainImage: vkWaitForFences failed. Result=%d"),
 			(int32)vkResult);
+		SetFailureReason(EVdjmVkFailureReason::FenceWaitFailed);
 		return false;
 	}
 	
@@ -650,6 +654,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("AcquireNextSwapchainImage: vkAcquireNextImageKHR failed. Result=%d"),
 			(int32)vkResult);
+		SetFailureReason(EVdjmVkFailureReason::AcquireFailed);
 		return false;
 	}
 	
@@ -661,6 +666,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 			TEXT("AcquireNextSwapchainImage: acquired image index is invalid. Index=%u ImageCount=%d"),
 			AcquiredImageIndex,
 			mVkRecordSession.SwapchainImages.Num());
+		SetFailureReason(EVdjmVkFailureReason::AcquireFailed);
 		return false;
 	}
 
@@ -676,6 +682,7 @@ bool FVdjmAndroidEncoderBackendVulkan::AcquireNextSwapchainImage(FVdjmVkFrameSub
 		TEXT("AcquireNextSwapchainImage: success. Result=%d ImageIndex=%u"),
 		(int32)vkResult,
 		AcquiredImageIndex);
+	SetFailureReason(EVdjmVkFailureReason::None);
 	//mVkRecordSession.AdvanceToNextFrameContext();
 	return true;
 }
@@ -1364,14 +1371,6 @@ bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureToCodecSurface(const FVdjmVk
 	if (vkResult != VK_SUCCESS && vkResult != VK_SUBOPTIMAL_KHR)
 	{
 		SetFailureReason(EVdjmVkFailureReason::PresentFailed);
-		UE_LOG(LogVdjmRecorderCore, Error,
-			TEXT("SubmitTextureToCodecSurface: vkQueuePresentKHR failed. Result=%d"),
-			(int32)vkResult);
-		return false;
-	}
-
-	if (vkResult != VK_SUCCESS && vkResult != VK_SUBOPTIMAL_KHR)
-	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("SubmitTextureToCodecSurface: vkQueuePresentKHR failed. Result=%d"),
 			(int32)vkResult);
