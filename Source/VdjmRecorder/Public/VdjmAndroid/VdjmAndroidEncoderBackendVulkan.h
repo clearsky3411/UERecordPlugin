@@ -10,7 +10,15 @@
 struct IVulkanDynamicRHI;
 class FVdjmAndroidEncoderBackendVulkan;
 
-
+/*
+ * 1. GPU Copy/render
+ * 2. codec input surface
+ * 3. codec encoding
+ * Start trigger 시
+ * - Session 생성
+ * - 
+ * 
+ */
 
 
 
