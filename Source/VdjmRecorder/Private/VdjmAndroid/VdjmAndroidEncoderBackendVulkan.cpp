@@ -13,6 +13,10 @@ namespace
 	static constexpr VkImageAspectFlags GColorAspect = VK_IMAGE_ASPECT_COLOR_BIT;
 }
 
+FVdjmAndroidRecordVulkanSession::~FVdjmAndroidRecordVulkanSession()
+{
+}
+
 FVdjmAndroidEncoderBackendVulkan::FVdjmAndroidEncoderBackendVulkan()
 {}
 

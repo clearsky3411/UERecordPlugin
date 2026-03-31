@@ -20,9 +20,18 @@ class FVdjmAndroidEncoderBackendVulkan;
  * 
  */
 
-
-
-
+class FVdjmVkRuntimeRefs
+{
+	
+};
+class FVdjmVkCodecInputSurfaceState
+{
+	
+};
+class FVdjmVkIntermediateState
+{
+	
+};
 /**	
  *	@brief Vulkan 기반 Android 인코더 백엔드 구현 클래스
  *	@class FVdjmAndroidEncoderBackendVulkan
