@@ -42,19 +42,16 @@ bool FVdjmVkSubProcInputAnalyzer::Analyze(const FTextureRHIRef& srcTexture, FVdj
 	{
 	case PF_B8G8R8A8:
 		outInfo.SrcFormat = VK_FORMAT_B8G8R8A8_UNORM;
-		
-
+		break;
 	case PF_R8G8B8A8:
 		outInfo.SrcFormat = VK_FORMAT_R8G8B8A8_UNORM;
-		
-
+		break;
 	default:
 		UE_LOG(LogVdjmRecorderCore, Error,
-			TEXT("Analyze: unsupported UE pixel format = %d"),
-			(int32)srcTexture->GetFormat());
+			TEXT("Analyze: unsupported UE pixel format = %s"),
+			*FVdjmVkHelper::ConvertPixelFormatToString( srcTexture->GetFormat()));
 		return false;
 	}
-
 	return true;
 }
 
@@ -205,10 +202,10 @@ VkSurfaceFormatKHR FVdjmVkHelper::ChooseSurfaceFormat(const FVdjmVkRuntimeContex
 {
 	const VkFormat PreferredFormats[] =
 	{
-		runtimeContext.VulkanRHI->RHIGetSwapChainVkFormat(PF_R8G8B8A8),
-		runtimeContext.VulkanRHI->RHIGetSwapChainVkFormat(PF_B8G8R8A8),
 		VK_FORMAT_R8G8B8A8_UNORM,
-		VK_FORMAT_B8G8R8A8_UNORM
+		VK_FORMAT_B8G8R8A8_UNORM,
+		runtimeContext.VulkanRHI->RHIGetSwapChainVkFormat(PF_R8G8B8A8),
+		runtimeContext.VulkanRHI->RHIGetSwapChainVkFormat(PF_B8G8R8A8)
 	};
 	for (VkFormat Want : PreferredFormats)
 	{
@@ -523,6 +520,11 @@ FString FVdjmVkHelper::ConvertVkFormatToString(VkFormat format)
 	}
 }
 
+FString FVdjmVkHelper::ConvertPixelFormatToString(EPixelFormat format)
+{
+	return GPixelFormats[format].Name; 
+}
+
 
 FVdjmAndroidEncoderBackendVulkan::FVdjmAndroidEncoderBackendVulkan()
 	: mAnalyzer(this),
@@ -687,9 +689,7 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 		 * 에러시 SubmitInfo 의 toString 과 지금 session 의 format이나 그런 정보를 로그로 찍는다.
 		 */
 		
-		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Running: SubmitInfo: %s"), *SubmitInfo.ToString());
-		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Running : surface format: %s extent: %ux%u"), *FVdjmVkHelper::ConvertVkFormatToString(mVkRecordSession.SurfaceFormat), mVkRecordSession.SurfaceExtent.width, mVkRecordSession.SurfaceExtent.height);
-
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Running: SubmitInfo: %s surface format: %s extent: %ux%u"), *SubmitInfo.ToString(),*FVdjmVkHelper::ConvertVkFormatToString(mVkRecordSession.SurfaceFormat), mVkRecordSession.SurfaceExtent.width, mVkRecordSession.SurfaceExtent.height);
 		return false;
 	}
 

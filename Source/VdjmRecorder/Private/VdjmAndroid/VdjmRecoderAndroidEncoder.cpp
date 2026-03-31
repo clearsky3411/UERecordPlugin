@@ -403,7 +403,8 @@ bool FVdjmAndroidRecordSession::Running(FRHICommandList& RHICmdList, const FText
 	
 	if (not mGraphicBackend->Running(RHICmdList, srcTexture, timeStampSec))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::Running - Graphic backend is not running."));
+		UE_LOG(LogVdjmRecorderCore, Warning,
+	TEXT("FVdjmAndroidRecordSession::Running - Graphic backend Running() returned false."));
 		return false;
 	}
 	

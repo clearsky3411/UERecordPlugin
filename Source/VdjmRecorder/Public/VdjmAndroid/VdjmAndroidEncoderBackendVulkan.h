@@ -352,6 +352,7 @@ public:
 	static VkExtent2D ChooseExtent(	const VkSurfaceCapabilitiesKHR& caps,uint32 desiredWid,	uint32 desiredHei);
 	
 	static FString ConvertVkFormatToString(VkFormat format);
+	static FString ConvertPixelFormatToString(EPixelFormat format);
 };
 
 
