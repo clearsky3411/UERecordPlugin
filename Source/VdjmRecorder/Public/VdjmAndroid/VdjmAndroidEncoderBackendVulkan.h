@@ -19,7 +19,7 @@ class FVdjmAndroidEncoderBackendVulkan;
  * - 
  * 
  */
-class FVdjmVkRecoder
+class FVdjmVkRecoderHandles
 {
 public:
 	
@@ -81,7 +81,7 @@ private:
 	bool mStarted = false;
 	bool mPaused = false;
 	
-	FVdjmVkRecoder mVulkanRecoder;
+	FVdjmVkRecoderHandles mVkHandles;
 };
 
 
