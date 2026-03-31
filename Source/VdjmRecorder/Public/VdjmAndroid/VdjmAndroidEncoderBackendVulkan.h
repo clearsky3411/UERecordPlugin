@@ -38,18 +38,23 @@ struct FVdjmVkOwnedImageState
 	uint32 Height = 0;
 	VkImageLayout CurrentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	
+	VkDeviceMemory VkMemory = VK_NULL_HANDLE;
+	
 	void Clear()
 	{
 		Image = VK_NULL_HANDLE;
+		
 		View = VK_NULL_HANDLE;
 		Format = VK_FORMAT_UNDEFINED;
 		Width = 0;
 		Height = 0;
 		CurrentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		
+		VkMemory = VK_NULL_HANDLE;
 	}
 	bool IsValid() const
 	{
-		return Image != VK_NULL_HANDLE && Format != VK_FORMAT_UNDEFINED && Width > 0 && Height > 0 && CurrentLayout != VK_IMAGE_LAYOUT_UNDEFINED;
+		return Image != VK_NULL_HANDLE && Format != VK_FORMAT_UNDEFINED && Width > 0 && Height > 0;
 	}
 };
 
@@ -419,6 +424,7 @@ public:
 	void SetCurrentSwapchainImageIndex(uint32 InIndex) { mCurrentSwapchainImageIndex32 = InIndex; }
 	
 	bool CreateRecordSessionVkResources();
+	void DestroyIntermediate(VkDevice Device);
 	void DestroyRecordSessionVkResources();
 	
 	bool TryExtractNativeVkImage(const FTextureRHIRef& srcTexture, VkImage& outImage) const;

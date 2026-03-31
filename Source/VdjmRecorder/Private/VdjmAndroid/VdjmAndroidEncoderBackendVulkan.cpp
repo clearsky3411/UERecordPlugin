@@ -674,22 +674,44 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 	SubmitInfo.bCanDirectCopy = bExactSize && bExactFormat;
 	SubmitInfo.bNeedsIntermediate = !SubmitInfo.bCanDirectCopy;
 
-	if (not bExactFormat)
-	{
-		SetFailureReason(EVdjmVkFailureReason::SourceFormatMismatch);
-	}
-	else if (not bExactSize)
+	if (not bExactSize)
 	{
 		SetFailureReason(EVdjmVkFailureReason::SourceExtentMismatch);
+		
+		UE_LOG(LogVdjmRecorderCore, Warning,
+		TEXT("Running: size mismatch is not supported by the current intermediate path. Src=%ux%u Surface=%ux%u"),
+		SubmitInfo.SrcWidth,
+		SubmitInfo.SrcHeight,
+		mVkRecordSession.SurfaceExtent.width,
+		mVkRecordSession.SurfaceExtent.height);
+		
+		return false;
 	}
 	
-	if (not SubmitInfo.bCanDirectCopy)
+	//	Direct copy 경로
+	if (bExactFormat)
 	{
-		/*
-		 * 에러시 SubmitInfo 의 toString 과 지금 session 의 format이나 그런 정보를 로그로 찍는다.
-		 */
-		
-		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Running: SubmitInfo: %s surface format: %s extent: %ux%u"), *SubmitInfo.ToString(),*FVdjmVkHelper::ConvertVkFormatToString(mVkRecordSession.SurfaceFormat), mVkRecordSession.SurfaceExtent.width, mVkRecordSession.SurfaceExtent.height);
+		FVdjmVkFrameSubmitState FrameState{};
+		if (not AcquireNextSwapchainImage(FrameState))
+		{
+			UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Running: failed to acquire next swapchain image"));
+			return false;
+		}
+
+		return SubmitTextureToCodecSurface(SubmitInfo, FrameState);
+	}
+	
+	//	Intermediate 경로
+	FVdjmVkObservedSourceState SourceState{};
+	if (not TryResolveSourceState(SubmitInfo, SourceState))
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Running: failed to resolve source state for intermediate path"));
+		return false;
+	}
+
+	if (not EnsureIntermediateForFrame(SubmitInfo))
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("Running: failed to prepare intermediate image"));
 		return false;
 	}
 
@@ -700,7 +722,9 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 		return false;
 	}
 
-	return SubmitTextureToCodecSurface(SubmitInfo, FrameState);
+	FVdjmVkFrameContext& FrameCtx = mVkRecordSession.GetCurrentFrameContext();
+	return SubmitTextureViaIntermediate(SubmitInfo, FrameCtx, SourceState);
+	
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::CreateRecordSessionVkResources()
@@ -1038,11 +1062,35 @@ bool FVdjmAndroidEncoderBackendVulkan::CreateRecordSessionVkResources()
 	return true;
 }
 
+void FVdjmAndroidEncoderBackendVulkan::DestroyIntermediate(VkDevice Device)
+{
+	if (mVkRecordSession.IntermediateImageState.View != VK_NULL_HANDLE)
+	{
+		vkDestroyImageView(Device, mVkRecordSession.IntermediateImageState.View, nullptr);
+		mVkRecordSession.IntermediateImageState.View = VK_NULL_HANDLE;
+	}
+
+	if (mVkRecordSession.IntermediateImageState.Image != VK_NULL_HANDLE)
+	{
+		vkDestroyImage(Device, mVkRecordSession.IntermediateImageState.Image, nullptr);
+		mVkRecordSession.IntermediateImageState.Image = VK_NULL_HANDLE;
+	}
+
+	if (mVkRecordSession.IntermediateImageState.VkMemory != VK_NULL_HANDLE)
+	{
+		vkFreeMemory(Device, mVkRecordSession.IntermediateImageState.VkMemory, nullptr);
+		mVkRecordSession.IntermediateImageState.VkMemory = VK_NULL_HANDLE;
+	}
+
+	mVkRecordSession.bHasIntermediateImage = false;
+}
+
 void FVdjmAndroidEncoderBackendVulkan::DestroyRecordSessionVkResources()
 {
 	VkDevice Device = mVkRuntime.VkDevice;
 	if (Device == VK_NULL_HANDLE)
 	{
+		DestroyIntermediate(Device);
 		mVkRecordSession.Clear();
 		mCurrentSwapchainImageIndex32 = UINT32_MAX;
 		return;
@@ -1091,6 +1139,8 @@ void FVdjmAndroidEncoderBackendVulkan::DestroyRecordSessionVkResources()
 		vkDestroySurfaceKHR(mVkRuntime.VkInstance, mVkRecordSession.CodecSurface, nullptr);
 		mVkRecordSession.CodecSurface = VK_NULL_HANDLE;
 	}
+	//	destroy intermedia
+	DestroyIntermediate(Device);
 
 	mVkRecordSession.Clear();
 	mCurrentSwapchainImageIndex32 = UINT32_MAX;
@@ -1151,6 +1201,330 @@ bool FVdjmAndroidEncoderBackendVulkan::TryExtractNativeVkImage(const FTextureRHI
 	       outImage);
 
 	return true;
+}
+
+bool FVdjmAndroidEncoderBackendVulkan::EnsureIntermediateForFrame(const FVdjmVkSubmitFrameInfo& SubmitInfo)
+{
+	if (!SubmitInfo.IsValid() || !mVkRuntime.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+		       TEXT("EnsureIntermediateForFrame: invalid submit info or Vulkan runtime"));
+		return false;
+	}
+	const VkFormat DesiredFormat = mVkRecordSession.SurfaceFormat;
+    const uint32 DesiredWidth = mVkRecordSession.SurfaceExtent.width;
+    const uint32 DesiredHeight = mVkRecordSession.SurfaceExtent.height;
+
+    if (DesiredFormat == VK_FORMAT_UNDEFINED || DesiredWidth == 0 || DesiredHeight == 0)
+    {
+        return false;
+    }
+
+    FVdjmVkOwnedImageState& Intermediate = mVkRecordSession.IntermediateImageState;
+
+    const bool bCanReuse =
+        mVkRecordSession.bHasIntermediateImage &&
+        Intermediate.Image != VK_NULL_HANDLE &&
+        Intermediate.VkMemory != VK_NULL_HANDLE &&
+        Intermediate.Format == DesiredFormat &&
+        Intermediate.Width == DesiredWidth &&
+        Intermediate.Height == DesiredHeight;
+
+    if (bCanReuse)
+    {
+        return true;
+    }
+
+    if (Intermediate.View != VK_NULL_HANDLE)
+    {
+        vkDestroyImageView(mVkRuntime.VkDevice, Intermediate.View, nullptr);
+        Intermediate.View = VK_NULL_HANDLE;
+    }
+
+    if (Intermediate.Image != VK_NULL_HANDLE)
+    {
+        vkDestroyImage(mVkRuntime.VkDevice, Intermediate.Image, nullptr);
+        Intermediate.Image = VK_NULL_HANDLE;
+    }
+
+    if (Intermediate.VkMemory != VK_NULL_HANDLE)
+    {
+        vkFreeMemory(mVkRuntime.VkDevice, Intermediate.VkMemory, nullptr);
+        Intermediate.VkMemory = VK_NULL_HANDLE;
+    }
+
+    Intermediate.Clear();
+    mVkRecordSession.bHasIntermediateImage = false;
+
+    VkImageCreateInfo ImageInfo{};
+    ImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ImageInfo.imageType = VK_IMAGE_TYPE_2D;
+    ImageInfo.format = DesiredFormat;
+    ImageInfo.extent = { DesiredWidth, DesiredHeight, 1 };
+    ImageInfo.mipLevels = 1;
+    ImageInfo.arrayLayers = 1;
+    ImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    ImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ImageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    ImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VkResult Result = vkCreateImage(mVkRuntime.VkDevice, &ImageInfo, nullptr, &Intermediate.Image);
+    if (Result != VK_SUCCESS || Intermediate.Image == VK_NULL_HANDLE)
+    {
+        Intermediate.Clear();
+        return false;
+    }
+
+    VkMemoryRequirements MemReq{};
+    vkGetImageMemoryRequirements(mVkRuntime.VkDevice, Intermediate.Image, &MemReq);
+
+    const uint32 MemoryTypeIndex = FVdjmVkHelper::FindMemoryType(
+        mVkRuntime.VkPhysicalDevice,
+        MemReq.memoryTypeBits,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    if (MemoryTypeIndex == UINT32_MAX)
+    {
+        vkDestroyImage(mVkRuntime.VkDevice, Intermediate.Image, nullptr);
+        Intermediate.Clear();
+        return false;
+    }
+
+    VkMemoryAllocateInfo AllocInfo{};
+    AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    AllocInfo.allocationSize = MemReq.size;
+    AllocInfo.memoryTypeIndex = MemoryTypeIndex;
+
+    Result = vkAllocateMemory(mVkRuntime.VkDevice, &AllocInfo, nullptr, &Intermediate.VkMemory);
+    if (Result != VK_SUCCESS || Intermediate.VkMemory == VK_NULL_HANDLE)
+    {
+        vkDestroyImage(mVkRuntime.VkDevice, Intermediate.Image, nullptr);
+        Intermediate.Clear();
+        return false;
+    }
+
+    Result = vkBindImageMemory(mVkRuntime.VkDevice, Intermediate.Image, Intermediate.VkMemory, 0);
+    if (Result != VK_SUCCESS)
+    {
+        vkFreeMemory(mVkRuntime.VkDevice, Intermediate.VkMemory, nullptr);
+        vkDestroyImage(mVkRuntime.VkDevice, Intermediate.Image, nullptr);
+        Intermediate.Clear();
+        return false;
+    }
+
+    Intermediate.Format = DesiredFormat;
+    Intermediate.Width = DesiredWidth;
+    Intermediate.Height = DesiredHeight;
+    Intermediate.CurrentLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    mVkRecordSession.bHasIntermediateImage = true;
+    return true;
+}
+
+bool FVdjmAndroidEncoderBackendVulkan::SubmitTextureViaIntermediate(const FVdjmVkSubmitFrameInfo& SubmitInfo,FVdjmVkFrameContext& FrameCtx, const FVdjmVkObservedSourceState& SourceState)
+{
+	if (!SubmitInfo.IsValid() || !FrameCtx.IsReady())
+    {
+        return false;
+    }
+
+    if (!mVkRecordSession.bHasIntermediateImage)
+    {
+        return false;
+    }
+
+    FVdjmVkOwnedImageState& Intermediate = mVkRecordSession.IntermediateImageState;
+    if (Intermediate.Image == VK_NULL_HANDLE || Intermediate.VkMemory == VK_NULL_HANDLE)
+    {
+        return false;
+    }
+
+    if (!mVkRecordSession.SwapchainImages.IsValidIndex((int32)mCurrentSwapchainImageIndex32))
+    {
+        return false;
+    }
+
+    if (!SourceState.bLayoutKnown || SourceState.LastKnownLayout == VK_IMAGE_LAYOUT_UNDEFINED)
+    {
+        SetFailureReason(EVdjmVkFailureReason::SourceLayoutUnknown);
+        return false;
+    }
+
+    const uint32 AcquiredImageIndex = mCurrentSwapchainImageIndex32;
+    VkImage DstImage = mVkRecordSession.SwapchainImages[AcquiredImageIndex];
+    VkImageLayout& DstLayoutRef = mVkRecordSession.SwapchainImageLayouts[AcquiredImageIndex];
+
+    const VkImageLayout OriginalSrcLayout = SourceState.LastKnownLayout;
+    const VkImageLayout CopySrcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
+    VkResult Result = vkResetCommandBuffer(FrameCtx.CommandBuffer, 0);
+    if (Result != VK_SUCCESS)
+    {
+        return false;
+    }
+
+    VkCommandBufferBeginInfo BeginInfo{};
+    BeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    BeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    Result = vkBeginCommandBuffer(FrameCtx.CommandBuffer, &BeginInfo);
+    if (Result != VK_SUCCESS)
+    {
+        return false;
+    }
+
+    if (OriginalSrcLayout != CopySrcLayout)
+    {
+        FVdjmVkHelper::TransitionImageLayout(
+            FrameCtx.CommandBuffer,
+            SubmitInfo.SrcImage,
+            SubmitInfo.SrcFormat,
+            OriginalSrcLayout,
+            CopySrcLayout);
+    }
+
+    if (!FVdjmVkHelper::TransitionOwnedImage(
+            FrameCtx.CommandBuffer,
+            Intermediate,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL))
+    {
+        return false;
+    }
+
+    VkImageCopy CopyRegion{};
+    CopyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    CopyRegion.srcSubresource.mipLevel = 0;
+    CopyRegion.srcSubresource.baseArrayLayer = 0;
+    CopyRegion.srcSubresource.layerCount = 1;
+
+    CopyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    CopyRegion.dstSubresource.mipLevel = 0;
+    CopyRegion.dstSubresource.baseArrayLayer = 0;
+    CopyRegion.dstSubresource.layerCount = 1;
+
+    CopyRegion.extent.width = SubmitInfo.SrcWidth;
+    CopyRegion.extent.height = SubmitInfo.SrcHeight;
+    CopyRegion.extent.depth = 1;
+
+    vkCmdCopyImage(
+        FrameCtx.CommandBuffer,
+        SubmitInfo.SrcImage,
+        CopySrcLayout,
+        Intermediate.Image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        &CopyRegion);
+
+    if (OriginalSrcLayout != CopySrcLayout)
+    {
+        FVdjmVkHelper::TransitionImageLayout(
+            FrameCtx.CommandBuffer,
+            SubmitInfo.SrcImage,
+            SubmitInfo.SrcFormat,
+            CopySrcLayout,
+            OriginalSrcLayout);
+    }
+
+    if (!FVdjmVkHelper::TransitionOwnedImage(
+            FrameCtx.CommandBuffer,
+            Intermediate,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL))
+    {
+        return false;
+    }
+
+    FVdjmVkHelper::TransitionImageLayout(
+        FrameCtx.CommandBuffer,
+        DstImage,
+        mVkRecordSession.SurfaceFormat,
+        DstLayoutRef,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    vkCmdCopyImage(
+        FrameCtx.CommandBuffer,
+        Intermediate.Image,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        DstImage,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1,
+        &CopyRegion);
+
+    FVdjmVkHelper::TransitionImageLayout(
+        FrameCtx.CommandBuffer,
+        DstImage,
+        mVkRecordSession.SurfaceFormat,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+    Result = vkEndCommandBuffer(FrameCtx.CommandBuffer);
+    if (Result != VK_SUCCESS)
+    {
+        return false;
+    }
+
+    Result = vkResetFences(mVkRuntime.VkDevice, 1, &FrameCtx.SubmitFence);
+    if (Result != VK_SUCCESS)
+    {
+        return false;
+    }
+
+    VkPipelineStageFlags WaitStages[] = { VK_PIPELINE_STAGE_TRANSFER_BIT };
+
+    VkSubmitInfo SubmitInfoVk{};
+    SubmitInfoVk.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    SubmitInfoVk.waitSemaphoreCount = 1;
+    SubmitInfoVk.pWaitSemaphores = &FrameCtx.AcquireCompleteSemaphore;
+    SubmitInfoVk.pWaitDstStageMask = WaitStages;
+    SubmitInfoVk.commandBufferCount = 1;
+    SubmitInfoVk.pCommandBuffers = &FrameCtx.CommandBuffer;
+    SubmitInfoVk.signalSemaphoreCount = 1;
+    SubmitInfoVk.pSignalSemaphores = &FrameCtx.RenderCompleteSemaphore;
+
+    Result = vkQueueSubmit(
+        mVkRuntime.GraphicsQueue,
+        1,
+        &SubmitInfoVk,
+        FrameCtx.SubmitFence);
+
+    if (Result != VK_SUCCESS)
+    {
+        SetFailureReason(EVdjmVkFailureReason::SubmitFailed);
+        return false;
+    }
+
+    CommitSourceStateAfterSubmit(SubmitInfo, OriginalSrcLayout);
+    Intermediate.CurrentLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    mVkRecordSession.AdvanceToNextFrameContext();
+
+    VkPresentInfoKHR PresentInfo{};
+    PresentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    PresentInfo.waitSemaphoreCount = 1;
+    PresentInfo.pWaitSemaphores = &FrameCtx.RenderCompleteSemaphore;
+    PresentInfo.swapchainCount = 1;
+    PresentInfo.pSwapchains = &mVkRecordSession.CodecSwapchain;
+    PresentInfo.pImageIndices = &AcquiredImageIndex;
+
+    Result = vkQueuePresentKHR(mVkRuntime.GraphicsQueue, &PresentInfo);
+    if (Result == VK_ERROR_OUT_OF_DATE_KHR)
+    {
+        SetFailureReason(EVdjmVkFailureReason::SwapchainOutOfDate);
+        return false;
+    }
+    if (Result == VK_ERROR_DEVICE_LOST)
+    {
+        SetFailureReason(EVdjmVkFailureReason::DeviceLost);
+        return false;
+    }
+    if (Result != VK_SUCCESS && Result != VK_SUBOPTIMAL_KHR)
+    {
+        SetFailureReason(EVdjmVkFailureReason::PresentFailed);
+        return false;
+    }
+
+    DstLayoutRef = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    SetFailureReason(EVdjmVkFailureReason::None);
+    return true;
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::InitVkRuntimeContext()
