@@ -19,7 +19,33 @@ class FVdjmAndroidEncoderBackendVulkan;
  * - 
  * 
  */
+class FVdjmVkRecoder
+{
+public:
+	
+	
+	void Clear()
+	{
+		mVulkanRHI = nullptr;
+		mVkInstance = VK_NULL_HANDLE;
+		mVkPhysicalDevice = VK_NULL_HANDLE;
+		mVkDevice = VK_NULL_HANDLE;
+		mGraphicsQueue = VK_NULL_HANDLE;
+		mGraphicsQueueFamilyIndex = UINT32_MAX;
+	}
+	bool IsValid() const
+	{
+		return mVulkanRHI != nullptr && mVkInstance != VK_NULL_HANDLE && mVkPhysicalDevice != VK_NULL_HANDLE && mVkDevice != VK_NULL_HANDLE && mGraphicsQueue != VK_NULL_HANDLE && mGraphicsQueueFamilyIndex != UINT32_MAX;
+	}
+private:
+	IVulkanDynamicRHI* mVulkanRHI = nullptr;
 
+	VkInstance mVkInstance = VK_NULL_HANDLE;
+	VkPhysicalDevice mVkPhysicalDevice = VK_NULL_HANDLE;
+	VkDevice mVkDevice = VK_NULL_HANDLE;
+	VkQueue mGraphicsQueue = VK_NULL_HANDLE;
+	uint32 mGraphicsQueueFamilyIndex = UINT32_MAX;
+};
 class FVdjmVkRuntimeRefs
 {
 	
@@ -54,6 +80,8 @@ private:
 	bool mInitialized = false;
 	bool mStarted = false;
 	bool mPaused = false;
+	
+	FVdjmVkRecoder mVulkanRecoder;
 };
 
 
