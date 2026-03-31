@@ -30,21 +30,36 @@ bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& 
 		ANativeWindow_release(mInputWindow);
 		mInputWindow = nullptr;
 	}
-
+	mConfig = config;
 	mInputWindow = inputWindow;
 	ANativeWindow_acquire(mInputWindow);
-
+	
+	mInitialized = true;
+	mStarted = false;
+	mPaused = false;
+	
 	return true;
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::Start()
 {
+	if (!mInitialized || mInputWindow == nullptr)
+	{
+		return false;
+	}
 
-	return true;
+	UE_LOG(
+		LogTemp,
+		Error,
+		TEXT("FVdjmAndroidEncoderBackendVulkan::Start - disabled. Raw Vulkan submit path was removed."));
+
+	mStarted = false;
+	return false;
 }
 void FVdjmAndroidEncoderBackendVulkan::Stop()
 {
-
+	mStarted = false;
+	mPaused = false;
 }
 void FVdjmAndroidEncoderBackendVulkan::Terminate()
 {
@@ -55,18 +70,21 @@ void FVdjmAndroidEncoderBackendVulkan::Terminate()
 		ANativeWindow_release(mInputWindow);
 		mInputWindow = nullptr;
 	}
-
+	mInitialized = false;
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::IsRunnable() const
 {
-	
-	return true;
+	return mInitialized && mStarted && !mPaused && mInputWindow != nullptr;
 }
 
 bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec)
 {
-	
+	UE_LOG(
+		LogTemp,
+		Error,
+		TEXT("FVdjmAndroidEncoderBackendVulkan::Running - disabled path reached unexpectedly."));
+	return false;
 }
 
 #endif
