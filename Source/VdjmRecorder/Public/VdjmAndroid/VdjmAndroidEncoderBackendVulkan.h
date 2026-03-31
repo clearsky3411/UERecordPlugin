@@ -20,7 +20,11 @@ class FVdjmAndroidEncoderBackendVulkan;
  * 
  */
 
-
+/**
+ * @brief Vulkan 관련 핸들들을 관리하는 클래스. IVulkanDynamicRHI에서 필요한 핸들들을 추출하여 저장하고, 초기화 및 유효성 검사를 담당.
+ * @class FVdjmVkRecoderHandles
+ * @note IVulkanDynamicRHI에서 핸들을 추출하여 저장하는 역할을 담당하며, 초기화 및 유효성 검사 기능을 제공. Vulkan 관련 작업을 수행하는 클래스에서 이 핸들들을 사용하여 Vulkan API 호출을 수행할 수 있도록 지원.
+ */
 class FVdjmVkRecoderHandles
 {
 public:
@@ -80,6 +84,10 @@ private:
 	uint32 mGraphicsQueueFamilyIndex = UINT32_MAX;
 };
 
+/**
+ * @brief Vulkan 프레임 리소스 구조체. 각 프레임마다 필요한 Vulkan 리소스들을 관리하는 구조체로, 명령 버퍼, 동기 객체 등을 포함.
+ * @struct FVdjmVkFrameResources
+ */
 struct FVdjmVkFrameResources
 {
 	VkCommandPool CommandPool = VK_NULL_HANDLE;
@@ -108,6 +116,10 @@ struct FVdjmVkFrameResources
 	}
 };
 
+/**
+ * @brief Vulkan 입력 서피스 상태 관리 클래스. Vulkan을 사용하여 코덱 입력 서피스를 관리하는 클래스이며, 서피스 및 스왑체인 생성, 프레임 리소스 관리 등을 담당.
+ * @class FVdjmVkCodecInputSurfaceState
+ */
 class FVdjmVkCodecInputSurfaceState
 {
 public:

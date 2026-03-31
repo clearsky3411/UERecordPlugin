@@ -83,6 +83,135 @@ bool FVdjmVkRecoderHandles::InitializeFromDynamicRHI(IVulkanDynamicRHI* inVulkan
 	return true;
 }
 
+void FVdjmVkCodecInputSurfaceState::ReleaseSurfaceState(const FVdjmVkRecoderHandles& vkHandles)
+{
+	if (not vkHandles.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("FVdjmVkCodecInputSurfaceState::ReleaseSurfaceState - Invalid Vulkan handles provided. Skipping resource release and clearing surface state."));
+		Clear();
+		return;
+	}
+
+	const VkDevice VkDeviceHandle = vkHandles.GetVkDevice();
+	const VkInstance VkInstanceHandle = vkHandles.GetVkInstance();
+
+	ReleasePerFrameResources(VkDeviceHandle);
+	ReleaseSwapchain(VkDeviceHandle);
+	ReleaseSurface(VkInstanceHandle);
+	Clear();
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("FVdjmVkCodecInputSurfaceState::ReleaseSurfaceState - Successfully released Vulkan surface state resources."));
+}
+
+void FVdjmVkCodecInputSurfaceState::ReleasePerFrameResources(VkDevice vkDevice)
+{
+	if (vkDevice == VK_NULL_HANDLE)
+	{
+		mFrames.Reset();
+		return;
+	}
+
+	for (FVdjmVkFrameResources& Frame : mFrames)
+	{
+		if (Frame.SubmitFence != VK_NULL_HANDLE)
+		{
+			vkDestroyFence(vkDevice, Frame.SubmitFence, nullptr);
+			Frame.SubmitFence = VK_NULL_HANDLE;
+		}
+
+		if (Frame.ImageAcquiredSemaphore != VK_NULL_HANDLE)
+		{
+			vkDestroySemaphore(vkDevice, Frame.ImageAcquiredSemaphore, nullptr);
+			Frame.ImageAcquiredSemaphore = VK_NULL_HANDLE;
+		}
+
+		if (Frame.RenderCompleteSemaphore != VK_NULL_HANDLE)
+		{
+			vkDestroySemaphore(vkDevice, Frame.RenderCompleteSemaphore, nullptr);
+			Frame.RenderCompleteSemaphore = VK_NULL_HANDLE;
+		}
+
+		if (Frame.CommandPool != VK_NULL_HANDLE)
+		{
+			vkDestroyCommandPool(vkDevice, Frame.CommandPool, nullptr);
+			Frame.CommandPool = VK_NULL_HANDLE;
+			Frame.CommandBuffer = VK_NULL_HANDLE;
+		}
+	}
+
+	mFrames.Reset();
+}
+
+void FVdjmVkCodecInputSurfaceState::ReleaseSwapchain(VkDevice vkDevice)
+{
+	if (vkDevice == VK_NULL_HANDLE)
+	{
+		mSwapchainImageViews.Reset();
+		mSwapchainImages.Reset();
+		mSwapchain = VK_NULL_HANDLE;
+		return;
+	}
+
+	for (VkImageView ImageView : mSwapchainImageViews)
+	{
+		if (ImageView != VK_NULL_HANDLE)
+		{
+			vkDestroyImageView(vkDevice, ImageView, nullptr);
+		}
+	}
+
+	mSwapchainImageViews.Reset();
+	mSwapchainImages.Reset();
+
+	if (mSwapchain != VK_NULL_HANDLE)
+	{
+		vkDestroySwapchainKHR(vkDevice, mSwapchain, nullptr);
+		mSwapchain = VK_NULL_HANDLE;
+	}
+}
+
+void FVdjmVkCodecInputSurfaceState::ReleaseSurface(VkInstance vkInstance)
+{
+	if (vkInstance != VK_NULL_HANDLE && mSurface != VK_NULL_HANDLE)
+	{
+		vkDestroySurfaceKHR(vkInstance, mSurface, nullptr);
+	}
+
+	mSurface = VK_NULL_HANDLE;
+}
+
+void FVdjmVkIntermediateState::Release(const FVdjmVkRecoderHandles& vkHandles)
+{
+	if (not vkHandles.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("FVdjmVkIntermediateState::Release - Invalid Vulkan handles provided. Skipping resource release and clearing intermediate state."));
+		Clear();
+		return;
+	}
+
+	const VkDevice VkDeviceHandle = vkHandles.GetVkDevice();
+
+	if (mImageView != VK_NULL_HANDLE)
+	{
+		vkDestroyImageView(VkDeviceHandle, mImageView, nullptr);
+		mImageView = VK_NULL_HANDLE;
+	}
+
+	if (mImage != VK_NULL_HANDLE)
+	{
+		vkDestroyImage(VkDeviceHandle, mImage, nullptr);
+		mImage = VK_NULL_HANDLE;
+	}
+
+	if (mMemory != VK_NULL_HANDLE)
+	{
+		vkFreeMemory(VkDeviceHandle, mMemory, nullptr);
+		mMemory = VK_NULL_HANDLE;
+	}
+
+	Clear();
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("FVdjmVkIntermediateState::Release - Successfully released Vulkan intermediate state resources."));
+}
+
 FVdjmAndroidEncoderBackendVulkan::FVdjmAndroidEncoderBackendVulkan()
 {}
 
@@ -146,6 +275,16 @@ bool FVdjmAndroidEncoderBackendVulkan::Start()
 }
 void FVdjmAndroidEncoderBackendVulkan::Stop()
 {
+	if (mVkHandles.IsValid())
+	{
+		mIntermediateState.Release(mVkHandles);
+		mCodecInputSurfaceState.ReleaseSurfaceState(mVkHandles);
+	}
+	else
+	{
+		mIntermediateState.Clear();
+		mCodecInputSurfaceState.Clear();
+	}
 	mStarted = false;
 	mPaused = false;
 }
@@ -158,6 +297,7 @@ void FVdjmAndroidEncoderBackendVulkan::Terminate()
 		ANativeWindow_release(mInputWindow);
 		mInputWindow = nullptr;
 	}
+	mVkHandles.Clear();
 	mInitialized = false;
 }
 
