@@ -19,10 +19,24 @@ class FVdjmAndroidEncoderBackendVulkan;
  * - 
  * 
  */
+
+
 class FVdjmVkRecoderHandles
 {
 public:
+	FVdjmVkRecoderHandles() = default;
+	~FVdjmVkRecoderHandles() = default;
 	
+	bool InitializeHandles();
+	bool EnsureInitialized();
+	
+	IVulkanDynamicRHI* GetVulkanRHI() const { return mVulkanRHI; }
+	VkInstance GetVkInstance() const { return mVkInstance; }
+	VkPhysicalDevice GetVkPhysicalDevice() const { return mVkPhysicalDevice; }
+	VkDevice GetVkDevice() const { return mVkDevice; }
+	VkQueue GetGraphicsQueue() const { return mGraphicsQueue; }
+	uint32 GetGraphicsQueueIndex() const { return mGraphicsQueueIndex; }
+	uint32 GetGraphicsQueueFamilyIndex() const { return mGraphicsQueueFamilyIndex; }
 	
 	void Clear()
 	{
@@ -31,19 +45,38 @@ public:
 		mVkPhysicalDevice = VK_NULL_HANDLE;
 		mVkDevice = VK_NULL_HANDLE;
 		mGraphicsQueue = VK_NULL_HANDLE;
+		mGraphicsQueueIndex = UINT32_MAX;
 		mGraphicsQueueFamilyIndex = UINT32_MAX;
 	}
 	bool IsValid() const
 	{
 		return mVulkanRHI != nullptr && mVkInstance != VK_NULL_HANDLE && mVkPhysicalDevice != VK_NULL_HANDLE && mVkDevice != VK_NULL_HANDLE && mGraphicsQueue != VK_NULL_HANDLE && mGraphicsQueueFamilyIndex != UINT32_MAX;
 	}
+	bool NeedReInit() const
+	{
+		return not IsValid();
+	}
+	FString ToString() const
+	{
+		return FString::Printf(TEXT("Vulkan Handles - Instance: %p, PhysicalDevice: %p, Device: %p, GraphicsQueue: %p, GraphicsQueueIndex: %u, GraphicsQueueFamilyIndex: %u"),
+			(void*)mVkInstance,
+			(void*)mVkPhysicalDevice,
+			(void*)mVkDevice,
+			(void*)mGraphicsQueue,
+			mGraphicsQueueIndex,
+			mGraphicsQueueFamilyIndex);
+	}
+	
 private:
+	bool InitializeFromDynamicRHI(IVulkanDynamicRHI* vulkanRHI);
+	
 	IVulkanDynamicRHI* mVulkanRHI = nullptr;
 
 	VkInstance mVkInstance = VK_NULL_HANDLE;
 	VkPhysicalDevice mVkPhysicalDevice = VK_NULL_HANDLE;
 	VkDevice mVkDevice = VK_NULL_HANDLE;
 	VkQueue mGraphicsQueue = VK_NULL_HANDLE;
+	uint32 mGraphicsQueueIndex = UINT32_MAX;
 	uint32 mGraphicsQueueFamilyIndex = UINT32_MAX;
 };
 class FVdjmVkRuntimeRefs
