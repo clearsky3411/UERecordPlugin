@@ -1140,7 +1140,7 @@ void FVdjmAndroidEncoderBackendVulkan::DestroyRecordSessionVkResources()
 		mVkRecordSession.CodecSurface = VK_NULL_HANDLE;
 	}
 	//	destroy intermedia
-	DestroyIntermediate(Device);
+	DestroyIntermediate(Device);it a
 
 	mVkRecordSession.Clear();
 	mCurrentSwapchainImageIndex32 = UINT32_MAX;
