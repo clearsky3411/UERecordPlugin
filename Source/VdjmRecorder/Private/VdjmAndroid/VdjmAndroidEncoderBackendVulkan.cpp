@@ -1053,8 +1053,8 @@ bool FVdjmAndroidEncoderBackendVulkan::CreateRecordSessionVkResources()
 	mCurrentSwapchainImageIndex32 = UINT32_MAX;
 
 	UE_LOG(LogVdjmRecorderCore, Warning,
-	       TEXT("CreateRecordSessionVkResources: success. Format=%d Extent=(%u,%u) Images=%d"),
-	       (int32)mVkRecordSession.SurfaceFormat,
+	       TEXT("CreateRecordSessionVkResources: success. Format= %s Extent=(%u,%u) Images=%d"),
+	       *FVdjmVkHelper::ConvertVkFormatToString( mVkRecordSession.SurfaceFormat),
 	       mVkRecordSession.SurfaceExtent.width,
 	       mVkRecordSession.SurfaceExtent.height,
 	       mVkRecordSession.SwapchainImages.Num());
