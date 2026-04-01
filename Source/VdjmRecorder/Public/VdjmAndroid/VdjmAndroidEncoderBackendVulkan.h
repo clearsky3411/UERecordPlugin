@@ -118,12 +118,8 @@ namespace VdjmVkUtil
 	uint32 sourceHeight);
 	
 	static VkAccessFlags GetAccessFlagsForLayout(VkImageLayout layout);
-
-	static void AddImageBarrier(
-		VkCommandBuffer commandBuffer,
-		VkImage image,
-		VkImageLayout oldLayout,
-		VkImageLayout newLayout);
+	static VkPipelineStageFlags GetPipelineStageFlagsForLayout(VkImageLayout layout);
+	static void AddImageBarrier(VkCommandBuffer commandBuffer,	VkImage image,VkImageLayout oldLayout,	VkImageLayout newLayout);
 	
 }
 
