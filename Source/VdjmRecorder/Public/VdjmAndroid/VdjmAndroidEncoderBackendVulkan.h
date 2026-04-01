@@ -121,6 +121,10 @@ namespace VdjmVkUtil
 	static VkPipelineStageFlags GetPipelineStageFlagsForLayout(VkImageLayout layout);
 	static void AddImageBarrier(VkCommandBuffer commandBuffer,	VkImage image,VkImageLayout oldLayout,	VkImageLayout newLayout);
 	
+	static FString ConvertVulkanResultString(VkResult result);
+	static FString ConvertPixelFormatToString(EPixelFormat format);
+	static FString ConvertVkFormatToString(VkFormat format);
+	
 }
 
 
