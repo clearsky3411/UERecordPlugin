@@ -19,6 +19,84 @@ class FVdjmAndroidEncoderBackendVulkan;
  * - 
  * 
  */
+namespace VdjmVkUtil
+{
+	static constexpr VkImageAspectFlags GColorAspect = VK_IMAGE_ASPECT_COLOR_BIT;
+	
+	static bool CheckVkResult(VkResult result,const TCHAR* context)
+	{
+		if (result != VK_SUCCESS)
+		{
+			UE_LOG(LogVdjmRecorderCore, Error,
+				TEXT("%s - Vulkan call failed. VkResult=%d"), context, (int32)result);
+			return false;
+		}
+		return true;
+	}
+	static VkSurfaceFormatKHR ChooseSurfaceFormat(const TArray<VkSurfaceFormatKHR>& formats)
+	{
+		if (formats.Num() == 1 && formats[0].format == VK_FORMAT_UNDEFINED)
+		{
+			VkSurfaceFormatKHR fallback{};
+			fallback.format = VK_FORMAT_R8G8B8A8_UNORM;
+			fallback.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+			return fallback;
+		}
+
+		for (const VkSurfaceFormatKHR& format : formats)
+		{
+			if (format.format == VK_FORMAT_R8G8B8A8_UNORM)
+			{
+				return format;
+			}
+		}
+
+		for (const VkSurfaceFormatKHR& format : formats)
+		{
+			if (format.format == VK_FORMAT_B8G8R8A8_UNORM)
+			{
+				return format;
+			}
+		}
+
+		return formats.Num() > 0 ? formats[0] : VkSurfaceFormatKHR{};
+	}
+
+	static VkCompositeAlphaFlagBitsKHR ChooseCompositeAlpha(VkCompositeAlphaFlagsKHR supportedFlags)
+	{
+		if (supportedFlags & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
+		{
+			return VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+		}
+		if (supportedFlags & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR)
+		{
+			return VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+		}
+		if (supportedFlags & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR)
+		{
+			return VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
+		}
+		if (supportedFlags & VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR)
+		{
+			return VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR;
+		}
+		return VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+	}
+
+	static VkExtent2D ChooseExtent(const VkSurfaceCapabilitiesKHR& caps, uint32 desiredWidth, uint32 desiredHeight)
+	{
+		if (caps.currentExtent.width != UINT32_MAX)
+		{
+			return caps.currentExtent;
+		}
+
+		VkExtent2D extent{};
+		extent.width = FMath::Clamp(desiredWidth, caps.minImageExtent.width, caps.maxImageExtent.width);
+		extent.height = FMath::Clamp(desiredHeight, caps.minImageExtent.height, caps.maxImageExtent.height);
+		return extent;
+	}
+}
+
 
 /**
  * @brief Vulkan 관련 핸들들을 관리하는 클래스. IVulkanDynamicRHI에서 필요한 핸들들을 추출하여 저장하고, 초기화 및 유효성 검사를 담당.
@@ -217,6 +295,11 @@ private:
 	TArray<FVdjmVkFrameResources> mFrames;
 
 };
+
+/**
+ * @brief Vulkan 중간 상태 관리 클래스. Vulkan을 사용하여 인코딩 과정에서 필요한 중간 이미지 리소스를 관리하는 클래스이며, 이미지 생성, 메모리 할당, 이미지 뷰 생성 등을 담당.
+ * @class FVdjmVkIntermediateState
+ */
 class FVdjmVkIntermediateState
 {
 public:
