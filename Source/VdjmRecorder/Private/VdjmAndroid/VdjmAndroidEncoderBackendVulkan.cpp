@@ -81,19 +81,19 @@ bool VdjmVkUtil::WaitAndAcquireFrame(const FVdjmVkRecoderHandles& vkHandles,
 bool VdjmVkUtil::SubmitAndPresentFrame(const FVdjmVkRecoderHandles& vkHandles,
 	FVdjmVkCodecInputSurfaceState& surfaceState, FVdjmVkFrameResources& frameResources)
 {
-	if (!vkHandles.IsValid() || !surfaceState.IsValid() || !frameResources.IsValid())
+	if (not vkHandles.IsValid() || not surfaceState.IsValid() || not frameResources.IsValid())
 	{
 		return false;
 	}
 
-	if (!VdjmVkUtil::CheckVkResult(
+	if (not VdjmVkUtil::CheckVkResult(
 		vkEndCommandBuffer(frameResources.CommandBuffer),
 		TEXT("VdjmSubmitAndPresentFrame.vkEndCommandBuffer")))
 	{
 		return false;
 	}
 
-	if (!VdjmVkUtil::CheckVkResult(
+	if (not VdjmVkUtil::CheckVkResult(
 		vkResetFences(vkHandles.GetVkDevice(), 1, &frameResources.SubmitFence),
 		TEXT("VdjmSubmitAndPresentFrame.vkResetFences")))
 	{
@@ -112,7 +112,7 @@ bool VdjmVkUtil::SubmitAndPresentFrame(const FVdjmVkRecoderHandles& vkHandles,
 	submitInfo.signalSemaphoreCount = 1;
 	submitInfo.pSignalSemaphores = &frameResources.RenderCompleteSemaphore;
 
-	if (!VdjmVkUtil::CheckVkResult(
+	if (not VdjmVkUtil::CheckVkResult(
 		vkQueueSubmit(vkHandles.GetGraphicsQueue(), 1, &submitInfo, frameResources.SubmitFence),
 		TEXT("VdjmSubmitAndPresentFrame.vkQueueSubmit")))
 	{
@@ -173,7 +173,7 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(VkCommandBuffer comma
 		return false;
 	}
 
-	if (!surfaceState.IsValid() || !intermediateState.IsValid())
+	if (not surfaceState.IsValid() || not intermediateState.IsValid())
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("VdjmRecordBackBufferToIntermediateToSwapchain - invalid surface/intermediate state."));
@@ -230,44 +230,13 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(VkCommandBuffer comma
 		}
 	};
 
-	auto AddImageBarrier = [&](VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout)
-	{
-		if (oldLayout == newLayout)
-		{
-			return;
-		}
-
-		VkImageMemoryBarrier barrier{};
-		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		barrier.oldLayout = oldLayout;
-		barrier.newLayout = newLayout;
-		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.image = image;
-		barrier.subresourceRange.aspectMask = VdjmVkUtil::GColorAspect;
-		barrier.subresourceRange.baseMipLevel = 0;
-		barrier.subresourceRange.levelCount = 1;
-		barrier.subresourceRange.baseArrayLayer = 0;
-		barrier.subresourceRange.layerCount = 1;
-		barrier.srcAccessMask = GetAccessMaskForLayout(oldLayout);
-		barrier.dstAccessMask = GetAccessMaskForLayout(newLayout);
-
-		vkCmdPipelineBarrier(
-			commandBuffer,
-			GetStageMaskForLayout(oldLayout),
-			GetStageMaskForLayout(newLayout),
-			0,
-			0, nullptr,
-			0, nullptr,
-			1, &barrier);
-	};
-
+	
 	const VkImageLayout sourceOriginalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	const VkImageLayout intermediateOriginalLayout = intermediateState.GetCurrentLayout();
 	const VkImageLayout swapchainOriginalLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-	AddImageBarrier(sourceImage, sourceOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-	AddImageBarrier(intermediateImage, intermediateOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	VdjmVkUtil::AddImageBarrier(commandBuffer, sourceImage, sourceOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	VdjmVkUtil::AddImageBarrier(commandBuffer, intermediateImage, intermediateOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
 	VkImageBlit sourceToIntermediate{};
 	sourceToIntermediate.srcSubresource.aspectMask = VdjmVkUtil::GColorAspect;
@@ -294,8 +263,8 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(VkCommandBuffer comma
 		&sourceToIntermediate,
 		VK_FILTER_NEAREST);
 
-	AddImageBarrier(intermediateImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-	AddImageBarrier(swapchainImage, swapchainOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	VdjmVkUtil::AddImageBarrier(commandBuffer,intermediateImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	VdjmVkUtil::AddImageBarrier(commandBuffer,swapchainImage, swapchainOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
 	VkImageCopy intermediateToSwapchain{};
 	intermediateToSwapchain.srcSubresource.aspectMask = VdjmVkUtil::GColorAspect;
@@ -323,11 +292,71 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(VkCommandBuffer comma
 		1,
 		&intermediateToSwapchain);
 
-	AddImageBarrier(swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-	AddImageBarrier(sourceImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, sourceOriginalLayout);
+	VdjmVkUtil::AddImageBarrier(commandBuffer,swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	VdjmVkUtil::AddImageBarrier(commandBuffer,sourceImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, sourceOriginalLayout);
 
 	intermediateState.SetCurrentLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	return true;
+}
+
+VkAccessFlags VdjmVkUtil::GetAccessFlagsForLayout(VkImageLayout layout)
+{
+	switch (layout)
+	{
+	case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+		return VK_ACCESS_TRANSFER_READ_BIT;
+	case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+		return VK_ACCESS_TRANSFER_WRITE_BIT;
+	case VK_IMAGE_LAYOUT_UNDEFINED:
+		return 0;
+	case VK_IMAGE_LAYOUT_GENERAL:
+		return VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+	case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
+		return VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
+		return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	case VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL:
+		return VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+	case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
+		return VK_ACCESS_SHADER_READ_BIT;
+	case VK_IMAGE_LAYOUT_PREINITIALIZED:
+		return VK_ACCESS_HOST_WRITE_BIT;
+	default:
+		return 0;
+	}
+}
+
+void VdjmVkUtil::AddImageBarrier(VkCommandBuffer commandBuffer, VkImage image, VkImageLayout oldLayout,
+                                 VkImageLayout newLayout)
+{
+	if (oldLayout == newLayout)
+	{
+		return;
+	}
+
+	VkImageMemoryBarrier barrier{};
+	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	barrier.oldLayout = oldLayout;
+	barrier.newLayout = newLayout;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.image = image;
+	barrier.subresourceRange.aspectMask = VdjmVkUtil::GColorAspect;
+	barrier.subresourceRange.baseMipLevel = 0;
+	barrier.subresourceRange.levelCount = 1;
+	barrier.subresourceRange.baseArrayLayer = 0;
+	barrier.subresourceRange.layerCount = 1;
+	barrier.srcAccessMask = VdjmVkUtil::GetAccessFlagsForLayout(oldLayout);
+	barrier.dstAccessMask = VdjmVkUtil::GetAccessFlagsForLayout(newLayout);
+
+	vkCmdPipelineBarrier(
+		commandBuffer,
+		VdjmVkUtil::GetAccessFlagsForLayout(oldLayout),
+		VdjmVkUtil::GetAccessFlagsForLayout(newLayout),
+		0,
+		0, nullptr,
+		0, nullptr,
+		1, &barrier);
 }
 
 bool FVdjmVkRecoderHandles::InitializeHandles()
@@ -1175,7 +1204,7 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 		return false;
 	}
 
-	if (!VdjmVkUtil::SubmitAndPresentFrame(mVkHandles, mCodecInputSurfaceState, *frameResources))
+	if (not VdjmVkUtil::SubmitAndPresentFrame(mVkHandles, mCodecInputSurfaceState, *frameResources))
 	{
 		UE_LOG(LogVdjmRecorderCore, Warning,
 			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - failed to submit/present frame. timestamp=%f"),
