@@ -7,6 +7,7 @@
 #include "VdjmRecoderAndroidEncoder.h"
 #include "vulkan_core.h"
 
+class FVdjmVkIntermediateState;
 struct FVdjmVkFrameResources;
 class FVdjmVkCodecInputSurfaceState;
 class FVdjmVkRecoderHandles;
@@ -107,6 +108,15 @@ namespace VdjmVkUtil
 	const FVdjmVkRecoderHandles& vkHandles,
 	FVdjmVkCodecInputSurfaceState& surfaceState,
 	FVdjmVkFrameResources& frameResources);
+	
+	static bool RecordBackBufferToIntermediateToSwapchain(
+	VkCommandBuffer commandBuffer,
+	const FVdjmVkCodecInputSurfaceState& surfaceState,
+	FVdjmVkIntermediateState& intermediateState,
+	VkImage sourceImage,
+	uint32 sourceWidth,
+	uint32 sourceHeight);
+	
 }
 
 

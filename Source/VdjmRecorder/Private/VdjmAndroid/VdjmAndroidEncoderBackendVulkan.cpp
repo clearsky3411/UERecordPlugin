@@ -26,13 +26,6 @@ bool VdjmVkUtil::WaitAndAcquireFrame(const FVdjmVkRecoderHandles& vkHandles,
 		return false;
 	}
 
-	if (!VdjmVkUtil::CheckVkResult(
-		vkResetFences(vkDevice, 1, &frameResources.SubmitFence),
-		TEXT("VdjmWaitAndAcquireFrame.vkResetFences")))
-	{
-		return false;
-	}
-
 	uint32 imageIndex = UINT32_MAX;
 	const VkResult acquireResult = vkAcquireNextImageKHR(
 		vkDevice,
@@ -49,7 +42,12 @@ bool VdjmVkUtil::WaitAndAcquireFrame(const FVdjmVkRecoderHandles& vkHandles,
 		return false;
 	}
 
-	if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR)
+	if (acquireResult == VK_SUBOPTIMAL_KHR)
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning,
+			TEXT("VdjmWaitAndAcquireFrame - swapchain suboptimal."));
+	}
+	else if (acquireResult != VK_SUCCESS)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("VdjmWaitAndAcquireFrame - vkAcquireNextImageKHR failed. VkResult=%d"),
@@ -95,6 +93,13 @@ bool VdjmVkUtil::SubmitAndPresentFrame(const FVdjmVkRecoderHandles& vkHandles,
 		return false;
 	}
 
+	if (!VdjmVkUtil::CheckVkResult(
+		vkResetFences(vkHandles.GetVkDevice(), 1, &frameResources.SubmitFence),
+		TEXT("VdjmSubmitAndPresentFrame.vkResetFences")))
+	{
+		return false;
+	}
+
 	const VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_TRANSFER_BIT };
 
 	VkSubmitInfo submitInfo{};
@@ -115,13 +120,21 @@ bool VdjmVkUtil::SubmitAndPresentFrame(const FVdjmVkRecoderHandles& vkHandles,
 	}
 
 	const uint32 imageIndex = surfaceState.GetCurrentSwapchainImageIndex();
+	if (imageIndex == UINT32_MAX)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("VdjmSubmitAndPresentFrame - invalid current swapchain image index."));
+		return false;
+	}
+
+	VkSwapchainKHR swapchain = surfaceState.GetSwapchain();
 
 	VkPresentInfoKHR presentInfo{};
 	presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 	presentInfo.waitSemaphoreCount = 1;
 	presentInfo.pWaitSemaphores = &frameResources.RenderCompleteSemaphore;
 	presentInfo.swapchainCount = 1;
-	presentInfo.pSwapchains = &surfaceState.GetSwapchain();
+	presentInfo.pSwapchains = &swapchain;
 	presentInfo.pImageIndices = &imageIndex;
 
 	const VkResult presentResult = vkQueuePresentKHR(vkHandles.GetGraphicsQueue(), &presentInfo);
@@ -132,7 +145,12 @@ bool VdjmVkUtil::SubmitAndPresentFrame(const FVdjmVkRecoderHandles& vkHandles,
 		return false;
 	}
 
-	if (presentResult != VK_SUCCESS && presentResult != VK_SUBOPTIMAL_KHR)
+	if (presentResult == VK_SUBOPTIMAL_KHR)
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning,
+			TEXT("VdjmSubmitAndPresentFrame - swapchain suboptimal during present."));
+	}
+	else if (presentResult != VK_SUCCESS)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("VdjmSubmitAndPresentFrame - vkQueuePresentKHR failed. VkResult=%d"),
@@ -141,6 +159,174 @@ bool VdjmVkUtil::SubmitAndPresentFrame(const FVdjmVkRecoderHandles& vkHandles,
 	}
 
 	surfaceState.AdvanceFrame();
+	return true;
+}
+
+bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(VkCommandBuffer commandBuffer,
+	const FVdjmVkCodecInputSurfaceState& surfaceState, FVdjmVkIntermediateState& intermediateState, VkImage sourceImage,
+	uint32 sourceWidth, uint32 sourceHeight)
+{
+	if (commandBuffer == VK_NULL_HANDLE || sourceImage == VK_NULL_HANDLE || sourceWidth == 0 || sourceHeight == 0)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("VdjmRecordBackBufferToIntermediateToSwapchain - invalid source args."));
+		return false;
+	}
+
+	if (!surfaceState.IsValid() || !intermediateState.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("VdjmRecordBackBufferToIntermediateToSwapchain - invalid surface/intermediate state."));
+		return false;
+	}
+
+	const uint32 swapchainImageIndex = surfaceState.GetCurrentSwapchainImageIndex();
+	const TArray<VkImage>& swapchainImages = surfaceState.GetSwapchainImages();
+	if (!swapchainImages.IsValidIndex((int32)swapchainImageIndex))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("VdjmRecordBackBufferToIntermediateToSwapchain - invalid swapchain image index: %u"),
+			swapchainImageIndex);
+		return false;
+	}
+
+	const VkImage swapchainImage = swapchainImages[(int32)swapchainImageIndex];
+	const VkImage intermediateImage = intermediateState.GetImage();
+	const VkExtent2D swapchainExtent = surfaceState.GetExtent();
+
+	if (swapchainImage == VK_NULL_HANDLE || intermediateImage == VK_NULL_HANDLE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("VdjmRecordBackBufferToIntermediateToSwapchain - invalid intermediate/swapchain image."));
+		return false;
+	}
+
+	auto GetStageMaskForLayout = [](VkImageLayout layout) -> VkPipelineStageFlags
+	{
+		switch (layout)
+		{
+		case VK_IMAGE_LAYOUT_UNDEFINED:
+			return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+		case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+			return VK_PIPELINE_STAGE_TRANSFER_BIT;
+		case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
+			return VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+		default:
+			return VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+		}
+	};
+
+	auto GetAccessMaskForLayout = [](VkImageLayout layout) -> VkAccessFlags
+	{
+		switch (layout)
+		{
+		case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
+			return VK_ACCESS_TRANSFER_READ_BIT;
+		case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
+			return VK_ACCESS_TRANSFER_WRITE_BIT;
+		default:
+			return 0;
+		}
+	};
+
+	auto AddImageBarrier = [&](VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout)
+	{
+		if (oldLayout == newLayout)
+		{
+			return;
+		}
+
+		VkImageMemoryBarrier barrier{};
+		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		barrier.oldLayout = oldLayout;
+		barrier.newLayout = newLayout;
+		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.image = image;
+		barrier.subresourceRange.aspectMask = VdjmVkUtil::GColorAspect;
+		barrier.subresourceRange.baseMipLevel = 0;
+		barrier.subresourceRange.levelCount = 1;
+		barrier.subresourceRange.baseArrayLayer = 0;
+		barrier.subresourceRange.layerCount = 1;
+		barrier.srcAccessMask = GetAccessMaskForLayout(oldLayout);
+		barrier.dstAccessMask = GetAccessMaskForLayout(newLayout);
+
+		vkCmdPipelineBarrier(
+			commandBuffer,
+			GetStageMaskForLayout(oldLayout),
+			GetStageMaskForLayout(newLayout),
+			0,
+			0, nullptr,
+			0, nullptr,
+			1, &barrier);
+	};
+
+	const VkImageLayout sourceOriginalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	const VkImageLayout intermediateOriginalLayout = intermediateState.GetCurrentLayout();
+	const VkImageLayout swapchainOriginalLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+	AddImageBarrier(sourceImage, sourceOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	AddImageBarrier(intermediateImage, intermediateOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+	VkImageBlit sourceToIntermediate{};
+	sourceToIntermediate.srcSubresource.aspectMask = VdjmVkUtil::GColorAspect;
+	sourceToIntermediate.srcSubresource.mipLevel = 0;
+	sourceToIntermediate.srcSubresource.baseArrayLayer = 0;
+	sourceToIntermediate.srcSubresource.layerCount = 1;
+	sourceToIntermediate.srcOffsets[0] = { 0, 0, 0 };
+	sourceToIntermediate.srcOffsets[1] = { (int32)sourceWidth, (int32)sourceHeight, 1 };
+
+	sourceToIntermediate.dstSubresource.aspectMask = VdjmVkUtil::GColorAspect;
+	sourceToIntermediate.dstSubresource.mipLevel = 0;
+	sourceToIntermediate.dstSubresource.baseArrayLayer = 0;
+	sourceToIntermediate.dstSubresource.layerCount = 1;
+	sourceToIntermediate.dstOffsets[0] = { 0, 0, 0 };
+	sourceToIntermediate.dstOffsets[1] = { (int32)intermediateState.GetWidth(), (int32)intermediateState.GetHeight(), 1 };
+
+	vkCmdBlitImage(
+		commandBuffer,
+		sourceImage,
+		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		intermediateImage,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		1,
+		&sourceToIntermediate,
+		VK_FILTER_NEAREST);
+
+	AddImageBarrier(intermediateImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	AddImageBarrier(swapchainImage, swapchainOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+	VkImageCopy intermediateToSwapchain{};
+	intermediateToSwapchain.srcSubresource.aspectMask = VdjmVkUtil::GColorAspect;
+	intermediateToSwapchain.srcSubresource.mipLevel = 0;
+	intermediateToSwapchain.srcSubresource.baseArrayLayer = 0;
+	intermediateToSwapchain.srcSubresource.layerCount = 1;
+	intermediateToSwapchain.srcOffset = { 0, 0, 0 };
+
+	intermediateToSwapchain.dstSubresource.aspectMask = VdjmVkUtil::GColorAspect;
+	intermediateToSwapchain.dstSubresource.mipLevel = 0;
+	intermediateToSwapchain.dstSubresource.baseArrayLayer = 0;
+	intermediateToSwapchain.dstSubresource.layerCount = 1;
+	intermediateToSwapchain.dstOffset = { 0, 0, 0 };
+
+	intermediateToSwapchain.extent.width = swapchainExtent.width;
+	intermediateToSwapchain.extent.height = swapchainExtent.height;
+	intermediateToSwapchain.extent.depth = 1;
+
+	vkCmdCopyImage(
+		commandBuffer,
+		intermediateImage,
+		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		swapchainImage,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		1,
+		&intermediateToSwapchain);
+
+	AddImageBarrier(swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	AddImageBarrier(sourceImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, sourceOriginalLayout);
+
+	intermediateState.SetCurrentLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	return true;
 }
 
@@ -900,6 +1086,8 @@ bool FVdjmAndroidEncoderBackendVulkan::IsRunnable() const
 
 bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec)
 {
+	(void)RHICmdList;
+	
 	if (!IsRunnable() || !srcTexture.IsValid())
 	{
 		UE_LOG(LogVdjmRecorderCore, Warning,
@@ -914,6 +1102,49 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 		return false;
 	}
 
+	IVulkanDynamicRHI* VulkanRHI = mVkHandles.GetVulkanRHI();
+	if (VulkanRHI == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - VulkanRHI is null."));
+		return false;
+	}
+
+	FRHITexture* sourceTextureRHI = srcTexture.GetReference();
+	if (sourceTextureRHI == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - sourceTextureRHI is null."));
+		return false;
+	}
+
+	const VkImage sourceImage = VulkanRHI->RHIGetVkImage(sourceTextureRHI);
+	if (sourceImage == VK_NULL_HANDLE)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - failed to get source VkImage."));
+		return false;
+	}
+
+	const FIntVector sourceSize = srcTexture->GetSizeXYZ();
+	if (sourceSize.X <= 0 || sourceSize.Y <= 0)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - invalid source size. Size=(%d,%d,%d)"),
+			sourceSize.X, sourceSize.Y, sourceSize.Z);
+		return false;
+	}
+
+	const VkExtent2D surfaceExtent = mCodecInputSurfaceState.GetExtent();
+	const VkFormat surfaceFormat = mCodecInputSurfaceState.GetSurfaceFormat().format;
+
+	if (!mIntermediateState.EnsureCreated(mVkHandles, surfaceFormat, surfaceExtent.width, surfaceExtent.height))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - failed to ensure intermediate image."));
+		return false;
+	}
+
 	FVdjmVkFrameResources* frameResources = mCodecInputSurfaceState.GetCurrentFrameResources();
 	if (frameResources == nullptr || !frameResources->IsValid())
 	{
@@ -922,23 +1153,37 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 		return false;
 	}
 
-	if (not VdjmVkUtil::WaitAndAcquireFrame(mVkHandles, mCodecInputSurfaceState, *frameResources))
+	if (!VdjmVkUtil::WaitAndAcquireFrame(mVkHandles, mCodecInputSurfaceState, *frameResources))
 	{
-		UE_LOG(LogVdjmRecorderCore, Error,
-			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - failed to acquire frame."));
+		UE_LOG(LogVdjmRecorderCore, Warning,
+			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - failed to acquire frame. timestamp=%f"),
+			timeStampSec);
 		return false;
 	}
 
-	/*
-	 * TODO
-	 */
+	if (not VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(
+		frameResources->CommandBuffer,
+		mCodecInputSurfaceState,
+		mIntermediateState,
+		sourceImage,
+		(uint32)sourceSize.X,
+		(uint32)sourceSize.Y))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - failed to record copy commands. timestamp=%f"),
+			timeStampSec);
+		return false;
+	}
 
-	UE_LOG(LogVdjmRecorderCore, Error,
-		TEXT("FVdjmAndroidEncoderBackendVulkan::Running - copy path is not implemented yet. timestamp=%f"),
-		timeStampSec);
+	if (!VdjmVkUtil::SubmitAndPresentFrame(mVkHandles, mCodecInputSurfaceState, *frameResources))
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning,
+			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - failed to submit/present frame. timestamp=%f"),
+			timeStampSec);
+		return false;
+	}
 
-	vkEndCommandBuffer(frameResources->CommandBuffer);
-	return false;
+	return true;
 }
 
 #endif
