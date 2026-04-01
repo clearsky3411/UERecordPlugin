@@ -9,6 +9,141 @@
 #include "IVulkanDynamicRHI.h"
 
 
+bool VdjmVkUtil::WaitAndAcquireFrame(const FVdjmVkRecoderHandles& vkHandles,
+	FVdjmVkCodecInputSurfaceState& surfaceState, FVdjmVkFrameResources& frameResources)
+{
+	if (!vkHandles.IsValid() || !surfaceState.IsValid() || !frameResources.IsValid())
+	{
+		return false;
+	}
+
+	const VkDevice vkDevice = vkHandles.GetVkDevice();
+
+	if (!VdjmVkUtil::CheckVkResult(
+		vkWaitForFences(vkDevice, 1, &frameResources.SubmitFence, VK_TRUE, UINT64_MAX),
+		TEXT("VdjmWaitAndAcquireFrame.vkWaitForFences")))
+	{
+		return false;
+	}
+
+	if (!VdjmVkUtil::CheckVkResult(
+		vkResetFences(vkDevice, 1, &frameResources.SubmitFence),
+		TEXT("VdjmWaitAndAcquireFrame.vkResetFences")))
+	{
+		return false;
+	}
+
+	uint32 imageIndex = UINT32_MAX;
+	const VkResult acquireResult = vkAcquireNextImageKHR(
+		vkDevice,
+		surfaceState.GetSwapchain(),
+		UINT64_MAX,
+		frameResources.ImageAcquiredSemaphore,
+		VK_NULL_HANDLE,
+		&imageIndex);
+
+	if (acquireResult == VK_ERROR_OUT_OF_DATE_KHR)
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning,
+			TEXT("VdjmWaitAndAcquireFrame - swapchain out of date."));
+		return false;
+	}
+
+	if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("VdjmWaitAndAcquireFrame - vkAcquireNextImageKHR failed. VkResult=%d"),
+			(int32)acquireResult);
+		return false;
+	}
+
+	surfaceState.SetCurrentSwapchainImageIndex(imageIndex);
+
+	if (!VdjmVkUtil::CheckVkResult(
+		vkResetCommandPool(vkDevice, frameResources.CommandPool, 0),
+		TEXT("VdjmWaitAndAcquireFrame.vkResetCommandPool")))
+	{
+		return false;
+	}
+
+	VkCommandBufferBeginInfo beginInfo{};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+	if (!VdjmVkUtil::CheckVkResult(
+		vkBeginCommandBuffer(frameResources.CommandBuffer, &beginInfo),
+		TEXT("VdjmWaitAndAcquireFrame.vkBeginCommandBuffer")))
+	{
+		return false;
+	}
+
+	return true;
+}
+
+bool VdjmVkUtil::SubmitAndPresentFrame(const FVdjmVkRecoderHandles& vkHandles,
+	FVdjmVkCodecInputSurfaceState& surfaceState, FVdjmVkFrameResources& frameResources)
+{
+	if (!vkHandles.IsValid() || !surfaceState.IsValid() || !frameResources.IsValid())
+	{
+		return false;
+	}
+
+	if (!VdjmVkUtil::CheckVkResult(
+		vkEndCommandBuffer(frameResources.CommandBuffer),
+		TEXT("VdjmSubmitAndPresentFrame.vkEndCommandBuffer")))
+	{
+		return false;
+	}
+
+	const VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_TRANSFER_BIT };
+
+	VkSubmitInfo submitInfo{};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submitInfo.waitSemaphoreCount = 1;
+	submitInfo.pWaitSemaphores = &frameResources.ImageAcquiredSemaphore;
+	submitInfo.pWaitDstStageMask = waitStages;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &frameResources.CommandBuffer;
+	submitInfo.signalSemaphoreCount = 1;
+	submitInfo.pSignalSemaphores = &frameResources.RenderCompleteSemaphore;
+
+	if (!VdjmVkUtil::CheckVkResult(
+		vkQueueSubmit(vkHandles.GetGraphicsQueue(), 1, &submitInfo, frameResources.SubmitFence),
+		TEXT("VdjmSubmitAndPresentFrame.vkQueueSubmit")))
+	{
+		return false;
+	}
+
+	const uint32 imageIndex = surfaceState.GetCurrentSwapchainImageIndex();
+
+	VkPresentInfoKHR presentInfo{};
+	presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+	presentInfo.waitSemaphoreCount = 1;
+	presentInfo.pWaitSemaphores = &frameResources.RenderCompleteSemaphore;
+	presentInfo.swapchainCount = 1;
+	presentInfo.pSwapchains = &surfaceState.GetSwapchain();
+	presentInfo.pImageIndices = &imageIndex;
+
+	const VkResult presentResult = vkQueuePresentKHR(vkHandles.GetGraphicsQueue(), &presentInfo);
+	if (presentResult == VK_ERROR_OUT_OF_DATE_KHR)
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning,
+			TEXT("VdjmSubmitAndPresentFrame - swapchain out of date during present."));
+		return false;
+	}
+
+	if (presentResult != VK_SUCCESS && presentResult != VK_SUBOPTIMAL_KHR)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("VdjmSubmitAndPresentFrame - vkQueuePresentKHR failed. VkResult=%d"),
+			(int32)presentResult);
+		return false;
+	}
+
+	surfaceState.AdvanceFrame();
+	return true;
+}
+
 bool FVdjmVkRecoderHandles::InitializeHandles()
 {
 	Clear();
@@ -120,11 +255,6 @@ bool FVdjmVkCodecInputSurfaceState::InitializeSurfaceState(const FVdjmVkRecoderH
 
 void FVdjmVkCodecInputSurfaceState::ReleaseSurfaceState(const FVdjmVkRecoderHandles& vkHandles)
 {
-	if (vkHandles.IsValid() && vkHandles.GetVkDevice() != VK_NULL_HANDLE)
-	{
-		vkDeviceWaitIdle(vkHandles.GetVkDevice());
-	}
-
 	if (vkHandles.IsValid())
 	{
 		ReleasePerFrameResources(vkHandles.GetVkDevice());
@@ -770,10 +900,44 @@ bool FVdjmAndroidEncoderBackendVulkan::IsRunnable() const
 
 bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec)
 {
-	UE_LOG(
-		LogTemp,
-		Error,
-		TEXT("FVdjmAndroidEncoderBackendVulkan::Running - disabled path reached unexpectedly."));
+	if (!IsRunnable() || !srcTexture.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning,
+			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - backend not runnable or srcTexture invalid."));
+		return false;
+	}
+
+	if (!mVkHandles.IsValid() || !mCodecInputSurfaceState.IsValid() || !mIntermediateState.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - Vulkan state is invalid."));
+		return false;
+	}
+
+	FVdjmVkFrameResources* frameResources = mCodecInputSurfaceState.GetCurrentFrameResources();
+	if (frameResources == nullptr || !frameResources->IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - current frame resources are invalid."));
+		return false;
+	}
+
+	if (not VdjmVkUtil::WaitAndAcquireFrame(mVkHandles, mCodecInputSurfaceState, *frameResources))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - failed to acquire frame."));
+		return false;
+	}
+
+	/*
+	 * TODO
+	 */
+
+	UE_LOG(LogVdjmRecorderCore, Error,
+		TEXT("FVdjmAndroidEncoderBackendVulkan::Running - copy path is not implemented yet. timestamp=%f"),
+		timeStampSec);
+
+	vkEndCommandBuffer(frameResources->CommandBuffer);
 	return false;
 }
 

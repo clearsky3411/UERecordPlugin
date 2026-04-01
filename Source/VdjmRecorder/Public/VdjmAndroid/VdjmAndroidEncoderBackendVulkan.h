@@ -7,6 +7,9 @@
 #include "VdjmRecoderAndroidEncoder.h"
 #include "vulkan_core.h"
 
+struct FVdjmVkFrameResources;
+class FVdjmVkCodecInputSurfaceState;
+class FVdjmVkRecoderHandles;
 struct IVulkanDynamicRHI;
 class FVdjmAndroidEncoderBackendVulkan;
 
@@ -95,6 +98,15 @@ namespace VdjmVkUtil
 		extent.height = FMath::Clamp(desiredHeight, caps.minImageExtent.height, caps.maxImageExtent.height);
 		return extent;
 	}
+	static bool WaitAndAcquireFrame(
+	const FVdjmVkRecoderHandles& vkHandles,
+	FVdjmVkCodecInputSurfaceState& surfaceState,
+	FVdjmVkFrameResources& frameResources);
+	
+	static bool SubmitAndPresentFrame(
+	const FVdjmVkRecoderHandles& vkHandles,
+	FVdjmVkCodecInputSurfaceState& surfaceState,
+	FVdjmVkFrameResources& frameResources);
 }
 
 
