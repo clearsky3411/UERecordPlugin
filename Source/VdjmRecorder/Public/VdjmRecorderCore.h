@@ -800,7 +800,7 @@ public:
 	UFUNCTION(BlueprintCallable)
 	FString GetCurrentFileName() const
 	{
-		return mCurrentEnvInfo ? mCurrentEnvInfo->GetCurrentFilePath() : FString("No File");
+		return FString();
 	}
 	
 	UFUNCTION(BlueprintCallable)

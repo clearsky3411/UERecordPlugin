@@ -197,6 +197,7 @@ void UVdjmRecordAndroidUnit::ReleaseUnit()
 		mAndroidEncoderImpl.Reset();
 	}
 	ReleaseRecordPrevStartDelegate();
+	ReleaseRecordStartedDelegate();
 }
 
 bool UVdjmRecordAndroidUnit::DbcIsValidUnitInit() const
