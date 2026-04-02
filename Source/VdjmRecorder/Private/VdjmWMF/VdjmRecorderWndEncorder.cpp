@@ -72,6 +72,10 @@ bool FVdjmWindowsEncoderImpl::InitializeEncoder(const FString& outputFilePath, i
 		return false;
 	case EVdjmResourceStatus::EError:	//	check
 		return TryRefreshEncoder(AsShared());
+	case EVdjmResourceStatus::ENone:
+		break;
+	case EVdjmResourceStatus::EMax:
+		break;
 	}
 	return false;
 }

@@ -581,34 +581,39 @@ FVdjmAndroidEncoderImpl::~FVdjmAndroidEncoderImpl()
 
 bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, int32 width, int32 height, int32 bitrate,int32 framerate)
 {
+	
 	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidEncoderImpl::InitializeEncoder - outputFilePath: %s, width: %d, height: %d, bitrate: %d, framerate: %d"), *outputFilePath, width, height, bitrate, framerate);
-	//	생성을 위한곳
-	if (not mRecordSession.IsValid() || mRecordSession == nullptr)
+	
+	if (mRecordSession.IsValid())
 	{
-		mRecordSession = MakeShared<FVdjmAndroidRecordSession>();
-	}
-	//	멱등성을 위한거임.
-	if (mRecordSession->IsRunning())
-	{
-		mRecordSession->Stop();
+		if (mRecordSession->IsRunning())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderImpl::InitializeEncoder - Encoder is already running. Stopping current session before reinitializing."));
+			mRecordSession->Stop();
+		}
 		mRecordSession->Terminate();
+		mRecordSession.Reset();
+		mRecordSession = nullptr;
 	}
-	//	검증을 위해 분리
-	FVdjmAndroidEncoderConfigure config = FVdjmAndroidEncoderConfigure(width, height, bitrate, framerate,outputFilePath);
-	config.MimeType = VdjmMimeAvc;
-	config.VideoIntervalSec = 1;
-	config.GraphicBackend = 
-		IsVulkanRHI() ? EVdjmAndroidGraphicBackend::EVulkan : 
+	mConfig.OutputFilePath = outputFilePath;
+	mConfig.VideoWidth = width;
+	mConfig.VideoHeight = height;
+	mConfig.VideoBitrate = bitrate;
+	mConfig.VideoFPS = framerate;
+	mConfig.GraphicBackend =  IsVulkanRHI() ? EVdjmAndroidGraphicBackend::EVulkan : 
 	(IsOpenGLRHI() ? EVdjmAndroidGraphicBackend::EOpenGL : 
 		EVdjmAndroidGraphicBackend::EUnknown);
-	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidEncoderImpl::InitializeEncoder - con %s"), *config.ToString());
 	
-	
-	return mRecordSession->Initialize(config);
+	return true;
 }
 
 VdjmResult FVdjmAndroidEncoderImpl::StartEncoder()
 {
+	FVdjmAndroidEncoderConfigure config = FVdjmAndroidEncoderConfigure(width, height, bitrate, framerate,outputFilePath);
+	config.MimeType = VdjmMimeAvc;
+	config.VideoIntervalSec = 1;
+	
+	mRecordSession = MakeShared<FVdjmAndroidRecordSession>();
 	if (not mRecordSession.IsValid())
 	{
 		return VdjmResults::Fail;
@@ -617,7 +622,7 @@ VdjmResult FVdjmAndroidEncoderImpl::StartEncoder()
 	{
 		return VdjmResults::Fail;
 	}
-	
+	mRecordSession->Initialize(config);
 	return mRecordSession->Start() ? VdjmResults::Ok : VdjmResults::Fail;
 }
 

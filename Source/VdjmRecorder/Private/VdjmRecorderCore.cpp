@@ -1074,7 +1074,7 @@ EVdjmRecordEnvPlatform AVdjmRecordBridgeActor::GetTargetPlatform()
 #endif
 }
 
-void AVdjmRecordBridgeActor::PostResourceInit(UVdjmRecordResource* resource)
+void AVdjmRecordBridgeActor::PostResourceInit_depr(UVdjmRecordResource* resource)
 {
 	if (mRecordConfigureDataAsset == nullptr)
 	{

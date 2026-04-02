@@ -7,7 +7,7 @@
 
 #include "vulkan_android.h"
 #include "IVulkanDynamicRHI.h"
-#include "VulkanRHIPrivate.h"
+
 
 
 bool VdjmVkUtil::WaitAndAcquireFrame(const FVdjmVkRecoderHandles& vkHandles,

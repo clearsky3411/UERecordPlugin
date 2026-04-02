@@ -852,7 +852,8 @@ public:
 	//	Platform Branch Function
 	static EVdjmRecordEnvPlatform GetTargetPlatform();
 	
-	void PostResourceInit(UVdjmRecordResource* resource);
+	//	not use
+	void PostResourceInit_depr(UVdjmRecordResource* resource);
 	
 	UVdjmRecordEnvDataAsset* GetRecordEnvConfigureDataAsset()
 	{

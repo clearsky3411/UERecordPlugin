@@ -52,7 +52,6 @@ END_SHADER_PARAMETER_STRUCT()
 	UFUNCTION()
 	void StopRecord();
 	
-	
 	virtual bool InitializeUnit(UVdjmRecordResource* recordResource) override;
 	virtual void ExecuteUnit(const FVdjmRecordUnitParamContext& context, FVdjmRecordUnitParamPayload& payload) override;
 	virtual void ReleaseUnit() override;
@@ -67,7 +66,7 @@ private:
 protected:
 	FDelegateHandle mStartRecordPrepareHandle;
 	FDelegateHandle mPostEndPipelineExecuteHandle;
-	TSharedPtr<FVdjmVideoEncoderBase> mAndroidEncoder;
+	TSharedPtr<FVdjmVideoEncoderBase> mAndroidEncoderImpl;
 };
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	

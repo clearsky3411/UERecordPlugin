@@ -206,9 +206,14 @@ public:
 	FVdjmAndroidEncoderImpl();
 	virtual ~FVdjmAndroidEncoderImpl() override;
 	
-	virtual bool InitializeEncoder(const FString& outputFilePath, int32 width, int32 height, int32 bitrate,	int32 framerate) override;
-	
-	virtual VdjmResult StartEncoder() override;
+	/*
+	 *	여기 호출에 config 를 새롭게 만들고 검증한다. 
+	 */
+	virtual bool InitializeEncoder(const FString& outputFilePath, int32 width, int32 height, int32 bitrate,	int32 framerate) override;	
+	/*
+	 * mRecordSession 을 초기화 하고 다음 프레임에 녹화를 시작한다. pipeline 의 첫 프레임을 어떻게 하지.
+	 */
+	virtual VdjmResult StartEncoder() override;	
 
 	virtual bool SubmitSurfaceFrame(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec) override;
 	
@@ -224,6 +229,8 @@ public:
 
 private:
 	TSharedPtr<FVdjmAndroidRecordSession> mRecordSession;
+
+	FVdjmAndroidEncoderConfigure mConfig;
 };
 
 
