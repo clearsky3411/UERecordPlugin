@@ -255,7 +255,10 @@ public:
 
 	virtual bool DbcIsValidUnitInit() const  { return LinkedPipeline.IsValid() && LinkedRecordResource.IsValid();  }
 	
+	virtual bool DbcRecordUnitStatus() const { return DbcIsValidUnitInit(); }
+	
 	TWeakObjectPtr<UVdjmRecordUnitPipeline> LinkedPipeline;
+	//	 UVdjmRecordUnitPipeline::CreateUnit 에서 설정됨.
 	TWeakObjectPtr<UVdjmRecordResource> LinkedRecordResource;
 };
 /*
@@ -280,6 +283,7 @@ public:
 	virtual void ReleaseRecordPipeline();
 	
 	virtual bool DbcIsValid() const;
+	virtual bool ExecutePossible() const {return false;}
 
 	bool DbcUnitCheck() const;
 
@@ -712,6 +716,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVdjmRecordEvent,UVdjmRecordResource
 DECLARE_MULTICAST_DELEGATE_OneParam(FVdjmRecordInnerEvent,UVdjmRecordResource*);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmRecordTickEvent,UVdjmRecordResource*, recordResource, float, deltaTime);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FVdjmRecordTickInnerEvent,UVdjmRecordResource*,  float);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVdjmRecordBridgeActorChainInitEvent, AVdjmRecordBridgeActor*, bridgeActor, EVdjmRecordBridgeInitStep, prevInitstep, EVdjmRecordBridgeInitStep, currentInitStep);
 
@@ -779,7 +784,12 @@ public:
 	AVdjmRecordBridgeActor();
 	virtual void BeginDestroy() override;
 	virtual void Tick(float DeltaSeconds) override;
-	//UVdjmRecordDescriptor* DbcGetCurrentRecordDesc() ;
+	void PrintLogErrors();
+	
+	UFUNCTION()
+	void OnBindSlateBackBufferReadyToPresentEvent();
+	UFUNCTION()
+	void OnStopSlateBackBufferReadyToPresentEvent();
 	
 	UFUNCTION(BlueprintCallable)
 	void StartRecording();
@@ -788,9 +798,9 @@ public:
 	void StopRecording();
 
 	UFUNCTION(BlueprintCallable)
-	FString GetCurrentFileName()
+	FString GetCurrentFileName() const
 	{
-		return FString();
+		return mCurrentEnvInfo ? mCurrentEnvInfo->GetCurrentFilePath() : FString("No File");
 	}
 	
 	UFUNCTION(BlueprintCallable)
@@ -879,6 +889,21 @@ public:
 	{
 		return mRecordResource;
 	}
+	void BroadcastRecordPrevStart()
+	{
+		OnRecordPrevStart.Broadcast(mRecordResource);
+		OnRecordPrevStartInner.Broadcast(mRecordResource);
+	}
+	void BroadcastRecordStart()
+	{
+		OnRecordStarted.Broadcast(mRecordResource);
+		OnRecordStartedInner.Broadcast(mRecordResource);
+	}
+	void BroadcastRecordTick(float deltaTime)
+	{
+		OnRecordTick.Broadcast(mRecordResource, deltaTime);
+		OnRecordTickInner.Broadcast(mRecordResource, deltaTime);
+	}
 	
 	/*	↓↓↓[			Delegators			]↓↓↓	*/
 	UPROPERTY(BlueprintAssignable,EditAnywhere)
@@ -891,6 +916,7 @@ public:
 	
 	UPROPERTY(BlueprintAssignable,EditAnywhere)
 	FVdjmRecordTickEvent OnRecordTick;
+	FVdjmRecordTickInnerEvent OnRecordTickInner;
 	
 	UPROPERTY(BlueprintAssignable,EditAnywhere)
 	FVdjmRecordEvent OnRecordStopped;
@@ -929,6 +955,9 @@ protected:
 	UPROPERTY()
 	FTimerHandle mChainInitTimerHandle;
 	UPROPERTY()
+	FTimerHandle mRecordStartTimerHandle;
+	
+	UPROPERTY()
 	EVdjmRecordBridgeInitStep mCurrentInitStep = EVdjmRecordBridgeInitStep::EInitializeStart;
 	EVdjmRecordBridgeInitStep mRetryStep = EVdjmRecordBridgeInitStep::EInitializeStart;
 	
@@ -960,6 +989,8 @@ protected:
 	double mRecordEndTime = 0.0;
 	double mNextFrameTime = 0.0;
 	double mFrameInterval = 0.0;
+	
+	int32 mRecordedFrameCount = 0;
 };
 
 

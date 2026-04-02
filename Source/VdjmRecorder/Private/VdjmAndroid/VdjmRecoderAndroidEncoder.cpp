@@ -565,6 +565,17 @@ bool FVdjmAndroidRecordSession::IsRunnable(const FTextureRHIRef& srcTexture) con
 	return true;
 }
 
+void FVdjmAndroidRecordSession::Clear()
+{
+	if (IsRunning())
+	{
+		Stop();
+	}
+	Terminate();
+	mConfig.Clear();
+	mOwnerEncoderImpl = nullptr;
+}
+
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
 class FVdjmAndroidEncoderImpl : public FVdjmVideoEncoderBase
@@ -581,7 +592,6 @@ FVdjmAndroidEncoderImpl::~FVdjmAndroidEncoderImpl()
 
 bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, int32 width, int32 height, int32 bitrate,int32 framerate)
 {
-	
 	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidEncoderImpl::InitializeEncoder - outputFilePath: %s, width: %d, height: %d, bitrate: %d, framerate: %d"), *outputFilePath, width, height, bitrate, framerate);
 	
 	if (mRecordSession.IsValid())
@@ -604,25 +614,31 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, i
 	(IsOpenGLRHI() ? EVdjmAndroidGraphicBackend::EOpenGL : 
 		EVdjmAndroidGraphicBackend::EUnknown);
 	
-	return true;
+	return mConfig.GraphicBackend != EVdjmAndroidGraphicBackend::EUnknown;
 }
 
 VdjmResult FVdjmAndroidEncoderImpl::StartEncoder()
 {
-	FVdjmAndroidEncoderConfigure config = FVdjmAndroidEncoderConfigure(width, height, bitrate, framerate,outputFilePath);
-	config.MimeType = VdjmMimeAvc;
-	config.VideoIntervalSec = 1;
+	if (mRecordSession == nullptr)
+	{
+		mRecordSession = MakeShared<FVdjmAndroidRecordSession>();
+	}
+	else
+	{
+		mRecordSession->Clear();
+	}
 	
-	mRecordSession = MakeShared<FVdjmAndroidRecordSession>();
-	if (not mRecordSession.IsValid())
+	if (not mRecordSession->Initialize(mConfig))
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::StartEncoder - Failed to initialize record session with current config."));
+		return VdjmResults::Fail;
+	}
+	
+	if (not mRecordSession->IsStartable() || not mRecordSession.IsValid())
 	{
 		return VdjmResults::Fail;
 	}
-	if (not mRecordSession->IsStartable())
-	{
-		return VdjmResults::Fail;
-	}
-	mRecordSession->Initialize(config);
+	
 	return mRecordSession->Start() ? VdjmResults::Ok : VdjmResults::Fail;
 }
 

@@ -55,39 +55,61 @@ void UVdjmRecordAndroidResource::BeginDestroy()
 	Super::BeginDestroy();
 }
 
-void UVdjmRecordAndroidUnit::RemoveRecordPrevStartDelegate()
+void UVdjmRecordAndroidUnit::ReleaseRecordPrevStartDelegate()
 {
 	if (AVdjmRecordBridgeActor* bridge = AVdjmRecordBridgeActor::TryGetRecordBridgeActor())
 	{
-		if (mStartRecordPrepareHandle.IsValid())
+		if (mStartRecordStepsHandle.IsValid())
 		{
-			bridge->OnRecordPrevStartInner.Remove(mStartRecordPrepareHandle);
+			bridge->OnRecordPrevStartInner.Remove(mStartRecordStepsHandle);
 		}
-		mStartRecordPrepareHandle.Reset();
+		mStartRecordStepsHandle.Reset();
 	}
 }
 
-/*
-§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
-class UVdjmRecordAndroidSurfacer : public UVdjmRecordUnit
-*/
-void UVdjmRecordAndroidUnit::RecordPrevStart(UVdjmRecordResource* res)
+void UVdjmRecordAndroidUnit::ReleaseRecordStartedDelegate()
 {
-	//	리소스 확인
-	if (not LinkedRecordResource.IsValid())
+	if (AVdjmRecordBridgeActor* bridge = AVdjmRecordBridgeActor::TryGetRecordBridgeActor())
 	{
-		if (res != nullptr && res->DbcIsValidResourceInit())
+		if (mStartRecordStepsHandle.IsValid())
 		{
-			if (not InitializeUnit(res))
-			{
-				UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidSurfacer::RecordPrevStart - Failed to initialize unit with provided resource."));
-				RemoveRecordPrevStartDelegate();
-				return;
-			}
+			bridge->OnRecordStartedInner.Remove(mStartRecordStepsHandle);
 		}
+		mStartRecordStepsHandle.Reset();
+	}
+}
+
+void UVdjmRecordAndroidUnit::RecordPrevStartDelegateFunc(UVdjmRecordResource* res)
+{
+	bInitializedStatus = false;
+	ReleaseRecordPrevStartDelegate();
+	if (LinkedRecordResource.IsValid() && mAndroidEncoderImpl.IsValid())
+	{
+		bInitializedStatus = mAndroidEncoderImpl->InitializeEncoder(
+				LinkedRecordResource->FinalFilePath,
+				LinkedRecordResource->OriginResolution.X,
+				LinkedRecordResource->OriginResolution.Y,
+				LinkedRecordResource->FinalBitrate,
+				LinkedRecordResource->FinalFrameRate);
 	}
 	
-	//	엔코더의 start 는 AVdjmRecordBridgeActor::StartRecording() 에서 start 전에 호출해준다.
+	if (bInitializedStatus)
+	{
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidSurfacer::InitializeUnit - Successfully initialized Android Encoder."));
+		mStartRecordStepsHandle = AVdjmRecordBridgeActor::TryGetRecordBridgeActor()->OnRecordStartedInner.AddUObject(this,&UVdjmRecordAndroidUnit::RecordStartedDelegateFunc);
+	}
+	else
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidSurfacer::InitializeUnit - Failed to initialize Android Encoder."));
+		if (mAndroidEncoderImpl.IsValid())
+		{
+			mAndroidEncoderImpl->TerminateEncoder();
+		}
+	}
+}
+void UVdjmRecordAndroidUnit::RecordStartedDelegateFunc(UVdjmRecordResource* VdjmRecordResource)
+{
+	ReleaseRecordStartedDelegate();
 	if (LinkedRecordResource.IsValid() && mAndroidEncoderImpl.IsValid())
 	{
 		VdjmResult result = mAndroidEncoderImpl->StartEncoder();
@@ -95,11 +117,13 @@ void UVdjmRecordAndroidUnit::RecordPrevStart(UVdjmRecordResource* res)
 		{
 			UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidSurfacer::RecordPrevStart - Failed to start Android Encoder. Result code: 0x%08X"), result);
 			mAndroidEncoderImpl->TerminateEncoder();
-			RemoveRecordPrevStartDelegate();
+		}
+		else
+		{
+			UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidSurfacer::RecordPrevStart - Android Encoder started successfully."));
 		}
 	}
 }
-
 void UVdjmRecordAndroidUnit::PostEndPipelineExecute(const FVdjmRecordUnitParamContext& context,
 	FVdjmRecordUnitParamPayload& payload)
 {
@@ -122,28 +146,9 @@ bool UVdjmRecordAndroidUnit::InitializeUnit(UVdjmRecordResource* recordResource)
 		{
 			UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidSurfacer::InitializeUnit - Initializing Android Encoder."));
 			mAndroidEncoderImpl = CreatePlatformVideoEncoder();
-			
-			bool bSuccess = mAndroidEncoderImpl->InitializeEncoder(
-				LinkedRecordResource->FinalFilePath,
-				LinkedRecordResource->OriginResolution.X,
-				LinkedRecordResource->OriginResolution.Y,
-				LinkedRecordResource->FinalBitrate,
-				LinkedRecordResource->FinalFrameRate);
-			
-			if (not bSuccess)
-			{
-				UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidSurfacer::InitializeUnit - Failed to initialize Android Encoder."));
-				mAndroidEncoderImpl.Reset();
-				return false;
-			}
-			UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidSurfacer::InitializeUnit - Successfully initialized Android Encoder."));
 			if (AVdjmRecordBridgeActor* bridge = AVdjmRecordBridgeActor::TryGetRecordBridgeActor())
 			{
-				if (not mStartRecordPrepareHandle.IsValid())
-				{
-					UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidSurfacer::InitializeUnit - Binding RecordPrevStart to bridge's OnRecordPrevStartInner event."));
-					mStartRecordPrepareHandle = bridge->OnRecordPrevStartInner.AddUObject(this, &UVdjmRecordAndroidUnit::RecordPrevStart);
-				}
+				mStartRecordStepsHandle = bridge->OnRecordPrevStartInner.AddUObject(this, &UVdjmRecordAndroidUnit::RecordPrevStartDelegateFunc);
 			}
 		}
 		return true;
@@ -191,7 +196,7 @@ void UVdjmRecordAndroidUnit::ReleaseUnit()
 		mAndroidEncoderImpl->TerminateEncoder();
 		mAndroidEncoderImpl.Reset();
 	}
-	RemoveRecordPrevStartDelegate();
+	ReleaseRecordPrevStartDelegate();
 }
 
 bool UVdjmRecordAndroidUnit::DbcIsValidUnitInit() const
@@ -208,8 +213,13 @@ bool UVdjmRecordAndroidUnit::DbcIsValidUnitInit() const
 	return Super::DbcIsValidUnitInit();
 }
 
+bool UVdjmRecordAndroidUnit::DbcRecordUnitStatus() const
+{
+	return bInitializedStatus;
+}
+
 void UVdjmRecordAndroidUnit::SubmitFrameToSurfacer(FRDGBuilder& graphBuilder, const FRDGTextureRef& srcTexture,
-	double timeStampSec)
+                                                   double timeStampSec)
 {
 	if (srcTexture == nullptr || !mAndroidEncoderImpl.IsValid())
 	{

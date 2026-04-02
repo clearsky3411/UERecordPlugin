@@ -44,11 +44,17 @@ public:
 	RDG_TEXTURE_ACCESS(InputTexture, ERHIAccess::CopySrc)
 END_SHADER_PARAMETER_STRUCT()
 
-	void RemoveRecordPrevStartDelegate();
+	void ReleaseRecordPrevStartDelegate();
+	void ReleaseRecordStartedDelegate();
 	UFUNCTION()
-	void RecordPrevStart(UVdjmRecordResource* res);
+	void RecordStartedDelegateFunc(UVdjmRecordResource* VdjmRecordResource);
+	
+	UFUNCTION()//	이거 역할이 mAndroidEncoderImpl->StartEncoder() 이거 실행해주는거임.
+	void RecordPrevStartDelegateFunc(UVdjmRecordResource* res);
+	
 	UFUNCTION()	
 	void PostEndPipelineExecute(const FVdjmRecordUnitParamContext& context, FVdjmRecordUnitParamPayload& payload);
+	
 	UFUNCTION()
 	void StopRecord();
 	
@@ -61,12 +67,16 @@ END_SHADER_PARAMETER_STRUCT()
 	}
 	
 	virtual bool DbcIsValidUnitInit() const override;
-private:
-	void SubmitFrameToSurfacer(FRDGBuilder& graphBuilder, const FRDGTextureRef& srcTexture, double timeStampSec);
+	virtual bool DbcRecordUnitStatus() const override;
+	
 protected:
-	FDelegateHandle mStartRecordPrepareHandle;
+	FDelegateHandle mStartRecordStepsHandle;
 	FDelegateHandle mPostEndPipelineExecuteHandle;
 	TSharedPtr<FVdjmVideoEncoderBase> mAndroidEncoderImpl;
+	
+	bool bInitializedStatus = false;
+private:
+	void SubmitFrameToSurfacer(FRDGBuilder& graphBuilder, const FRDGTextureRef& srcTexture, double timeStampSec);
 };
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	

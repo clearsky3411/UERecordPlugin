@@ -833,6 +833,97 @@ void AVdjmRecordBridgeActor::Tick(float DeltaSeconds)
 // 	return result;
 // }
 
+void AVdjmRecordBridgeActor::PrintLogErrors()
+{
+	if (mRecordConfigureDataAsset == nullptr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("mRecordConfigureDataAsset == nullptr"));
+	}
+	if (mCurrentEnvInfo == nullptr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("mCurrentEnvInfo == nullptr"));
+	}
+	if (bIsRecording)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("StartRecording - bIsRecording == true"));
+	}
+	if (mRecordResource == nullptr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("StartRecording - mRecordResource == nullptr"));
+	}
+	if (mRecordPipeline == nullptr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("StartRecording - mRecordPipeline == nullptr"));
+	}
+	else if (not mRecordPipeline->DbcIsValid())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("StartRecording - mRecordPipeline->DbcIsValid == false"));
+	}
+	if (not DbcRecordingPossible())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("StartRecording - 1   DbcRecordingPossible == false"));
+		if (not DbcValidRecordPipeline())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("StartRecording - 2       DbcValidRecordPipeline() == false"));
+			if (not DbcValidRecordResource())
+			{
+				UE_LOG(LogTemp, Warning, TEXT("StartRecording - 3           DbcValidRecordResource() == false"));
+				if (mRecordResource == nullptr)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("StartRecording - 4               mRecordResource == nullptr "));
+				}
+				if (mRecordResource != nullptr && not mRecordResource->DbcIsValidResourceInit())
+				{
+					UE_LOG(LogTemp, Warning, TEXT("StartRecording - 4               mRecordResource->DbcIsValidResource() "));
+					if (not mRecordResource->OwnerBridgeActor.IsValid())
+					{
+						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       not mRecordResource->OwnerBridgeActor.IsValid() "));
+					}
+					if (not mRecordResource->LinkedCurrentInfo.IsValid())
+					{
+						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       not mRecordResource->LinkedCurrentInfo.IsValid() "));
+					}
+					else
+					{
+						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       mTexturePoolRHI.IsEmpty() "));
+					}
+				}
+			}
+			if (mRecordPipeline == nullptr)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("StartRecording - 3           mRecordPipeline == nullptr"));
+			} 
+			if (mRecordPipeline != nullptr && not mRecordPipeline->DbcIsValid())
+			{
+				UE_LOG(LogTemp, Warning, TEXT("StartRecording - 3            mRecordPipeline->DbcIsValid()"));
+			}
+		}
+		if (not DbcValidCurrentEnvInfo())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("StartRecording - 2       DbcValidRecordPipeline() == false"));
+		}
+	}
+	UE_LOG(LogTemp, Warning, TEXT("StartRecording - Cannot start recording: not startable"));
+}
+
+void AVdjmRecordBridgeActor::OnBindSlateBackBufferReadyToPresentEvent()
+{
+	if (FSlateApplication::IsInitialized())
+	{
+		FSlateApplication& slateApp = FSlateApplication::Get();
+		if (mBackBufferDelegateHandle.IsValid())
+		{
+			slateApp.GetRenderer()->OnBackBufferReadyToPresent().Remove(mBackBufferDelegateHandle);
+			UE_LOG(LogTemp, Warning, TEXT("OnBindSlateBackBufferReadyToPresentEvent - Removed existing BackBufferReadyToPresent delegate"));
+		}
+		mBackBufferDelegateHandle = slateApp.GetRenderer()->OnBackBufferReadyToPresent().AddUObject(this,&AVdjmRecordBridgeActor::OnBackBufferReady_RenderThread);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("OnBindSlateBackBufferReadyToPresentEvent - Cannot bind BackBufferReadyToPresent event: Slate application not initialized"));
+	}
+}
+
 void AVdjmRecordBridgeActor::StartRecording()
 {
 	if(DbcRecordStartable())
@@ -849,25 +940,15 @@ void AVdjmRecordBridgeActor::StartRecording()
 			mRecordEndTime = Now + mCurrentEnvInfo->GetMaxDurationSecond();
             mNextFrameTime = Now; // 첫 프레임은 즉시 기록
             bIsRecording = true;
+			mRecordedFrameCount = 0;
 			
-			if (OnRecordPrevStart.IsBound())
-			{
-				OnRecordPrevStart.Broadcast(mRecordResource);
-			}
-			OnRecordPrevStartInner.Broadcast(mRecordResource);
+			BroadcastRecordPrevStart();
 			
-			if (mBackBufferDelegateHandle.IsValid())
+			if (UWorld* worldContext = GetWorld())
 			{
-				FSlateApplication::Get().GetRenderer()->OnBackBufferReadyToPresent().Remove(mBackBufferDelegateHandle);
+				UE_LOG(LogTemp, Log, TEXT("StartRecording - Binding BackBufferReadyToPresent event on next tick"));
+				worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::OnBindSlateBackBufferReadyToPresentEvent);
 			}
-			else
-			{
-				mBackBufferDelegateHandle = FSlateApplication::Get().GetRenderer()->OnBackBufferReadyToPresent().AddUObject(
-				this,
-				&AVdjmRecordBridgeActor::OnBackBufferReady_RenderThread);
-			}
-			
-			OnRecordStarted.Broadcast(mRecordResource);
 		}
 		else
 		{
@@ -877,75 +958,7 @@ void AVdjmRecordBridgeActor::StartRecording()
 	}
 	else
 	{
-		if (mRecordConfigureDataAsset == nullptr)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("mRecordConfigureDataAsset == nullptr"));
-		}
-		if (mCurrentEnvInfo == nullptr)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("mCurrentEnvInfo == nullptr"));
-		}
-		if (bIsRecording)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("StartRecording - bIsRecording == true"));
-		}
-		if (mRecordResource == nullptr)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("StartRecording - mRecordResource == nullptr"));
-		}
-		if (mRecordPipeline == nullptr)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("StartRecording - mRecordPipeline == nullptr"));
-		}
-		else if (not mRecordPipeline->DbcIsValid())
-		{
-			UE_LOG(LogTemp, Warning, TEXT("StartRecording - mRecordPipeline->DbcIsValid == false"));
-		}
-		if (not DbcRecordingPossible())
-		{
-			UE_LOG(LogTemp, Warning, TEXT("StartRecording - 1   DbcRecordingPossible == false"));
-			if (not DbcValidRecordPipeline())
-			{
-				UE_LOG(LogTemp, Warning, TEXT("StartRecording - 2       DbcValidRecordPipeline() == false"));
-				if (not DbcValidRecordResource())
-				{
-					UE_LOG(LogTemp, Warning, TEXT("StartRecording - 3           DbcValidRecordResource() == false"));
-					if (mRecordResource == nullptr)
-					{
-						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 4               mRecordResource == nullptr "));
-					}
-					if (mRecordResource != nullptr && not mRecordResource->DbcIsValidResourceInit())
-					{
-						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 4               mRecordResource->DbcIsValidResource() "));
-						if (not mRecordResource->OwnerBridgeActor.IsValid())
-						{
-							UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       not mRecordResource->OwnerBridgeActor.IsValid() "));
-						}
-						if (not mRecordResource->LinkedCurrentInfo.IsValid())
-						{
-							UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       not mRecordResource->LinkedCurrentInfo.IsValid() "));
-						}
-						else
-						{
-							UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       mTexturePoolRHI.IsEmpty() "));
-						}
-					}
-				}
-				if (mRecordPipeline == nullptr)
-				{
-					UE_LOG(LogTemp, Warning, TEXT("StartRecording - 3           mRecordPipeline == nullptr"));
-				} 
-				if (mRecordPipeline != nullptr && not mRecordPipeline->DbcIsValid())
-				{
-					UE_LOG(LogTemp, Warning, TEXT("StartRecording - 3            mRecordPipeline->DbcIsValid()"));
-				}
-			}
-			if (not DbcValidCurrentEnvInfo())
-			{
-				UE_LOG(LogTemp, Warning, TEXT("StartRecording - 2       DbcValidRecordPipeline() == false"));
-			}
-		}
-		UE_LOG(LogTemp, Warning, TEXT("StartRecording - Cannot start recording: not startable"));
+		PrintLogErrors();
 	}
 }
 
@@ -965,7 +978,8 @@ void AVdjmRecordBridgeActor::StopRecording()
 		}
 	});
 }
-void AVdjmRecordBridgeActor::StopRecordingInternal()
+
+void AVdjmRecordBridgeActor::OnStopSlateBackBufferReadyToPresentEvent()
 {
 	if (FSlateApplication::IsInitialized() && mBackBufferDelegateHandle.IsValid())
 	{
@@ -973,6 +987,11 @@ void AVdjmRecordBridgeActor::StopRecordingInternal()
 
 		mBackBufferDelegateHandle.Reset();
 	}
+}
+
+void AVdjmRecordBridgeActor::StopRecordingInternal()
+{
+	OnStopSlateBackBufferReadyToPresentEvent();
 
 	FlushRenderingCommands();
 
@@ -1021,6 +1040,19 @@ void AVdjmRecordBridgeActor::OnBackBufferReady_RenderThread(SWindow& SlateWindow
 		return;
 	}
 	
+	if (mRecordedFrameCount == 0)
+	{
+		FVdjmEncoderStatus::DbcGameThreadTask([weakThis = TWeakObjectPtr<AVdjmRecordBridgeActor>(this)]()
+		{
+			if (weakThis.IsValid())
+			{
+				weakThis->BroadcastRecordStart();
+			}
+		});
+	}
+	
+	++mRecordedFrameCount;
+	
 	mNextFrameTime = Now + mFrameInterval;
 	float deltaTime = mNextFrameTime - Now;
 	FVdjmRecordUnitParamContext recordUnitContext = {};
@@ -1052,13 +1084,11 @@ void AVdjmRecordBridgeActor::OnBackBufferReady_RenderThread(SWindow& SlateWindow
 	{
 		if (weakThis.IsValid())
 		{
-			weakThis->OnRecordTick.Broadcast(weakThis->GetRecordResource(),deltaTime);
+			weakThis->BroadcastRecordTick(deltaTime);
 		}
 	});
 	
 	RDGBuilder.Execute(); 
-	UE_LOG(LogTemp, Verbose, TEXT("OnBackBufferReady_RenderThread - Finished Recording Frame"));
-	//newPayload.LogString.Appendf(TEXT(" }} OnBackBufferReady_RenderThread - Finished Recording Frame \n"));
 }
 
 EVdjmRecordEnvPlatform AVdjmRecordBridgeActor::GetTargetPlatform()

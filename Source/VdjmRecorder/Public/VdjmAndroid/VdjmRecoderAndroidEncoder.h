@@ -171,6 +171,8 @@ public:
 	bool IsStartable() const;
 	bool IsRunnable(const FTextureRHIRef& srcTexture) const;
 	
+	void Clear();
+	
 	ANativeWindow* GetInputSurfaceWindow() { return mInputWindow; }
 	AMediaMuxer* GetMediaMuxer() { return mMuxer; }
 	AMediaCodec* GetMediaCodec() { return mCodec; }
@@ -181,6 +183,7 @@ protected:
 	FVdjmAndroidEncoderConfigure mConfig;
 	AMediaCodec* mCodec = nullptr;
 	AMediaMuxer* mMuxer = nullptr;
+	
 	ANativeWindow* mInputWindow = nullptr;
 	int32 mOutputFd = -1;
 	
