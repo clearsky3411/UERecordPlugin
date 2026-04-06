@@ -943,6 +943,12 @@ void AVdjmRecordBridgeActor::StartRecording()
 			mRecordedFrameCount = 0;
 			
 			BroadcastRecordPrevStart();
+			if (UVdjmRecordEventSession* getSession = DbcGetRecordEventSession())
+			{
+				getSession->StopSession();
+			}
+			
+			
 			
 			if (UWorld* worldContext = GetWorld())
 			{
@@ -1207,6 +1213,17 @@ const TCHAR* AVdjmRecordBridgeActor::GetInitStepName(EVdjmRecordBridgeInitStep s
 	case EVdjmRecordBridgeInitStep::EComplete:	return TEXT("EComplete");
 	default: return TEXT("Unknown");
 	}
+}
+
+UVdjmRecordEventSession* AVdjmRecordBridgeActor::DbcGetRecordEventSession()
+{
+	if (mCurrentRecordEventSession != nullptr)
+	{
+		mCurrentRecordEventSession->StopSession();
+		mCurrentRecordEventSession = nullptr;
+	}
+	mCurrentRecordEventSession = NewObject<UVdjmRecordEventSession>(this, UVdjmRecordEventSession::StaticClass());
+	return mCurrentRecordEventSession;
 }
 
 void AVdjmRecordBridgeActor::BeginPlay()

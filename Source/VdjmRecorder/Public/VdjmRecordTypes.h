@@ -10,7 +10,7 @@ class FVdjmVideoEncoderBase;
 class UVdjmRecordUnit;
 class UVdjmRecordResource;
 class UVdjmRecordEnvCurrentInfo;
-class AVdjmRecordBridgeActor;
+
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 	↓			LOG Categories for Vdjm Recorder				↓
@@ -455,6 +455,7 @@ protected:
 	void ClearSessionTimers();
 	
 	TWeakObjectPtr<AActor> mOwnerActor;
+	TWeakObjectPtr<UWorld> mOwnerWorld;  
 	
 	float mSessionStartTime = 0.0f;
 	int32 mSessionFrameCount = 0; // 현재 구조에서는 actual frame count가 아니라 RunningSession 호출 횟수에 가까움

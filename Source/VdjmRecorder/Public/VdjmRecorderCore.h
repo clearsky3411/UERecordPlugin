@@ -941,6 +941,8 @@ public:
 	bool TryResolveViewportSize(FIntPoint& OutSize) const;
 	static const TCHAR* GetInitStepName(EVdjmRecordBridgeInitStep step);
 
+	UVdjmRecordEventSession* DbcGetRecordEventSession();
+	
 protected:
 	virtual void BeginPlay() override;
 	
@@ -988,6 +990,9 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<USceneComponent> mRootScene;
+	
+	UPROPERTY()
+	TObjectPtr<UVdjmRecordEventSession> mCurrentRecordEventSession; 
 	
 	UPROPERTY()
 	double mRecordEndTime = 0.0;

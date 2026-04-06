@@ -3,6 +3,8 @@
 
 #include "VdjmRecordTypes.h"
 
+#include <gsl/pointers>
+
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 	↓			LOG Categories for Vdjm Recorder				↓
@@ -20,6 +22,7 @@ void UVdjmRecordEventSession::InitializeSession(AActor* InOwnerActor,EVdjmRecord
 
 	mOwnerActor = InOwnerActor;
 	mCallbackMask = InCallbackMask;
+	mOwnerWorld = InOwnerActor->GetWorld();
 	mSessionIntervalSeconds = InSessionIntervalSeconds > 0.0f ? InSessionIntervalSeconds : 0.33333f;
 
 	TrySetSessionState(EVdjmRecordEventSessionState::EInitialized);
@@ -29,13 +32,13 @@ void UVdjmRecordEventSession::InitializeSession(AActor* InOwnerActor,EVdjmRecord
 
 void UVdjmRecordEventSession::StartSession()
 {
-	AActor* ownerActor = mOwnerActor.Get();
-	if (!IsValid(ownerActor) || !IsValid(ownerActor->GetWorld()))
+	if (not mOwnerActor.IsValid() ||not mOwnerWorld.IsValid())
 	{
 		TrySetSessionState(EVdjmRecordEventSessionState::EError);
 		return;
 	}
-	UWorld* worldContext = ownerActor->GetWorld();
+	AActor* ownerActor = mOwnerActor.Get();
+	UWorld* worldContext = mOwnerWorld.Get();
 	if (mCurrentState == EVdjmRecordEventSessionState::ERunning ||
 		mCurrentState == EVdjmRecordEventSessionState::EStopping)
 	{
@@ -78,13 +81,13 @@ void UVdjmRecordEventSession::StartSession()
 void UVdjmRecordEventSession::RunningSession()
 {
 	AActor* ownerActor = mOwnerActor.Get();
-	if (!IsValid(ownerActor) || !IsValid(ownerActor->GetWorld()))
+	if (not mOwnerActor.IsValid() ||not mOwnerWorld.IsValid())
 	{
 		mReservedNextState = EVdjmRecordEventSessionState::EError;
 		StopSession();
 		return;
 	}
-	UWorld* worldContext = ownerActor->GetWorld();
+	UWorld* worldContext = mOwnerWorld.Get();
 
 	if (mCurrentState != EVdjmRecordEventSessionState::ERunning)
 	{
@@ -208,17 +211,21 @@ VdjmResult UVdjmRecordEventSession::ExecuteControlCallback(FVdjmRecordEventSessi
 
 void UVdjmRecordEventSession::ClearSessionTimers()
 {
-	AActor* ownerActor = mOwnerActor.Get();
-	if (!IsValid(ownerActor))
+	UWorld* WorldContext = mOwnerWorld.Get();
+	if (!IsValid(WorldContext))
+	{
+		if (AActor* OwnerActor = mOwnerActor.Get())
+		{
+			WorldContext = OwnerActor->GetWorld();
+		}
+	}
+
+	if (!IsValid(WorldContext))
 	{
 		return;
 	}
-	UWorld* worldContext = ownerActor->GetWorld();
-	if (!IsValid(worldContext))
-	{
-		return;
-	}
-	FTimerManager& TimerManager = worldContext->GetTimerManager();
+
+	FTimerManager& TimerManager = WorldContext->GetTimerManager();
 	TimerManager.ClearTimer(mSessionTimerHandle);
 	TimerManager.ClearTimer(mSessionObserverTimerHandle);
 }
