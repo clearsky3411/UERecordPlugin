@@ -385,6 +385,7 @@ UENUM()
 enum class EVdjmRecordEventSessionState
 {
 	EUndefined UMETA(DisplayName="Undefined"),
+	EInitialized UMETA(DisplayName="Initialized"),
 	EPrepare UMETA(DisplayName="Prepare"),
 	EPrepared UMETA(DisplayName="Prepared"),
 	ERunning UMETA(DisplayName="Running"),
@@ -393,13 +394,34 @@ enum class EVdjmRecordEventSessionState
 	ETerminated UMETA(DisplayName="Terminated"),
 	EError UMETA(DisplayName="Error"),
 };
+enum class EVdjmRecordEventSessionCallbackMask : uint8
+{
+	ENone					= 0x00,
+	EStartControl			= 0x01,
+	ERunningControl			= 0x02,
+	EStopControl			= 0x04,
+	ERunningObserve			= 0x08,
+	EStateChangedObserve	= 0x10,
+	EAll					= 0x1F
+};
+ENUM_CLASS_FLAGS(EVdjmRecordEventSessionCallbackMask);
 
-DECLARE_DELEGATE(FVdjmRecordEventSessionStateDelegate);
-DECLARE_MULTICAST_DELEGATE(FVdjmRecordEventSessionStateChangeDelegate);
+DECLARE_DELEGATE_RetVal_OneParam(VdjmResult, FVdjmRecordEventSessionControlDelegate, UVdjmRecordEventSession* /* Session */);
+
+// observe delegate
 DECLARE_MULTICAST_DELEGATE_TwoParams(
 	FVdjmRecordEventSessionStateChangedDelegate,
 	EVdjmRecordEventSessionState /* PrevState */,
 	EVdjmRecordEventSessionState /* CurrentState */
+);
+
+// RunningSession 관찰용.
+// 현재 mSessionIntervalSeconds 기반으로 부르면 frame 이 아니라 running tick count 임.
+DECLARE_MULTICAST_DELEGATE_ThreeParams(
+	FVdjmRecordEventSessionRunningObservedDelegate,
+	UVdjmRecordEventSession* /* Session */,
+	float /* ElapsedSeconds */,
+	int32 /* RunningTickCount */
 );
 
 UCLASS()
@@ -407,7 +429,7 @@ class VDJMRECORDER_API UVdjmRecordEventSession : public UObject
 {
 	GENERATED_BODY()
 public:
-	void InitializeSession(bool);
+	void InitializeSession(	AActor* InOwnerActor,EVdjmRecordEventSessionCallbackMask InCallbackMask =EVdjmRecordEventSessionCallbackMask::EAll, float InSessionIntervalSeconds = 0.5f);
 	
 	void StartSession();
 	void RunningSession();
@@ -417,29 +439,39 @@ public:
 	EVdjmRecordEventSessionState GetPreviousSessionState() const { return mPrevState; }
 	EVdjmRecordEventSessionState GetReservedNextSessionState() const { return mReservedNextState; }
 	
-	FVdjmRecordEventSessionStateDelegate OnStartSessionCallback;
-	FVdjmRecordEventSessionStateChangeDelegate OnRunningSessionCallback;
-	FVdjmRecordEventSessionStateDelegate OnStopSessionCallback;
+	FVdjmRecordEventSessionControlDelegate OnStartSessionCallback;
+	FVdjmRecordEventSessionControlDelegate OnRunningSessionCallback;
+	FVdjmRecordEventSessionControlDelegate OnStopSessionCallback;
 	
+	FVdjmRecordEventSessionRunningObservedDelegate OnRunningSessionObservedCallback;
 	FVdjmRecordEventSessionStateChangedDelegate OnSessionStateChangedCallback;
 protected:
+	bool TrySetSessionState(EVdjmRecordEventSessionState InNewState);
+	bool IsCallbackEnabled(EVdjmRecordEventSessionCallbackMask InMask) const;
+	VdjmResult ExecuteControlCallback(
+		FVdjmRecordEventSessionControlDelegate& InDelegate,
+		EVdjmRecordEventSessionCallbackMask InMask
+	);
+	void ClearSessionTimers();
+	
+	TWeakObjectPtr<AActor> mOwnerActor;
+	
 	float mSessionStartTime = 0.0f;
-	int32 mSessionFrameCount = 0;
-	float mSessionEndTime = 0.0f;	//	세션 종료될 시간.
-	
-	float mSessionIntervalSeconds = 0.5f; // 세션 업데이트 간격 (초)
-	
+	int32 mSessionFrameCount = 0; // 현재 구조에서는 actual frame count가 아니라 RunningSession 호출 횟수에 가까움
+	float mSessionEndTime = 0.0f; // 절대 시간 기준 종료 시각. 0 이하면 auto-stop 안함.
+
+	float mSessionIntervalSeconds = 0.5f;
+
 	FTimerHandle mSessionTimerHandle;
-	FTimerHandle mSessionObserverTimerHandle;
-	
-	FDelegateHandle mStartSessionCallbackHandle;
-	FDelegateHandle mRunningSessionCallbackHandle;
-	FDelegateHandle mStopSessionCallbackHandle;
-	
+	FTimerHandle mSessionObserverTimerHandle; // 지금 구현에서는 미사용. 분리 observer cadence 가 필요 없으면 제거 권장.
+
+	EVdjmRecordEventSessionCallbackMask mCallbackMask = EVdjmRecordEventSessionCallbackMask::EAll;
+
 	EVdjmRecordEventSessionState mPrevState = EVdjmRecordEventSessionState::EUndefined;
 	EVdjmRecordEventSessionState mCurrentState = EVdjmRecordEventSessionState::EUndefined;
 	EVdjmRecordEventSessionState mReservedNextState = EVdjmRecordEventSessionState::EUndefined;
 };
+
 /**
  * 
  */
