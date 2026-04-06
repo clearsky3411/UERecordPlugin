@@ -384,25 +384,49 @@ enum class EVdjmRecordPipelineStages : uint8
 UENUM()
 enum class EVdjmRecordEventSessionState
 {
-	
+	EUndefined UMETA(DisplayName="Undefined"),
+	EPrepare UMETA(DisplayName="Prepare"),
+	EPrepared UMETA(DisplayName="Prepared"),
+	ERunning UMETA(DisplayName="Running"),
+	EStopping UMETA(DisplayName="Stopping"),
+	EStopped UMETA(DisplayName="Stopped"),
+	ETerminated UMETA(DisplayName="Terminated"),
+	EError UMETA(DisplayName="Error"),
 };
-
 
 UCLASS()
 class VDJMRECORDER_API UVdjmRecordEventSession : public UObject
 {
 	GENERATED_BODY()
 public:
-	UFUNCTION()
-	void StartSession();
+	void InitializeSession(TFunction<void> startSessionCallback ,
+		TFunction<void(EVdjmRecordEventSessionState newState)> updateSessionCallback ,
+		TFunction<void> stopSessionCallback );
 	
-	UFUNCTION()
-	void StopSession();
+	void StartSession(TFunction<void> onSessionStartedCallback = nullptr);
+	void UpdateSession(TFunction<void(EVdjmRecordEventSessionState newState)> onSessionUpdatedCallback = nullptr);
+	void StopSession(TFunction<void> onSessionStoppedCallback = nullptr);
+	
+	EVdjmRecordEventSessionState GetCurrentSessionState() const { return mCurrentState; }
+	EVdjmRecordEventSessionState GetPreviousSessionState() const { return mPrevState; }
+	EVdjmRecordEventSessionState GetReservedNextSessionState() const { return mReservedNextState; }
 protected:
-	FTimerHandle SessionTimerHandle;
+	float mSessionStartTime = 0.0f;
+	int32 mSessionFrameCount = 0;
+	float mSessionEndTime = 0.0f;	//	세션 종료될 시간.
 	
+	float mSessionIntervalSeconds = 0.5f; // 세션 업데이트 간격 (초)
 	
+	FTimerHandle mSessionTimerHandle;
+	FTimerHandle mSessionObserverTimerHandle;
 	
+	TFunction<void()> mStartSessionCallback;
+	TFunction<void(EVdjmRecordEventSessionState newState)> mUpdateSessionCallback;
+	TFunction<void()> mStopSessionCallback;
+	
+	EVdjmRecordEventSessionState mPrevState = EVdjmRecordEventSessionState::EUndefined;
+	EVdjmRecordEventSessionState mCurrentState = EVdjmRecordEventSessionState::EUndefined;
+	EVdjmRecordEventSessionState mReservedNextState = EVdjmRecordEventSessionState::EUndefined;
 };
 /**
  * 

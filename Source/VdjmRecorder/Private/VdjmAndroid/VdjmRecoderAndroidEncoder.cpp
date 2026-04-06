@@ -613,8 +613,11 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, i
 	mConfig.GraphicBackend =  IsVulkanRHI() ? EVdjmAndroidGraphicBackend::EVulkan : 
 	(IsOpenGLRHI() ? EVdjmAndroidGraphicBackend::EOpenGL : 
 		EVdjmAndroidGraphicBackend::EUnknown);
-	
-	return mConfig.GraphicBackend != EVdjmAndroidGraphicBackend::EUnknown;
+	/*
+	 * 검증을 여기에다가 넣으라고?
+	 */
+	;
+	return mConfig.IsValidateEncoderArguments();
 }
 
 VdjmResult FVdjmAndroidEncoderImpl::StartEncoder()

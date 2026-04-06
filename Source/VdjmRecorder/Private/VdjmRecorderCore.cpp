@@ -1271,6 +1271,7 @@ void AVdjmRecordBridgeActor::OnTryChainInitNext(EVdjmRecordBridgeInitStep nextSt
 			mChainInitTimerHandle = worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::ChainInit_FinalizeInitialization);
 			break;
 		case EVdjmRecordBridgeInitStep::EComplete:
+			//	여기에서 뭐 해줘야하나?
 			bValidateInitializeComplete = true;
 			mChainInitTimerHandle.Invalidate();
 			break;
@@ -1525,7 +1526,7 @@ void AVdjmRecordBridgeActor::ChainInit_FinalizeInitialization()
 {
 	if (DbcRecordStartableFull())
 	{
-		UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_FinalizeInitialization - Initialization complete and record is startable. Transitioning to EComplete."));
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("!!{ ChainInit_FinalizeInitialization - Initialization complete and record is startable. Transitioning to EComplete. }!!"));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EComplete);
 	}
 	else
