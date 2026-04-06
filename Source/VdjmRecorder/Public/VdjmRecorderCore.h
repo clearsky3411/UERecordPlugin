@@ -769,6 +769,10 @@ namespace VdjmRecorderValidation
 		const TCHAR* DebugOwner);
 }
 
+
+
+
+
 UCLASS(Blueprintable)
 class VDJMRECORDER_API AVdjmRecordBridgeActor : public AActor
 {

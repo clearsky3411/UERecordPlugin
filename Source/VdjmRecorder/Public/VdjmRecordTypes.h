@@ -381,7 +381,29 @@ enum class EVdjmRecordPipelineStages : uint8
 	ELimit = 255 UMETA(Hidden) 
 };
 
+UENUM()
+enum class EVdjmRecordEventSessionState
+{
+	
+};
 
+
+UCLASS()
+class VDJMRECORDER_API UVdjmRecordEventSession : public UObject
+{
+	GENERATED_BODY()
+public:
+	UFUNCTION()
+	void StartSession();
+	
+	UFUNCTION()
+	void StopSession();
+protected:
+	FTimerHandle SessionTimerHandle;
+	
+	
+	
+};
 /**
  * 
  */

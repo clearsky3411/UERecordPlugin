@@ -120,6 +120,7 @@ void UVdjmRecordAndroidUnit::RecordStartedDelegateFunc(UVdjmRecordResource* Vdjm
 		}
 		else
 		{
+			//	여기에 브릿지액터의 tick 을 넣으라는건가? 시발?
 			UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidSurfacer::RecordPrevStart - Android Encoder started successfully."));
 		}
 	}
