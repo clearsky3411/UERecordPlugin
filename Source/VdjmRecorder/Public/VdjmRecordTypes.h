@@ -394,22 +394,34 @@ enum class EVdjmRecordEventSessionState
 	EError UMETA(DisplayName="Error"),
 };
 
+DECLARE_DELEGATE(FVdjmRecordEventSessionStateDelegate);
+DECLARE_MULTICAST_DELEGATE(FVdjmRecordEventSessionStateChangeDelegate);
+DECLARE_MULTICAST_DELEGATE_TwoParams(
+	FVdjmRecordEventSessionStateChangedDelegate,
+	EVdjmRecordEventSessionState /* PrevState */,
+	EVdjmRecordEventSessionState /* CurrentState */
+);
+
 UCLASS()
 class VDJMRECORDER_API UVdjmRecordEventSession : public UObject
 {
 	GENERATED_BODY()
 public:
-	void InitializeSession(TFunction<void> startSessionCallback ,
-		TFunction<void(EVdjmRecordEventSessionState newState)> updateSessionCallback ,
-		TFunction<void> stopSessionCallback );
+	void InitializeSession(bool);
 	
-	void StartSession(TFunction<void> onSessionStartedCallback = nullptr);
-	void UpdateSession(TFunction<void(EVdjmRecordEventSessionState newState)> onSessionUpdatedCallback = nullptr);
-	void StopSession(TFunction<void> onSessionStoppedCallback = nullptr);
+	void StartSession();
+	void RunningSession();
+	void StopSession();
 	
 	EVdjmRecordEventSessionState GetCurrentSessionState() const { return mCurrentState; }
 	EVdjmRecordEventSessionState GetPreviousSessionState() const { return mPrevState; }
 	EVdjmRecordEventSessionState GetReservedNextSessionState() const { return mReservedNextState; }
+	
+	FVdjmRecordEventSessionStateDelegate OnStartSessionCallback;
+	FVdjmRecordEventSessionStateChangeDelegate OnRunningSessionCallback;
+	FVdjmRecordEventSessionStateDelegate OnStopSessionCallback;
+	
+	FVdjmRecordEventSessionStateChangedDelegate OnSessionStateChangedCallback;
 protected:
 	float mSessionStartTime = 0.0f;
 	int32 mSessionFrameCount = 0;
@@ -420,9 +432,9 @@ protected:
 	FTimerHandle mSessionTimerHandle;
 	FTimerHandle mSessionObserverTimerHandle;
 	
-	TFunction<void()> mStartSessionCallback;
-	TFunction<void(EVdjmRecordEventSessionState newState)> mUpdateSessionCallback;
-	TFunction<void()> mStopSessionCallback;
+	FDelegateHandle mStartSessionCallbackHandle;
+	FDelegateHandle mRunningSessionCallbackHandle;
+	FDelegateHandle mStopSessionCallbackHandle;
 	
 	EVdjmRecordEventSessionState mPrevState = EVdjmRecordEventSessionState::EUndefined;
 	EVdjmRecordEventSessionState mCurrentState = EVdjmRecordEventSessionState::EUndefined;
