@@ -905,16 +905,23 @@ void AVdjmRecordBridgeActor::PrintLogErrors()
 	UE_LOG(LogTemp, Warning, TEXT("StartRecording - Cannot start recording: not startable"));
 }
 
+void AVdjmRecordBridgeActor::UnBindBackBufferReady(FSlateApplication& slateApp)
+{
+	
+	if (mBackBufferDelegateHandle.IsValid())
+	{
+		slateApp.GetRenderer()->OnBackBufferReadyToPresent().Remove(mBackBufferDelegateHandle);
+		UE_LOG(LogTemp, Warning, TEXT("OnBindSlateBackBufferReadyToPresentEvent - Removed existing BackBufferReadyToPresent delegate"));
+	}
+
+}
+
 void AVdjmRecordBridgeActor::OnBindSlateBackBufferReadyToPresentEvent()
 {
 	if (FSlateApplication::IsInitialized())
 	{
 		FSlateApplication& slateApp = FSlateApplication::Get();
-		if (mBackBufferDelegateHandle.IsValid())
-		{
-			slateApp.GetRenderer()->OnBackBufferReadyToPresent().Remove(mBackBufferDelegateHandle);
-			UE_LOG(LogTemp, Warning, TEXT("OnBindSlateBackBufferReadyToPresentEvent - Removed existing BackBufferReadyToPresent delegate"));
-		}
+		UnBindBackBufferReady(slateApp);
 		mBackBufferDelegateHandle = slateApp.GetRenderer()->OnBackBufferReadyToPresent().AddUObject(this,&AVdjmRecordBridgeActor::OnBackBufferReady_RenderThread);
 	}
 	else
@@ -938,7 +945,7 @@ void AVdjmRecordBridgeActor::StartRecording()
 			mFrameInterval = 1.0 / FMath::Max(currentFPS, mCurrentEnvInfo->GetCurrentGlobalRules().MinFrameRate);
 			mRecordEndTime = Now + mCurrentEnvInfo->GetMaxDurationSecond();
             mNextFrameTime = Now; // 첫 프레임은 즉시 기록
-            bIsRecording = true;
+			bIsRecording = true;
 			mRecordedFrameCount = 0;
 	
 			if (OnRecordStartRetValEvent.IsBound())
@@ -947,12 +954,14 @@ void AVdjmRecordBridgeActor::StartRecording()
 				if (result != VdjmResults::Ok)
 				{
 					UE_LOG(LogTemp, Warning, TEXT("StartRecording - OnRecordStartRetValEvent returned failure result. Result=%d"), static_cast<int32>(result));
-					bIsRecording = false;
 					/*
 					 * 구조 변경해서 window 쪽도 바꿔줘야함. 지금 오로지 안드로이드를 위한거임.
 					 */
+					bIsRecording = false;
+					StopRecordingInternal();
 					return;
 				}
+				
 				OnBindSlateBackBufferReadyToPresentEvent();
 			}
 		}

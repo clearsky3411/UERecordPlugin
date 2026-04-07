@@ -792,6 +792,7 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 	void PrintLogErrors();
 	
+
 	UFUNCTION()
 	void OnBindSlateBackBufferReadyToPresentEvent();
 	UFUNCTION()
@@ -961,6 +962,7 @@ protected:
 	void ChainInit_PostResourceInitResolve();
 	void ChainInit_CreateRecordPipeline();
 	void ChainInit_FinalizeInitialization();
+	void UnBindBackBufferReady(FSlateApplication& slateApp);
 	
 	UPROPERTY()
 	int32 mChainTryInitCount = 8;
