@@ -81,6 +81,8 @@ void UVdjmRecordAndroidUnit::ReleaseRecordStartedDelegate()
 
 void UVdjmRecordAndroidUnit::RecordPrevStartDelegateFunc(UVdjmRecordResource* res)
 {
+	(void)res;
+	
 	bInitializedStatus = false;
 	ReleaseRecordPrevStartDelegate();
 	if (LinkedRecordResource.IsValid() && mAndroidEncoderImpl.IsValid())
@@ -149,7 +151,7 @@ bool UVdjmRecordAndroidUnit::InitializeUnit(UVdjmRecordResource* recordResource)
 			mAndroidEncoderImpl = CreatePlatformVideoEncoder();
 			if (AVdjmRecordBridgeActor* bridge = AVdjmRecordBridgeActor::TryGetRecordBridgeActor())
 			{
-				mStartRecordStepsHandle = bridge->OnRecordPrevStartInner.AddUObject(this, &UVdjmRecordAndroidUnit::RecordPrevStartDelegateFunc);
+				bridge->OnRecordStartRetValEvent.BindUObject(this,&UVdjmRecordAndroidUnit::RecordStartCheck);
 			}
 		}
 		return true;
@@ -218,6 +220,28 @@ bool UVdjmRecordAndroidUnit::DbcIsValidUnitInit() const
 bool UVdjmRecordAndroidUnit::DbcRecordUnitStatus() const
 {
 	return bInitializedStatus;
+}
+
+VdjmResult UVdjmRecordAndroidUnit::RecordStartCheck()
+{
+	if (LinkedRecordResource.IsValid() && mAndroidEncoderImpl.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidUnit::RecordStartCheck - LinkedRecordResource is not valid."));
+		return VdjmResults::Fail;
+	}
+	
+	if (not mAndroidEncoderImpl->InitializeEncoder(
+		LinkedRecordResource->FinalFilePath,
+		LinkedRecordResource->OriginResolution.X,
+		LinkedRecordResource->OriginResolution.Y,
+		LinkedRecordResource->FinalBitrate,
+		LinkedRecordResource->FinalFrameRate))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidUnit::RecordStartCheck - Failed to initialize Android Encoder."));
+		mAndroidEncoderImpl->TerminateEncoder();
+		return VdjmResults::InvalidArg;
+	}
+	return mAndroidEncoderImpl->StartEncoder();
 }
 
 void UVdjmRecordAndroidUnit::SubmitFrameToSurfacer(FRDGBuilder& graphBuilder, const FRDGTextureRef& srcTexture,

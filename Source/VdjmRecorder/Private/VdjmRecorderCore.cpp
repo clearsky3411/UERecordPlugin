@@ -943,17 +943,16 @@ void AVdjmRecordBridgeActor::StartRecording()
 			mRecordedFrameCount = 0;
 			
 			BroadcastRecordPrevStart();
-			if (UVdjmRecordEventSession* getSession = DbcGetRecordEventSession())
+	
+			if (OnRecordStartRetValEvent.IsBound())
 			{
-				getSession->StopSession();
-			}
-			
-			
-			
-			if (UWorld* worldContext = GetWorld())
-			{
-				UE_LOG(LogTemp, Log, TEXT("StartRecording - Binding BackBufferReadyToPresent event on next tick"));
-				worldContext->GetTimerManager().SetTimerForNextTick(this, &AVdjmRecordBridgeActor::OnBindSlateBackBufferReadyToPresentEvent);
+				VdjmResult result = OnRecordStartRetValEvent.Execute();
+				if (result != VdjmResults::Ok)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("StartRecording - OnRecordStartRetValEvent returned failure result. Result=%d"), static_cast<int32>(result));
+					bIsRecording = false;
+					return;
+				}
 			}
 		}
 		else

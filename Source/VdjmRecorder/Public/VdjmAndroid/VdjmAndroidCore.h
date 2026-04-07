@@ -70,12 +70,17 @@ END_SHADER_PARAMETER_STRUCT()
 	virtual bool DbcRecordUnitStatus() const override;
 	
 protected:
+	VdjmResult RecordStartCheck();
+	
 	FDelegateHandle mStartRecordStepsHandle;
 	FDelegateHandle mPostEndPipelineExecuteHandle;
 	TSharedPtr<FVdjmVideoEncoderBase> mAndroidEncoderImpl;
 	
 	bool bInitializedStatus = false;
 private:
+	
+	
+	
 	void SubmitFrameToSurfacer(FRDGBuilder& graphBuilder, const FRDGTextureRef& srcTexture, double timeStampSec);
 };
 /*

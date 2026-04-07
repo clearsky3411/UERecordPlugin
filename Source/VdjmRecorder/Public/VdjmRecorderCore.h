@@ -720,6 +720,8 @@ DECLARE_MULTICAST_DELEGATE_TwoParams(FVdjmRecordTickInnerEvent,UVdjmRecordResour
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVdjmRecordBridgeActorChainInitEvent, AVdjmRecordBridgeActor*, bridgeActor, EVdjmRecordBridgeInitStep, prevInitstep, EVdjmRecordBridgeInitStep, currentInitStep);
 
+DECLARE_DELEGATE_RetVal(VdjmResult,FVdjmRecordStartEvent);
+
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 						UVdjmRecordEncoderUnit 		
@@ -909,6 +911,9 @@ public:
 		OnRecordTickInner.Broadcast(mRecordResource, deltaTime);
 	}
 	
+	void SetSuccessEncoderImpl();
+	void SetSuccessEncoderStart();
+	
 	/*	↓↓↓[			Delegators			]↓↓↓	*/
 	UPROPERTY(BlueprintAssignable,EditAnywhere)
 	FVdjmRecordEvent OnRecordPrevStart;
@@ -931,6 +936,8 @@ public:
 	
 	UPROPERTY(BlueprintAssignable,EditAnywhere)
 	FVdjmRecordBridgeActorChainInitEvent OnChainInitEvent;
+	
+	FVdjmRecordStartEvent OnRecordStartRetValEvent;
 	
 	FSceneViewport* mTargetViewport;
 	TWeakObjectPtr<APlayerController> mTargetPlayerController;
