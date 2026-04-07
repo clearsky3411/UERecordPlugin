@@ -3,8 +3,6 @@
 
 #include "VdjmRecordTypes.h"
 
-#include <gsl/pointers>
-
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 	↓			LOG Categories for Vdjm Recorder				↓

@@ -951,8 +951,12 @@ void AVdjmRecordBridgeActor::StartRecording()
 				{
 					UE_LOG(LogTemp, Warning, TEXT("StartRecording - OnRecordStartRetValEvent returned failure result. Result=%d"), static_cast<int32>(result));
 					bIsRecording = false;
+					/*
+					 * 구조 변경해서 window 쪽도 바꿔줘야함. 지금 오로지 안드로이드를 위한거임.
+					 */
 					return;
 				}
+				OnBindSlateBackBufferReadyToPresentEvent();
 			}
 		}
 		else
@@ -1043,17 +1047,6 @@ void AVdjmRecordBridgeActor::OnBackBufferReady_RenderThread(SWindow& SlateWindow
 	{
 		UE_LOG(LogTemp, Verbose, TEXT("OnBackBufferReady_RenderThread - Frame interval not reached"));
 		return;
-	}
-	
-	if (mRecordedFrameCount == 0)
-	{
-		FVdjmEncoderStatus::DbcGameThreadTask([weakThis = TWeakObjectPtr<AVdjmRecordBridgeActor>(this)]()
-		{
-			if (weakThis.IsValid())
-			{
-				weakThis->BroadcastRecordStart();
-			}
-		});
 	}
 	
 	++mRecordedFrameCount;
