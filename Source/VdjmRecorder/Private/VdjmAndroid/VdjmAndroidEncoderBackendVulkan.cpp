@@ -163,9 +163,13 @@ bool VdjmVkUtil::SubmitAndPresentFrame(const FVdjmVkRecoderHandles& vkHandles,
 	return true;
 }
 
-bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(VkCommandBuffer commandBuffer,
-	const FVdjmVkCodecInputSurfaceState& surfaceState, FVdjmVkIntermediateState& intermediateState, VkImage sourceImage,
-	uint32 sourceWidth, uint32 sourceHeight)
+bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(
+	VkCommandBuffer commandBuffer,
+	FVdjmVkCodecInputSurfaceState& surfaceState,
+	FVdjmVkIntermediateState& intermediateState,
+	VkImage sourceImage,
+	uint32 sourceWidth,
+	uint32 sourceHeight)
 {
 	if (commandBuffer == VK_NULL_HANDLE || sourceImage == VK_NULL_HANDLE || sourceWidth == 0 || sourceHeight == 0)
 	{
@@ -174,7 +178,7 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(VkCommandBuffer comma
 		return false;
 	}
 
-	if (not surfaceState.IsValid() || not intermediateState.IsValid())
+	if (!surfaceState.IsValid() || !intermediateState.IsValid())
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("VdjmRecordBackBufferToIntermediateToSwapchain - invalid surface/intermediate state."));
@@ -202,42 +206,13 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(VkCommandBuffer comma
 		return false;
 	}
 
-	auto GetStageMaskForLayout = [](VkImageLayout layout) -> VkPipelineStageFlags
-	{
-		switch (layout)
-		{
-		case VK_IMAGE_LAYOUT_UNDEFINED:
-			return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-		case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-		case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-			return VK_PIPELINE_STAGE_TRANSFER_BIT;
-		case VK_IMAGE_LAYOUT_PRESENT_SRC_KHR:
-			return VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-		default:
-			return VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
-		}
-	};
-
-	auto GetAccessMaskForLayout = [](VkImageLayout layout) -> VkAccessFlags
-	{
-		switch (layout)
-		{
-		case VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:
-			return VK_ACCESS_TRANSFER_READ_BIT;
-		case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:
-			return VK_ACCESS_TRANSFER_WRITE_BIT;
-		default:
-			return 0;
-		}
-	};
-
-	
 	const VkImageLayout sourceOriginalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	const VkImageLayout intermediateOriginalLayout = intermediateState.GetCurrentLayout();
-	const VkImageLayout swapchainOriginalLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	const VkImageLayout swapchainOriginalLayout = surfaceState.GetCurrentSwapchainImageLayout();
 
 	VdjmVkUtil::AddImageBarrier(commandBuffer, sourceImage, sourceOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	VdjmVkUtil::AddImageBarrier(commandBuffer, intermediateImage, intermediateOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	VdjmVkUtil::AddImageBarrier(commandBuffer, swapchainImage, swapchainOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
 	VkImageBlit sourceToIntermediate{};
 	sourceToIntermediate.srcSubresource.aspectMask = VdjmVkUtil::GColorAspect;
@@ -264,8 +239,7 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(VkCommandBuffer comma
 		&sourceToIntermediate,
 		VK_FILTER_NEAREST);
 
-	VdjmVkUtil::AddImageBarrier(commandBuffer,intermediateImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-	VdjmVkUtil::AddImageBarrier(commandBuffer,swapchainImage, swapchainOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	VdjmVkUtil::AddImageBarrier(commandBuffer, intermediateImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
 	VkImageCopy intermediateToSwapchain{};
 	intermediateToSwapchain.srcSubresource.aspectMask = VdjmVkUtil::GColorAspect;
@@ -293,10 +267,12 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(VkCommandBuffer comma
 		1,
 		&intermediateToSwapchain);
 
-	VdjmVkUtil::AddImageBarrier(commandBuffer,swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-	VdjmVkUtil::AddImageBarrier(commandBuffer,sourceImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, sourceOriginalLayout);
+	VdjmVkUtil::AddImageBarrier(commandBuffer, swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	VdjmVkUtil::AddImageBarrier(commandBuffer, sourceImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, sourceOriginalLayout);
 
 	intermediateState.SetCurrentLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	surfaceState.SetCurrentSwapchainImageLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
 	return true;
 }
 
@@ -962,16 +938,17 @@ bool FVdjmVkCodecInputSurfaceState::CreateSurface(const FVdjmVkRecoderHandles& v
 		TEXT("FVdjmVkCodecInputSurfaceState::CreateSurface"));
 }
 
-bool FVdjmVkCodecInputSurfaceState::CreateSwapchain(const FVdjmVkRecoderHandles& vkHandles,
+bool FVdjmVkCodecInputSurfaceState::CreateSwapchain(
+	const FVdjmVkRecoderHandles& vkHandles,
 	const FVdjmAndroidEncoderConfigure& config)
 {
-	if (not vkHandles.IsValid() || mSurface == VK_NULL_HANDLE)
+	if (!vkHandles.IsValid() || mSurface == VK_NULL_HANDLE)
 	{
 		return false;
 	}
 
 	VkBool32 bSurfaceSupported = VK_FALSE;
-	if (not VdjmVkUtil::CheckVkResult(
+	if (!VdjmVkUtil::CheckVkResult(
 		vkGetPhysicalDeviceSurfaceSupportKHR(
 			vkHandles.GetVkPhysicalDevice(),
 			vkHandles.GetGraphicsQueueFamilyIndex(),
@@ -990,7 +967,7 @@ bool FVdjmVkCodecInputSurfaceState::CreateSwapchain(const FVdjmVkRecoderHandles&
 	}
 
 	VkSurfaceCapabilitiesKHR caps{};
-	if (not VdjmVkUtil::CheckVkResult(
+	if (!VdjmVkUtil::CheckVkResult(
 		vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vkHandles.GetVkPhysicalDevice(), mSurface, &caps),
 		TEXT("FVdjmVkCodecInputSurfaceState::CreateSwapchain.SurfaceCaps")))
 	{
@@ -998,7 +975,7 @@ bool FVdjmVkCodecInputSurfaceState::CreateSwapchain(const FVdjmVkRecoderHandles&
 	}
 
 	uint32 formatCount = 0;
-	if (not VdjmVkUtil::CheckVkResult(
+	if (!VdjmVkUtil::CheckVkResult(
 		vkGetPhysicalDeviceSurfaceFormatsKHR(vkHandles.GetVkPhysicalDevice(), mSurface, &formatCount, nullptr),
 		TEXT("FVdjmVkCodecInputSurfaceState::CreateSwapchain.SurfaceFormats.Count")))
 	{
@@ -1014,7 +991,8 @@ bool FVdjmVkCodecInputSurfaceState::CreateSwapchain(const FVdjmVkRecoderHandles&
 
 	TArray<VkSurfaceFormatKHR> surfaceFormats;
 	surfaceFormats.SetNum(formatCount);
-	if (not VdjmVkUtil::CheckVkResult(
+
+	if (!VdjmVkUtil::CheckVkResult(
 		vkGetPhysicalDeviceSurfaceFormatsKHR(vkHandles.GetVkPhysicalDevice(), mSurface, &formatCount, surfaceFormats.GetData()),
 		TEXT("FVdjmVkCodecInputSurfaceState::CreateSwapchain.SurfaceFormats")))
 	{
@@ -1069,7 +1047,7 @@ bool FVdjmVkCodecInputSurfaceState::CreateSwapchain(const FVdjmVkRecoderHandles&
 	swapchainInfo.clipped = VK_TRUE;
 	swapchainInfo.oldSwapchain = VK_NULL_HANDLE;
 
-	if (not VdjmVkUtil::CheckVkResult(
+	if (!VdjmVkUtil::CheckVkResult(
 		vkCreateSwapchainKHR(vkHandles.GetVkDevice(), &swapchainInfo, nullptr, &mSwapchain),
 		TEXT("FVdjmVkCodecInputSurfaceState::CreateSwapchain.Create")))
 	{
@@ -1077,7 +1055,7 @@ bool FVdjmVkCodecInputSurfaceState::CreateSwapchain(const FVdjmVkRecoderHandles&
 	}
 
 	uint32 imageCount = 0;
-	if (not VdjmVkUtil::CheckVkResult(
+	if (!VdjmVkUtil::CheckVkResult(
 		vkGetSwapchainImagesKHR(vkHandles.GetVkDevice(), mSwapchain, &imageCount, nullptr),
 		TEXT("FVdjmVkCodecInputSurfaceState::CreateSwapchain.GetImages.Count")))
 	{
@@ -1092,7 +1070,7 @@ bool FVdjmVkCodecInputSurfaceState::CreateSwapchain(const FVdjmVkRecoderHandles&
 	}
 
 	mSwapchainImages.SetNum(imageCount);
-	if (not VdjmVkUtil::CheckVkResult(
+	if (!VdjmVkUtil::CheckVkResult(
 		vkGetSwapchainImagesKHR(vkHandles.GetVkDevice(), mSwapchain, &imageCount, mSwapchainImages.GetData()),
 		TEXT("FVdjmVkCodecInputSurfaceState::CreateSwapchain.GetImages")))
 	{
@@ -1101,6 +1079,7 @@ bool FVdjmVkCodecInputSurfaceState::CreateSwapchain(const FVdjmVkRecoderHandles&
 
 	mSwapchainImageViews.Reset();
 	mSwapchainImageViews.Reserve(imageCount);
+	mSwapchainImageLayouts.Init(VK_IMAGE_LAYOUT_UNDEFINED, imageCount);
 
 	for (VkImage image : mSwapchainImages)
 	{
@@ -1116,7 +1095,7 @@ bool FVdjmVkCodecInputSurfaceState::CreateSwapchain(const FVdjmVkRecoderHandles&
 		imageViewInfo.subresourceRange.layerCount = 1;
 
 		VkImageView imageView = VK_NULL_HANDLE;
-		if (not VdjmVkUtil::CheckVkResult(
+		if (!VdjmVkUtil::CheckVkResult(
 			vkCreateImageView(vkHandles.GetVkDevice(), &imageViewInfo, nullptr, &imageView),
 			TEXT("FVdjmVkCodecInputSurfaceState::CreateSwapchain.CreateImageView")))
 		{
@@ -1243,6 +1222,7 @@ void FVdjmVkCodecInputSurfaceState::ReleaseSwapchain(VkDevice vkDevice)
 	{
 		mSwapchainImageViews.Reset();
 		mSwapchainImages.Reset();
+		mSwapchainImageLayouts.Reset();
 		mSwapchain = VK_NULL_HANDLE;
 		return;
 	}
@@ -1257,6 +1237,7 @@ void FVdjmVkCodecInputSurfaceState::ReleaseSwapchain(VkDevice vkDevice)
 
 	mSwapchainImageViews.Reset();
 	mSwapchainImages.Reset();
+	mSwapchainImageLayouts.Reset();
 
 	if (mSwapchain != VK_NULL_HANDLE)
 	{
@@ -1647,7 +1628,15 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - current frame resources are invalid."));
 		return false;
 	}
-
+	
+	if (!VdjmVkUtil::CheckVkResult(	vkQueueWaitIdle(mVkHandles.GetGraphicsQueue()),TEXT("FVdjmAndroidEncoderBackendVulkan::Running.PreFrameQueueWaitIdle")))
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning,
+			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - failed to wait for graphics queue idle before acquiring frame. timestamp=%f"),
+			timeStampSec);
+		return false;
+	}
+	
 	if (not VdjmVkUtil::WaitAndAcquireFrame(mVkHandles, mCodecInputSurfaceState, *frameResources))
 	{
 		UE_LOG(LogVdjmRecorderCore, Warning,

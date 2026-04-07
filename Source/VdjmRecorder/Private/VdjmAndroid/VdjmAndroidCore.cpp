@@ -241,7 +241,17 @@ VdjmResult UVdjmRecordAndroidUnit::RecordStartCheck()
 		mAndroidEncoderImpl->TerminateEncoder();
 		return VdjmResults::InvalidArg;
 	}
-	return mAndroidEncoderImpl->StartEncoder();
+	const VdjmResult StartResult = mAndroidEncoderImpl->StartEncoder();
+	if (StartResult != VdjmResults::Ok)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("UVdjmRecordAndroidUnit::RecordStartCheck - Failed to start Android Encoder. Result=%d"),
+			(int32)StartResult);
+		mAndroidEncoderImpl->TerminateEncoder();
+		return StartResult;
+	}
+
+	return VdjmResults::Ok;
 }
 
 void UVdjmRecordAndroidUnit::SubmitFrameToSurfacer(FRDGBuilder& graphBuilder, const FRDGTextureRef& srcTexture,

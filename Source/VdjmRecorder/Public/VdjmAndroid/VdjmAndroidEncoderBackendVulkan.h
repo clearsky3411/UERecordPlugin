@@ -111,7 +111,7 @@ namespace VdjmVkUtil
 	
 	static bool RecordBackBufferToIntermediateToSwapchain(
 	VkCommandBuffer commandBuffer,
-	const FVdjmVkCodecInputSurfaceState& surfaceState,
+	FVdjmVkCodecInputSurfaceState& surfaceState,
 	FVdjmVkIntermediateState& intermediateState,
 	VkImage sourceImage,
 	uint32 sourceWidth,
@@ -237,7 +237,7 @@ public:
 		const FVdjmAndroidEncoderConfigure& config);
 
 	void ReleaseSurfaceState(const FVdjmVkRecoderHandles& vkHandles);
-	
+
 	void Clear()
 	{
 		mSurface = VK_NULL_HANDLE;
@@ -250,6 +250,7 @@ public:
 		mCurrentSwapchainImageIndex = UINT32_MAX;
 		mSwapchainImages.Reset();
 		mSwapchainImageViews.Reset();
+		mSwapchainImageLayouts.Reset();
 		mFrames.Reset();
 	}
 
@@ -264,6 +265,7 @@ public:
 			mSwapchainImages.Num() > 0 &&
 			mFrames.Num() > 0;
 	}
+
 	bool NeedRecreate(uint32 width, uint32 height) const
 	{
 		return
@@ -271,6 +273,7 @@ public:
 			mExtent.width != width ||
 			mExtent.height != height;
 	}
+
 	FVdjmVkFrameResources* GetCurrentFrameResources()
 	{
 		return mFrames.IsValidIndex((int32)mCurrentFrameIndex) ? &mFrames[(int32)mCurrentFrameIndex] : nullptr;
@@ -280,6 +283,7 @@ public:
 	{
 		return mFrames.IsValidIndex((int32)mCurrentFrameIndex) ? &mFrames[(int32)mCurrentFrameIndex] : nullptr;
 	}
+
 	void AdvanceFrame()
 	{
 		if (mFrames.Num() > 0)
@@ -287,15 +291,47 @@ public:
 			mCurrentFrameIndex = (mCurrentFrameIndex + 1) % (uint32)mFrames.Num();
 		}
 	}
+
 	VkSurfaceKHR GetSurface() const { return mSurface; }
 	VkSwapchainKHR GetSwapchain() const { return mSwapchain; }
 	const VkSurfaceFormatKHR& GetSurfaceFormat() const { return mSurfaceFormat; }
 	VkExtent2D GetExtent() const { return mExtent; }
 	const TArray<VkImage>& GetSwapchainImages() const { return mSwapchainImages; }
 	const TArray<VkImageView>& GetSwapchainImageViews() const { return mSwapchainImageViews; }
+
 	uint32 GetCurrentFrameIndex() const { return mCurrentFrameIndex; }
 	uint32 GetCurrentSwapchainImageIndex() const { return mCurrentSwapchainImageIndex; }
-	void SetCurrentSwapchainImageIndex(uint32 imageIndex) { mCurrentSwapchainImageIndex = imageIndex; }
+
+	void SetCurrentSwapchainImageIndex(uint32 imageIndex)
+	{
+		mCurrentSwapchainImageIndex = imageIndex;
+	}
+
+	VkImageLayout GetSwapchainImageLayout(uint32 imageIndex) const
+	{
+		return mSwapchainImageLayouts.IsValidIndex((int32)imageIndex)
+			? mSwapchainImageLayouts[(int32)imageIndex]
+			: VK_IMAGE_LAYOUT_UNDEFINED;
+	}
+
+	void SetSwapchainImageLayout(uint32 imageIndex, VkImageLayout newLayout)
+	{
+		if (mSwapchainImageLayouts.IsValidIndex((int32)imageIndex))
+		{
+			mSwapchainImageLayouts[(int32)imageIndex] = newLayout;
+		}
+	}
+
+	VkImageLayout GetCurrentSwapchainImageLayout() const
+	{
+		return GetSwapchainImageLayout(mCurrentSwapchainImageIndex);
+	}
+
+	void SetCurrentSwapchainImageLayout(VkImageLayout newLayout)
+	{
+		SetSwapchainImageLayout(mCurrentSwapchainImageIndex, newLayout);
+	}
+
 private:
 	bool CreateSurface(
 		const FVdjmVkRecoderHandles& vkHandles,
@@ -310,7 +346,7 @@ private:
 	void ReleasePerFrameResources(VkDevice vkDevice);
 	void ReleaseSwapchain(VkDevice vkDevice);
 	void ReleaseSurface(VkInstance vkInstance);
-	
+
 	VkSurfaceKHR mSurface = VK_NULL_HANDLE;
 	VkSwapchainKHR mSwapchain = VK_NULL_HANDLE;
 	VkSurfaceFormatKHR mSurfaceFormat = {};
@@ -322,8 +358,8 @@ private:
 
 	TArray<VkImage> mSwapchainImages;
 	TArray<VkImageView> mSwapchainImageViews;
+	TArray<VkImageLayout> mSwapchainImageLayouts;
 	TArray<FVdjmVkFrameResources> mFrames;
-
 };
 
 /**
