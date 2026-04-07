@@ -547,8 +547,7 @@ void UVdjmRecordResource::ReleaseResources()
 	UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordResource::ReleaseResources - Resources released."));
 }
 
-FTextureRHIRef UVdjmRecordResource::CreateTextureForNV12(FIntPoint resolution, EPixelFormat pixelformat,
-	ETextureCreateFlags createFlags)
+FTextureRHIRef UVdjmRecordResource::CreateTextureForNV12(FIntPoint resolution, EPixelFormat pixelformat,ETextureCreateFlags createFlags)
 {
 	OriginResolution = resolution;
 	FIntPoint NV12Resolution;
@@ -941,8 +940,6 @@ void AVdjmRecordBridgeActor::StartRecording()
             mNextFrameTime = Now; // 첫 프레임은 즉시 기록
             bIsRecording = true;
 			mRecordedFrameCount = 0;
-			
-			BroadcastRecordPrevStart();
 	
 			if (OnRecordStartRetValEvent.IsBound())
 			{

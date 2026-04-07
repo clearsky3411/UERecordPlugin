@@ -224,7 +224,7 @@ bool UVdjmRecordAndroidUnit::DbcRecordUnitStatus() const
 
 VdjmResult UVdjmRecordAndroidUnit::RecordStartCheck()
 {
-	if (not LinkedRecordResource.IsValid() && not mAndroidEncoderImpl.IsValid())
+	if (not LinkedRecordResource.IsValid() || not mAndroidEncoderImpl.IsValid())
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidUnit::RecordStartCheck - LinkedRecordResource is not valid."));
 		return VdjmResults::Fail;

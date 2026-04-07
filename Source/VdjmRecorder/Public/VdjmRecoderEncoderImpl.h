@@ -121,7 +121,9 @@ public:
 	virtual ~FVdjmVideoEncoderBase() = default;
 	
 	virtual bool InitializeEncoder(const FString& outputFilePath,int32 width,int32 height,int32 bitrate,int32 framerate) = 0;
+	
 	virtual VdjmResult StartEncoder() = 0;
+	
 	virtual void RunningEncodeFrame(void* nv12Data,int32 bufferSize,double timeStampMs){};
 	
 	virtual bool SubmitSurfaceFrame(FRHICommandList& graphBuilder, const FTextureRHIRef& srcTexture, double timeStampSec) { return false; }

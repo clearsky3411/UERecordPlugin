@@ -1657,12 +1657,12 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 	}
 
 	if (not VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(
-		frameResources->CommandBuffer,
-		mCodecInputSurfaceState,
-		mIntermediateState,
-		sourceImage,
-		(uint32)sourceSize.X,
-		(uint32)sourceSize.Y))
+			frameResources->CommandBuffer,
+			mCodecInputSurfaceState,
+			mIntermediateState,
+			sourceImage,
+			(uint32)sourceSize.X,
+			(uint32)sourceSize.Y))
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - failed to record copy commands. timestamp=%f"),
