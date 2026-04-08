@@ -1572,8 +1572,6 @@ bool FVdjmAndroidEncoderBackendVulkan::IsRunnable() const
 
 bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,double timeStampSec)
 {
-	(void)RHICmdList;
-	
 	if (!IsRunnable() || !srcTexture.IsValid())
 	{
 		UE_LOG(LogVdjmRecorderCore, Warning,
@@ -1638,6 +1636,10 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - current frame resources are invalid."));
 		return false;
 	}
+
+	// UE RHI thread와 동일 Queue를 공유하므로, 플러그인 Vulkan submit 전후로 RHI thread를 flush하여
+	// cross-thread queue submit 경합을 줄인다.
+	RHICmdList.ImmediateFlush(EImmediateFlushType::FlushRHIThread);
 	
 	if (not VdjmVkUtil::WaitAndAcquireFrame(mVkHandles, mCodecInputSurfaceState, *frameResources))
 	{
@@ -1668,6 +1670,8 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 			timeStampSec);
 		return false;
 	}
+
+	RHICmdList.ImmediateFlush(EImmediateFlushType::FlushRHIThread);
 
 	return true;
 }
