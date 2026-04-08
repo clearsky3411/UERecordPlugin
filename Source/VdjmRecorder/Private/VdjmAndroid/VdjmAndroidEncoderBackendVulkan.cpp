@@ -206,6 +206,8 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(
 		return false;
 	}
 
+	// OnBackBufferReadyToPresent()에서 전달되는 백버퍼를 입력으로 사용한다.
+	// 본 경로는 백버퍼를 TRANSFER_SRC로 잠시 전환 후 다시 PRESENT로 되돌리는 것을 전제로 한다.
 	const VkImageLayout sourceOriginalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	const VkImageLayout intermediateOriginalLayout = intermediateState.GetCurrentLayout();
 	const VkImageLayout swapchainOriginalLayout = surfaceState.GetCurrentSwapchainImageLayout();
@@ -1629,14 +1631,15 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 		return false;
 	}
 	
-	if (!VdjmVkUtil::CheckVkResult(	vkQueueWaitIdle(mVkHandles.GetGraphicsQueue()),TEXT("FVdjmAndroidEncoderBackendVulkan::Running.PreFrameQueueWaitIdle")))
+	if (!VdjmVkUtil::CheckVkResult(vkQueueWaitIdle(mVkHandles.GetGraphicsQueue()),
+		TEXT("FVdjmAndroidEncoderBackendVulkan::Running.PreFrameQueueWaitIdle")))
 	{
 		UE_LOG(LogVdjmRecorderCore, Warning,
 			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - failed to wait for graphics queue idle before acquiring frame. timestamp=%f"),
 			timeStampSec);
 		return false;
 	}
-	
+
 	if (not VdjmVkUtil::WaitAndAcquireFrame(mVkHandles, mCodecInputSurfaceState, *frameResources))
 	{
 		UE_LOG(LogVdjmRecorderCore, Warning,
