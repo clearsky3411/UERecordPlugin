@@ -113,10 +113,19 @@ bool VdjmVkUtil::SubmitAndPresentFrame(const FVdjmVkRecoderHandles& vkHandles,
 	submitInfo.signalSemaphoreCount = 1;
 	submitInfo.pSignalSemaphores = &frameResources.RenderCompleteSemaphore;
 
-	if (not VdjmVkUtil::CheckVkResult(
-		vkQueueSubmit(vkHandles.GetGraphicsQueue(), 1, &submitInfo, frameResources.SubmitFence),
-		TEXT("VdjmSubmitAndPresentFrame.vkQueueSubmit")))
+	const VkResult submitResult = vkQueueSubmit(
+		vkHandles.GetGraphicsQueue(),
+		1,
+		&submitInfo,
+		frameResources.SubmitFence);
+	if (submitResult != VK_SUCCESS)
 	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("VdjmSubmitAndPresentFrame - vkQueueSubmit failed. VkResult=%d (%s), frameIndex=%u, swapchainImageIndex=%u"),
+			(int32)submitResult,
+			*VdjmVkUtil::ConvertVulkanResultString(submitResult),
+			surfaceState.GetCurrentFrameIndex(),
+			surfaceState.GetCurrentSwapchainImageIndex());
 		return false;
 	}
 
@@ -1631,15 +1640,6 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 		return false;
 	}
 	
-	if (!VdjmVkUtil::CheckVkResult(vkQueueWaitIdle(mVkHandles.GetGraphicsQueue()),
-		TEXT("FVdjmAndroidEncoderBackendVulkan::Running.PreFrameQueueWaitIdle")))
-	{
-		UE_LOG(LogVdjmRecorderCore, Warning,
-			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - failed to wait for graphics queue idle before acquiring frame. timestamp=%f"),
-			timeStampSec);
-		return false;
-	}
-
 	if (not VdjmVkUtil::WaitAndAcquireFrame(mVkHandles, mCodecInputSurfaceState, *frameResources))
 	{
 		UE_LOG(LogVdjmRecorderCore, Warning,
