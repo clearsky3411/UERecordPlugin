@@ -1639,7 +1639,7 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 
 	// UE RHI thread와 동일 Queue를 공유하므로, 플러그인 Vulkan submit 전후로 RHI thread를 flush하여
 	// cross-thread queue submit 경합을 줄인다.
-	RHICmdList.ImmediateFlush(EImmediateFlushType::FlushRHIThread);
+	FRHICommandListExecutor::GetImmediateCommandList().ImmediateFlush(EImmediateFlushType::FlushRHIThread);
 	
 	if (not VdjmVkUtil::WaitAndAcquireFrame(mVkHandles, mCodecInputSurfaceState, *frameResources))
 	{
@@ -1671,7 +1671,7 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 		return false;
 	}
 
-	RHICmdList.ImmediateFlush(EImmediateFlushType::FlushRHIThread);
+	FRHICommandListExecutor::GetImmediateCommandList().ImmediateFlush(EImmediateFlushType::FlushRHIThread);
 
 	return true;
 }
