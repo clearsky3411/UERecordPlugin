@@ -1010,7 +1010,7 @@ bool FVdjmVkCodecInputSurfaceState::CreateSwapchain(
 	}
 
 	mSurfaceFormat = VdjmVkUtil::ChooseSurfaceFormat(surfaceFormats);
-	mExtent = VdjmVkUtil::ChooseExtent(caps, (uint32)config.VideoWidth, (uint32)config.VideoHeight);
+	mExtent = VdjmVkUtil::ChooseExtent(caps, (uint32)config.VideoConfig.VideoWidth, (uint32)config.VideoConfig.VideoHeight);
 	mPresentMode = VK_PRESENT_MODE_FIFO_KHR;
 
 	uint32 desiredImageCount = caps.minImageCount + 1;

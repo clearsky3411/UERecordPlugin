@@ -30,13 +30,13 @@ namespace
 bool FVdjmAndroidEncoderConfigure::IsValidateEncoderArguments() const
 {
 		// 1. 출력 경로
-	if (OutputFilePath.IsEmpty())
+	if (VideoConfig.OutputFilePath.IsEmpty())
 	{
 		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - OutputFilePath is empty."));
 		return false;
 	}
 
-	const FString NormalizedPath = FPaths::ConvertRelativePathToFull(OutputFilePath);
+	const FString NormalizedPath = FPaths::ConvertRelativePathToFull(VideoConfig.OutputFilePath);
 	const FString DirectoryPath = FPaths::GetPath(NormalizedPath);
 	const FString Extension = FPaths::GetExtension(NormalizedPath, false);
 
@@ -60,93 +60,93 @@ bool FVdjmAndroidEncoderConfigure::IsValidateEncoderArguments() const
 
 	// 2. MIME
 	// 오늘 목표 기준으로 H.264 AVC만 허용하는 편이 가장 안전함
-	if (MimeType.IsEmpty() || !MimeType.Equals(TEXT("video/avc"), ESearchCase::IgnoreCase))
+	if (VideoConfig.MimeType.IsEmpty() || !VideoConfig.MimeType.Equals(TEXT("video/avc"), ESearchCase::IgnoreCase))
 	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Unsupported MimeType: %s (Only video/avc is supported for now)"), *MimeType);
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Unsupported MimeType: %s (Only video/avc is supported for now)"), *VideoConfig.MimeType);
 		return false;
 	}
 
 	// 3. 해상도
-	if (VideoWidth <= 0 || VideoHeight <= 0)
+	if (VideoConfig.VideoWidth <= 0 || VideoConfig.VideoHeight <= 0)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Invalid resolution. Width=%d Height=%d"), VideoWidth, VideoHeight);
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Invalid resolution. Width=%d Height=%d"), VideoConfig.VideoWidth, VideoConfig.VideoHeight);
 		return false;
 	}
 
 	// H.264 / Surface 인코더 호환성 관점에서 짝수 강제 권장
-	if ((VideoWidth % 2) != 0 || (VideoHeight % 2) != 0)
+	if ((VideoConfig.VideoWidth % 2) != 0 || (VideoConfig.VideoHeight % 2) != 0)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Width and Height must be even. Width=%d Height=%d"), VideoWidth, VideoHeight);
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Width and Height must be even. Width=%d Height=%d"), VideoConfig.VideoWidth, VideoConfig.VideoHeight);
 		return false;
 	}
 
 	// 너무 작은 값 방지
-	if (VideoWidth < 16 || VideoHeight < 16)
+	if (VideoConfig.VideoWidth < 16 || VideoConfig.VideoHeight < 16)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Resolution is too small. Width=%d Height=%d"), VideoWidth, VideoHeight);
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Resolution is too small. Width=%d Height=%d"), VideoConfig.VideoWidth, VideoConfig.VideoHeight);
 		return false;
 	}
 
 	// 너무 큰 값 방지
 	// 오늘 안에 끝내는 목적이면 보수적으로 8K 정도 상한선
-	if (VideoWidth > 7680 || VideoHeight > 4320)
+	if (VideoConfig.VideoWidth > 7680 || VideoConfig.VideoHeight > 4320)
 	{
 		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Resolution is too large. Width=%d Height=%d"), VideoWidth, VideoHeight);
 		return false;
 	}
 
 	// 4. 비트레이트
-	if (VideoBitrate <= 0)
+	if (VideoConfig.VideoBitrate <= 0)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Bitrate must be > 0. Bitrate=%d"), VideoBitrate);
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Bitrate must be > 0. Bitrate=%d"), VideoConfig.VideoBitrate);
 		return false;
 	}
 
 	// 너무 비정상적인 값 방지
-	if (VideoBitrate < 100000)
+	if (VideoConfig.VideoBitrate < 100000)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Bitrate looks too low. Bitrate=%d"), VideoBitrate);
+		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Bitrate looks too low. Bitrate=%d"), VideoConfig.VideoBitrate);
 	}
 
-	if (VideoBitrate > 100000000)
+	if (VideoConfig.VideoBitrate > 100000000)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Bitrate is too high. Bitrate=%d"), VideoBitrate);
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Bitrate is too high. Bitrate=%d"), VideoConfig.VideoBitrate);
 		return false;
 	}
 
 	// 5. FPS
-	if (VideoFPS <= 0)
+	if (VideoConfig.VideoFPS <= 0)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - FrameRate must be > 0. FrameRate=%d"), VideoFPS);
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - FrameRate must be > 0. FrameRate=%d"), VideoConfig.VideoFPS);
 		return false;
 	}
 
-	if (VideoFPS > 120)
+	if (VideoConfig.VideoFPS > 120)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - FrameRate is too high. FrameRate=%d"), VideoFPS);
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - FrameRate is too high. FrameRate=%d"), VideoConfig.VideoFPS);
 		return false;
 	}
 
 	// 6. I-Frame interval
-	if (VideoIntervalSec < 0)
+	if (VideoConfig.VideoIntervalSec < 0)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - VideoIntervalSec must be >= 0. VideoIntervalSec=%d"), VideoIntervalSec);
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - VideoIntervalSec must be >= 0. VideoIntervalSec=%d"), VideoConfig.VideoIntervalSec);
 		return false;
 	}
 
 	// 0은 허용할 수는 있지만 보통 1이 더 무난함
-	if (VideoIntervalSec == 0)
+	if (VideoConfig.VideoIntervalSec == 0)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - VideoIntervalSec is 0. This may create too many keyframes depending on codec behavior."));
 	}
 
-	if (VideoIntervalSec > 10)
+	if (VideoConfig.VideoIntervalSec > 10)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - VideoIntervalSec is quite high. This may create very long GOPs depending on codec behavior."));
 		return false;
 	}
 	
-	if (GraphicBackend == EVdjmAndroidGraphicBackend::EUnknown)
+	if (VideoConfig.GraphicBackend == EVdjmAndroidGraphicBackend::EUnknown)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - GraphicBackend is unknown. Make sure to set it correctly for optimal performance."));
 		
@@ -211,20 +211,13 @@ bool FVdjmAndroidRecordSession::Start()
 		return false;
 	}
 	UE_LOG(LogTemp, Warning,
-	TEXT("FVdjmAndroidRecordSession::Start - mConfig before validate: Path=%s Mime=%s W=%d H=%d Bitrate=%d FPS=%d Interval=%d GraphicBackend=%d"),
-	*mConfig.OutputFilePath,
-	*mConfig.MimeType,
-	mConfig.VideoWidth,
-	mConfig.VideoHeight,
-	mConfig.VideoBitrate,
-	mConfig.VideoFPS,
-	mConfig.VideoIntervalSec,
-	(int32)mConfig.GraphicBackend);
+	TEXT("FVdjmAndroidRecordSession::Start - mConfig before validate: %s"),
+	*mConfig.ToString());
 	
-	mOutputFd = open(TCHAR_TO_UTF8(*mConfig.OutputFilePath), O_RDWR | O_CREAT | O_TRUNC, 0644);
+	mOutputFd = open(TCHAR_TO_UTF8(*mConfig.VideoConfig.OutputFilePath), O_RDWR | O_CREAT | O_TRUNC, 0644);
 	if (mOutputFd < 0)
 	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::Start - Failed to open output file: %s"), *mConfig.OutputFilePath);
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::Start - Failed to open output file: %s"), *mConfig.VideoConfig.OutputFilePath);
 		return false;
 	}
 	mCodec = AMediaCodec_createEncoderByType(VdjmMimeAvc);
@@ -242,11 +235,11 @@ bool FVdjmAndroidRecordSession::Start()
 		return false;
 	}
 	
-	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, TCHAR_TO_UTF8(*mConfig.MimeType));
-	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_WIDTH, mConfig.VideoWidth);
-	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_HEIGHT, mConfig.VideoHeight);
-	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_BIT_RATE, mConfig.VideoBitrate);
-	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_FRAME_RATE, mConfig.VideoFPS);
+	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, TCHAR_TO_UTF8(*mConfig.VideoConfig.MimeType));
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_WIDTH, mConfig.VideoConfig.VideoWidth);
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_HEIGHT, mConfig.VideoConfig.VideoHeight);
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_BIT_RATE, mConfig.VideoConfig.VideoBitrate);
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_FRAME_RATE, mConfig.VideoConfig.VideoFPS);
 
 	// 0은 일부 기기/드라이버에서 과도한 IDR 요청으로 이어질 수 있어
 	// 실제 코덱 설정 시에는 최소 1초로 보정해 안정성을 우선한다.
@@ -255,7 +248,7 @@ bool FVdjmAndroidRecordSession::Start()
 	{
 		UE_LOG(LogTemp, Warning,
 			TEXT("FVdjmAndroidRecordSession::Start - VideoIntervalSec=%d, overriding to %d for codec stability."),
-			mConfig.VideoIntervalSec, SafeIFrameIntervalSec);
+			mConfig.VideoConfig.VideoIntervalSec, SafeIFrameIntervalSec);
 	}
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, SafeIFrameIntervalSec);
 	
@@ -299,8 +292,8 @@ bool FVdjmAndroidRecordSession::Start()
 	
 	if (not mGraphicBackend.IsValid())
 	{
-		UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidRecordSession::Start - Creating graphic backend for %d"), static_cast<int32>(mConfig.GraphicBackend));
-		switch (mConfig.GraphicBackend)
+		UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidRecordSession::Start - Creating graphic backend for %d"), static_cast<int32>(mConfig.VideoConfig.GraphicBackend));
+		switch (mConfig.VideoConfig.GraphicBackend)
 		{
 		case EVdjmAndroidGraphicBackend::EUnknown:
 			Terminate();
@@ -448,7 +441,7 @@ void FVdjmAndroidRecordSession::Stop()
 		mMuxerStarted = false;
 	}
 	
-	const FString FinalOutputPath = FPaths::ConvertRelativePathToFull(mConfig.OutputFilePath);
+	const FString FinalOutputPath = FPaths::ConvertRelativePathToFull(mConfig.VideoConfig.OutputFilePath);
 	const int64 OutputFileSize = IFileManager::Get().FileSize(*FinalOutputPath);
 
 	UE_LOG(LogTemp, Warning,
@@ -615,13 +608,13 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, i
 		mRecordSession.Reset();
 		mRecordSession = nullptr;
 	}
-	mConfig.OutputFilePath = outputFilePath;
-	mConfig.VideoWidth = width;
-	mConfig.VideoHeight = height;
-	mConfig.VideoBitrate = bitrate;
-	mConfig.VideoFPS = framerate;
-	mConfig.GraphicBackend =  IsVulkanRHI() ? EVdjmAndroidGraphicBackend::EVulkan : 
-	(IsOpenGLRHI() ? EVdjmAndroidGraphicBackend::EOpenGL : 
+	mConfig.VideoConfig.OutputFilePath = outputFilePath;
+	mConfig.VideoConfig.VideoWidth = width;
+	mConfig.VideoConfig.VideoHeight = height;
+	mConfig.VideoConfig.VideoBitrate = bitrate;
+	mConfig.VideoConfig.VideoFPS = framerate;
+	mConfig.VideoConfig.GraphicBackend =  IsVulkanRHI() ? EVdjmAndroidGraphicBackend::EVulkan : 
+	(IsOpenGlESRHI() ? EVdjmAndroidGraphicBackend::EOpenGL : 
 		EVdjmAndroidGraphicBackend::EUnknown);
 
 	return mConfig.IsValidateEncoderArguments();
@@ -722,7 +715,7 @@ FString FVdjmAndroidEncoderImpl::GetCurrentRHINameSafe()
 	return TEXT("Unknown");
 }
 
-bool FVdjmAndroidEncoderImpl::IsOpenGLRHI() const
+bool FVdjmAndroidEncoderImpl::IsOpenGlESRHI() const
 {
 	const FString RHIName = GetCurrentRHINameSafe();
 	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidEncoderImpl::IsOpenGLRHI - Current RHI Name: %s"), *RHIName);
