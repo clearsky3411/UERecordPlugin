@@ -229,6 +229,19 @@ VdjmResult UVdjmRecordAndroidUnit::RecordStartCheck()
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidUnit::RecordStartCheck - LinkedRecordResource is not valid."));
 		return VdjmResults::Fail;
 	}
+
+	if (LinkedRecordResource->LinkedCurrentInfo.IsValid())
+	{
+		const FString CustomFileName =
+			LinkedRecordResource->OwnerBridgeActor.IsValid()
+				? LinkedRecordResource->OwnerBridgeActor->GetCurrentFileName()
+				: FString();
+		LinkedRecordResource->FinalFilePath =
+			LinkedRecordResource->LinkedCurrentInfo->MakeFinalFilePath(CustomFileName);
+		UE_LOG(LogVdjmRecorderCore, Log,
+			TEXT("UVdjmRecordAndroidUnit::RecordStartCheck - Refreshed output path: %s"),
+			*LinkedRecordResource->FinalFilePath);
+	}
 	
 	if (not mAndroidEncoderImpl->InitializeEncoder(
 		LinkedRecordResource->FinalFilePath,
@@ -382,4 +395,3 @@ bool UVdjmAndroidRecordPipeline::DbcIsValid() const
 {
 	return Super::DbcIsValid();
 }
-
