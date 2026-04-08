@@ -113,10 +113,19 @@ bool VdjmVkUtil::SubmitAndPresentFrame(const FVdjmVkRecoderHandles& vkHandles,
 	submitInfo.signalSemaphoreCount = 1;
 	submitInfo.pSignalSemaphores = &frameResources.RenderCompleteSemaphore;
 
-	if (not VdjmVkUtil::CheckVkResult(
-		vkQueueSubmit(vkHandles.GetGraphicsQueue(), 1, &submitInfo, frameResources.SubmitFence),
-		TEXT("VdjmSubmitAndPresentFrame.vkQueueSubmit")))
+	const VkResult submitResult = vkQueueSubmit(
+		vkHandles.GetGraphicsQueue(),
+		1,
+		&submitInfo,
+		frameResources.SubmitFence);
+	if (submitResult != VK_SUCCESS)
 	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("VdjmSubmitAndPresentFrame - vkQueueSubmit failed. VkResult=%d (%s), frameIndex=%u, swapchainImageIndex=%u"),
+			(int32)submitResult,
+			*VdjmVkUtil::ConvertVulkanResultString(submitResult),
+			surfaceState.GetCurrentFrameIndex(),
+			surfaceState.GetCurrentSwapchainImageIndex());
 		return false;
 	}
 
@@ -206,6 +215,8 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(
 		return false;
 	}
 
+	// OnBackBufferReadyToPresent()에서 전달되는 백버퍼를 입력으로 사용한다.
+	// 본 경로는 백버퍼를 TRANSFER_SRC로 잠시 전환 후 다시 PRESENT로 되돌리는 것을 전제로 한다.
 	const VkImageLayout sourceOriginalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	const VkImageLayout intermediateOriginalLayout = intermediateState.GetCurrentLayout();
 	const VkImageLayout swapchainOriginalLayout = surfaceState.GetCurrentSwapchainImageLayout();
@@ -1626,14 +1637,6 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - current frame resources are invalid."));
-		return false;
-	}
-	
-	if (!VdjmVkUtil::CheckVkResult(	vkQueueWaitIdle(mVkHandles.GetGraphicsQueue()),TEXT("FVdjmAndroidEncoderBackendVulkan::Running.PreFrameQueueWaitIdle")))
-	{
-		UE_LOG(LogVdjmRecorderCore, Warning,
-			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - failed to wait for graphics queue idle before acquiring frame. timestamp=%f"),
-			timeStampSec);
 		return false;
 	}
 	
