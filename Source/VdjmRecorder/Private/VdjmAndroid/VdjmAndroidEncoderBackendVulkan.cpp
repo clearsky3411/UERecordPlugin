@@ -215,13 +215,13 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(
 		return false;
 	}
 
-	// OnBackBufferReadyToPresent()에서 전달되는 백버퍼를 입력으로 사용한다.
-	// 본 경로는 백버퍼를 TRANSFER_SRC로 잠시 전환 후 다시 PRESENT로 되돌리는 것을 전제로 한다.
-	const VkImageLayout sourceOriginalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	// UE가 관리하는 백버퍼의 실제 레이아웃은 프레임 시점/드라이버 경로에 따라 달라질 수 있다.
+	// 플러그인에서 강제로 레이아웃 전환/복원을 수행하면 UE 내부 상태와 불일치가 날 수 있으므로,
+	// 소스(backbuffer) 이미지는 전환하지 않고 GENERAL로 접근한다.
+	const VkImageLayout sourceLayoutForBlit = VK_IMAGE_LAYOUT_GENERAL;
 	const VkImageLayout intermediateOriginalLayout = intermediateState.GetCurrentLayout();
 	const VkImageLayout swapchainOriginalLayout = surfaceState.GetCurrentSwapchainImageLayout();
 
-	VdjmVkUtil::AddImageBarrier(commandBuffer, sourceImage, sourceOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	VdjmVkUtil::AddImageBarrier(commandBuffer, intermediateImage, intermediateOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 	VdjmVkUtil::AddImageBarrier(commandBuffer, swapchainImage, swapchainOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
@@ -243,7 +243,7 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(
 	vkCmdBlitImage(
 		commandBuffer,
 		sourceImage,
-		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		sourceLayoutForBlit,
 		intermediateImage,
 		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 		1,
@@ -279,7 +279,6 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(
 		&intermediateToSwapchain);
 
 	VdjmVkUtil::AddImageBarrier(commandBuffer, swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-	VdjmVkUtil::AddImageBarrier(commandBuffer, sourceImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, sourceOriginalLayout);
 
 	intermediateState.SetCurrentLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	surfaceState.SetCurrentSwapchainImageLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
