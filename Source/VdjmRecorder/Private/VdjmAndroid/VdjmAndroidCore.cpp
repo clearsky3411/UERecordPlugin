@@ -291,6 +291,7 @@ void UVdjmRecordAndroidUnit::SubmitFrameToSurfacer(FRDGBuilder& graphBuilder, co
 				return;
 			}
 	
+			
 			WeakThis->mAndroidEncoderImpl->SubmitSurfaceFrame(
 				RHICmdList,
 				sourceRHI,
