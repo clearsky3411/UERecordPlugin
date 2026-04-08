@@ -113,10 +113,19 @@ bool VdjmVkUtil::SubmitAndPresentFrame(const FVdjmVkRecoderHandles& vkHandles,
 	submitInfo.signalSemaphoreCount = 1;
 	submitInfo.pSignalSemaphores = &frameResources.RenderCompleteSemaphore;
 
-	if (not VdjmVkUtil::CheckVkResult(
-		vkQueueSubmit(vkHandles.GetGraphicsQueue(), 1, &submitInfo, frameResources.SubmitFence),
-		TEXT("VdjmSubmitAndPresentFrame.vkQueueSubmit")))
+	const VkResult submitResult = vkQueueSubmit(
+		vkHandles.GetGraphicsQueue(),
+		1,
+		&submitInfo,
+		frameResources.SubmitFence);
+	if (submitResult != VK_SUCCESS)
 	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("VdjmSubmitAndPresentFrame - vkQueueSubmit failed. VkResult=%d (%s), frameIndex=%u, swapchainImageIndex=%u"),
+			(int32)submitResult,
+			*VdjmVkUtil::ConvertVulkanResultString(submitResult),
+			surfaceState.GetCurrentFrameIndex(),
+			surfaceState.GetCurrentSwapchainImageIndex());
 		return false;
 	}
 
@@ -206,11 +215,13 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(
 		return false;
 	}
 
-	const VkImageLayout sourceOriginalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	// UE가 관리하는 백버퍼의 실제 레이아웃은 프레임 시점/드라이버 경로에 따라 달라질 수 있다.
+	// 플러그인에서 강제로 레이아웃 전환/복원을 수행하면 UE 내부 상태와 불일치가 날 수 있으므로,
+	// 소스(backbuffer) 이미지는 전환하지 않고 GENERAL로 접근한다.
+	const VkImageLayout sourceLayoutForBlit = VK_IMAGE_LAYOUT_GENERAL;
 	const VkImageLayout intermediateOriginalLayout = intermediateState.GetCurrentLayout();
 	const VkImageLayout swapchainOriginalLayout = surfaceState.GetCurrentSwapchainImageLayout();
 
-	VdjmVkUtil::AddImageBarrier(commandBuffer, sourceImage, sourceOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	VdjmVkUtil::AddImageBarrier(commandBuffer, intermediateImage, intermediateOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 	VdjmVkUtil::AddImageBarrier(commandBuffer, swapchainImage, swapchainOriginalLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
@@ -232,7 +243,7 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(
 	vkCmdBlitImage(
 		commandBuffer,
 		sourceImage,
-		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		sourceLayoutForBlit,
 		intermediateImage,
 		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
 		1,
@@ -268,7 +279,6 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(
 		&intermediateToSwapchain);
 
 	VdjmVkUtil::AddImageBarrier(commandBuffer, swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-	VdjmVkUtil::AddImageBarrier(commandBuffer, sourceImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, sourceOriginalLayout);
 
 	intermediateState.SetCurrentLayout(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	surfaceState.SetCurrentSwapchainImageLayout(VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
@@ -1626,14 +1636,6 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - current frame resources are invalid."));
-		return false;
-	}
-	
-	if (!VdjmVkUtil::CheckVkResult(	vkQueueWaitIdle(mVkHandles.GetGraphicsQueue()),TEXT("FVdjmAndroidEncoderBackendVulkan::Running.PreFrameQueueWaitIdle")))
-	{
-		UE_LOG(LogVdjmRecorderCore, Warning,
-			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - failed to wait for graphics queue idle before acquiring frame. timestamp=%f"),
-			timeStampSec);
 		return false;
 	}
 	
