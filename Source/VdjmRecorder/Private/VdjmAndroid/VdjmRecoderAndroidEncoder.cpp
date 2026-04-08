@@ -247,9 +247,19 @@ bool FVdjmAndroidRecordSession::Start()
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_HEIGHT, mConfig.VideoHeight);
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_BIT_RATE, mConfig.VideoBitrate);
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_FRAME_RATE, mConfig.VideoFPS);
-	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, mConfig.VideoIntervalSec);
+
+	// 0은 일부 기기/드라이버에서 과도한 IDR 요청으로 이어질 수 있어
+	// 실제 코덱 설정 시에는 최소 1초로 보정해 안정성을 우선한다.
+	const int32 SafeIFrameIntervalSec = FMath::Max(1, mConfig.VideoIntervalSec);
+	if (SafeIFrameIntervalSec != mConfig.VideoIntervalSec)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("FVdjmAndroidRecordSession::Start - VideoIntervalSec=%d, overriding to %d for codec stability."),
+			mConfig.VideoIntervalSec, SafeIFrameIntervalSec);
+	}
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, SafeIFrameIntervalSec);
 	
-	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_COLOR_FORMAT, 0x7F000789);
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_COLOR_FORMAT, VdjmColorFormatSurface);
 	
 	media_status_t status = AMediaCodec_configure(
 			mCodec,
