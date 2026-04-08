@@ -206,11 +206,9 @@ bool VdjmVkUtil::RecordBackBufferToIntermediateToSwapchain(
 		return false;
 	}
 
-	// UE 텍스처는 프레임 시점에 따라 PRESENT_SRC_KHR가 아닐 수 있다.
-	// (예: 렌더 타깃/포스트 프로세스 경로에서 GENERAL)
-	// 고정 PRESENT 가정은 드라이버에 따라 vkQueueSubmit 실패를 유발할 수 있어
-	// 보다 일반적인 레이아웃인 GENERAL 기준으로 전환한다.
-	const VkImageLayout sourceOriginalLayout = VK_IMAGE_LAYOUT_GENERAL;
+	// OnBackBufferReadyToPresent()에서 전달되는 백버퍼를 입력으로 사용한다.
+	// 본 경로는 백버퍼를 TRANSFER_SRC로 잠시 전환 후 다시 PRESENT로 되돌리는 것을 전제로 한다.
+	const VkImageLayout sourceOriginalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	const VkImageLayout intermediateOriginalLayout = intermediateState.GetCurrentLayout();
 	const VkImageLayout swapchainOriginalLayout = surfaceState.GetCurrentSwapchainImageLayout();
 
@@ -1633,6 +1631,15 @@ bool FVdjmAndroidEncoderBackendVulkan::Running(FRHICommandList& RHICmdList, cons
 		return false;
 	}
 	
+	if (!VdjmVkUtil::CheckVkResult(vkQueueWaitIdle(mVkHandles.GetGraphicsQueue()),
+		TEXT("FVdjmAndroidEncoderBackendVulkan::Running.PreFrameQueueWaitIdle")))
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning,
+			TEXT("FVdjmAndroidEncoderBackendVulkan::Running - failed to wait for graphics queue idle before acquiring frame. timestamp=%f"),
+			timeStampSec);
+		return false;
+	}
+
 	if (not VdjmVkUtil::WaitAndAcquireFrame(mVkHandles, mCodecInputSurfaceState, *frameResources))
 	{
 		UE_LOG(LogVdjmRecorderCore, Warning,
