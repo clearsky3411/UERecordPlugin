@@ -4,7 +4,9 @@
 
 #include "CoreMinimal.h"
 #include "VdjmRecordTypes.h"
+#include "VdjmAndroid/VdjmAndroidTypes.h"
 #include "UObject/Object.h"
+
 
 
 /*
@@ -121,6 +123,8 @@ public:
 	virtual ~FVdjmVideoEncoderBase() = default;
 	
 	virtual bool InitializeEncoder(const FString& outputFilePath,int32 width,int32 height,int32 bitrate,int32 framerate) = 0;
+	virtual 
+	
 	
 	virtual VdjmResult StartEncoder() = 0;
 	
