@@ -213,6 +213,9 @@ VdjmResult UVdjmRecordAndroidUnit::RecordStartCheck()
 			*LinkedRecordResource->FinalFilePath);
 	}
 	
+	/*
+	 * TODO: 20260409
+	 */
 	if (not mAndroidEncoderImpl->InitializeEncoder(
 		LinkedRecordResource->FinalFilePath,
 		LinkedRecordResource->OriginResolution.X,
@@ -224,6 +227,7 @@ VdjmResult UVdjmRecordAndroidUnit::RecordStartCheck()
 		mAndroidEncoderImpl->TerminateEncoder();
 		return VdjmResults::InvalidArg;
 	}
+	
 	const VdjmResult StartResult = mAndroidEncoderImpl->StartEncoder();
 	if (StartResult != VdjmResults::Ok)
 	{

@@ -228,11 +228,6 @@ void UVdjmRecordEventSession::ClearSessionTimers()
 	TimerManager.ClearTimer(mSessionObserverTimerHandle);
 }
 
-void FVdjmEncoderInitRequestVideo::Clear()
-{
-	*this = CreateDefaultForCurrentPlatform();
-}
-
 TOptional<FVdjmEncoderInitRequestVideo> FVdjmEncoderInitRequestVideo::CreateDefaultForCurrentPlatform()
 {
 #if PLATFORM_WINDOWS
@@ -245,7 +240,7 @@ TOptional<FVdjmEncoderInitRequestVideo> FVdjmEncoderInitRequestVideo::CreateDefa
 		.KeyframeInterval = 2,
 		.MimeType = TEXT("video/mp4")
 	};
-#elif PLATFORM_ANDROID ||| defined(__RESHARPER__) 
+#elif PLATFORM_ANDROID || defined(__RESHARPER__) 
 	// Android에 맞는 기본 설정을 반환하도록 구현 필요
 	return FVdjmEncoderInitRequestVideo{
 		.bResolutionFitToDisplay = true,
@@ -254,16 +249,11 @@ TOptional<FVdjmEncoderInitRequestVideo> FVdjmEncoderInitRequestVideo::CreateDefa
 		.FrameRate = 30,
 		.Bitrate = 5000000,
 		.KeyframeInterval = 2,
-		.MimeType = TEXT("video/mp4") // H.264
+		.MimeType = TEXT("video/avc") // H.264
 	};
 #else
 	return TOptional<FVdjmEncoderInitRequestVideo>();
 #endif
-}
-
-void FVdjmEncoderInitRequestAudio::Clear()
-{
-	*this = CreateDefaultForCurrentPlatform();
 }
 TOptional<FVdjmEncoderInitRequestAudio> FVdjmEncoderInitRequestAudio::CreateDefaultForCurrentPlatform()
 {
@@ -292,13 +282,6 @@ TOptional<FVdjmEncoderInitRequestAudio> FVdjmEncoderInitRequestAudio::CreateDefa
 	return TOptional<FVdjmEncoderInitRequestAudio>();
 #endif
 }
-
-
-void FVdjmEncoderInitRequestOutput::Clear()
-{
-	*this = CreateDefaultForCurrentPlatform();
-}
-
 TOptional<FVdjmEncoderInitRequestOutput> FVdjmEncoderInitRequestOutput::CreateDefaultForCurrentPlatform()
 {
 #if PLATFORM_WINDOWS
@@ -318,12 +301,7 @@ TOptional<FVdjmEncoderInitRequestOutput> FVdjmEncoderInitRequestOutput::CreateDe
 #endif
 }
 
-void FVdjmEncoderInitRequestRuntimePolicy::Clear()
-{
-	*this = CreateDefaultForCurrentPlatform();
-}
-
-TOptional<FVdjmEncoderInitRequestRuntimePolicy> FVdjmEncoderInitRequestRuntimePolicy::CreateDefaultForCurrentPlatform()
+TOptional<FVdjmEncoderInitRequestRuntimePolicy>FVdjmEncoderInitRequestRuntimePolicy::CreateDefaultForCurrentPlatform()
 {
 #if PLATFORM_WINDOWS
 	return FVdjmEncoderInitRequestRuntimePolicy{
