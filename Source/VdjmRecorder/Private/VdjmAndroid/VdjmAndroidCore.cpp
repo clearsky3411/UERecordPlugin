@@ -79,36 +79,6 @@ void UVdjmRecordAndroidUnit::ReleaseRecordStartedDelegate()
 	}
 }
 
-void UVdjmRecordAndroidUnit::RecordPrevStartDelegateFunc(UVdjmRecordResource* res)
-{
-	(void)res;
-	
-	bInitializedStatus = false;
-	ReleaseRecordPrevStartDelegate();
-	if (LinkedRecordResource.IsValid() && mAndroidEncoderImpl.IsValid())
-	{
-		bInitializedStatus = mAndroidEncoderImpl->InitializeEncoder(
-				LinkedRecordResource->FinalFilePath,
-				LinkedRecordResource->OriginResolution.X,
-				LinkedRecordResource->OriginResolution.Y,
-				LinkedRecordResource->FinalBitrate,
-				LinkedRecordResource->FinalFrameRate);
-	}
-	
-	if (bInitializedStatus)
-	{
-		UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidSurfacer::InitializeUnit - Successfully initialized Android Encoder."));
-		mStartRecordStepsHandle = AVdjmRecordBridgeActor::TryGetRecordBridgeActor()->OnRecordStartedInner.AddUObject(this,&UVdjmRecordAndroidUnit::RecordStartedDelegateFunc);
-	}
-	else
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidSurfacer::InitializeUnit - Failed to initialize Android Encoder."));
-		if (mAndroidEncoderImpl.IsValid())
-		{
-			mAndroidEncoderImpl->TerminateEncoder();
-		}
-	}
-}
 void UVdjmRecordAndroidUnit::RecordStartedDelegateFunc(UVdjmRecordResource* VdjmRecordResource)
 {
 	ReleaseRecordStartedDelegate();

@@ -49,8 +49,7 @@ END_SHADER_PARAMETER_STRUCT()
 	UFUNCTION()
 	void RecordStartedDelegateFunc(UVdjmRecordResource* VdjmRecordResource);
 	
-	UFUNCTION()//	이거 역할이 mAndroidEncoderImpl->StartEncoder() 이거 실행해주는거임.
-	void RecordPrevStartDelegateFunc(UVdjmRecordResource* res);
+	
 	
 	UFUNCTION()	
 	void PostEndPipelineExecute(const FVdjmRecordUnitParamContext& context, FVdjmRecordUnitParamPayload& payload);
