@@ -199,7 +199,7 @@ VdjmResult UVdjmRecordAndroidUnit::RecordStartCheck()
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidUnit::RecordStartCheck - LinkedRecordResource is not valid."));
 		return VdjmResults::Fail;
 	}
-
+	//	20260409 스냅샷으로 증명하게 만들어야함.
 	if (LinkedRecordResource->LinkedCurrentInfo.IsValid())
 	{
 		const FString CustomFileName =

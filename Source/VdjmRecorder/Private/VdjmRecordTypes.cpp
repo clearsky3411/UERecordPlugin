@@ -228,4 +228,135 @@ void UVdjmRecordEventSession::ClearSessionTimers()
 	TimerManager.ClearTimer(mSessionObserverTimerHandle);
 }
 
+void FVdjmEncoderInitRequestVideo::Clear()
+{
+	*this = CreateDefaultForCurrentPlatform();
+}
+
+TOptional<FVdjmEncoderInitRequestVideo> FVdjmEncoderInitRequestVideo::CreateDefaultForCurrentPlatform()
+{
+#if PLATFORM_WINDOWS
+	return FVdjmEncoderInitRequestVideo{
+		.bResolutionFitToDisplay = true,
+		.Width = 1280,
+		.Height = 720,
+		.FrameRate = 30,
+		.Bitrate = 5000000,
+		.KeyframeInterval = 2,
+		.MimeType = TEXT("video/mp4")
+	};
+#elif PLATFORM_ANDROID ||| defined(__RESHARPER__) 
+	// Android에 맞는 기본 설정을 반환하도록 구현 필요
+	return FVdjmEncoderInitRequestVideo{
+		.bResolutionFitToDisplay = true,
+		.Width = 1280,
+		.Height = 720,
+		.FrameRate = 30,
+		.Bitrate = 5000000,
+		.KeyframeInterval = 2,
+		.MimeType = TEXT("video/mp4") // H.264
+	};
+#else
+	return TOptional<FVdjmEncoderInitRequestVideo>();
+#endif
+}
+
+void FVdjmEncoderInitRequestAudio::Clear()
+{
+	*this = CreateDefaultForCurrentPlatform();
+}
+TOptional<FVdjmEncoderInitRequestAudio> FVdjmEncoderInitRequestAudio::CreateDefaultForCurrentPlatform()
+{
+#if PLATFORM_WINDOWS
+	return FVdjmEncoderInitRequestAudio{
+		.bEnableInternalAudioCapture = true,
+		.AudioMimeType = TEXT("audio/mp4a-latm"), // AAC
+		.SampleRate = 44100,
+		.ChannelCount = 2,
+		.Bitrate = 128000,
+		.AacProfile = 2, // LC-AAC
+		.SourceSubMixName = TEXT("Master")
+	};
+#elif PLATFORM_ANDROID || defined(__RESHARPER__)
+	// Android에 맞는 기본 설정을 반환하도록 구현 필요
+	return FVdjmEncoderInitRequestAudio{
+		.bEnableInternalAudioCapture = true,
+		.AudioMimeType = TEXT("audio/mp4a-latm"), // AAC
+		.SampleRate = 44100,
+		.ChannelCount = 2,
+		.Bitrate = 128000,
+		.AacProfile = 2, // LC-AAC
+		.SourceSubMixName = TEXT("Master")
+	};
+#else
+	return TOptional<FVdjmEncoderInitRequestAudio>();
+#endif
+}
+
+
+void FVdjmEncoderInitRequestOutput::Clear()
+{
+	*this = CreateDefaultForCurrentPlatform();
+}
+
+TOptional<FVdjmEncoderInitRequestOutput> FVdjmEncoderInitRequestOutput::CreateDefaultForCurrentPlatform()
+{
+#if PLATFORM_WINDOWS
+	return FVdjmEncoderInitRequestOutput{
+		.OutputFilePath = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Recordings"), TEXT("RecordingOutput.mp4")),
+		.SessionId = FString::Printf(TEXT("Session_%lld"), FDateTime::Now().GetTicks()),
+		.bOverwriteExists = false
+	};
+#elif PLATFORM_ANDROID || defined(__RESHARPER__)
+	return FVdjmEncoderInitRequestOutput{
+		.OutputFilePath = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("Recordings"), TEXT("RecordingOutput.mp4")),
+		.SessionId = FString::Printf(TEXT("Session_%lld"), FDateTime::Now().GetTicks()),
+		.bOverwriteExists = false
+	};
+#else
+	return TOptional<FVdjmEncoderInitRequestOutput>();
+#endif
+}
+
+void FVdjmEncoderInitRequestRuntimePolicy::Clear()
+{
+	*this = CreateDefaultForCurrentPlatform();
+}
+
+TOptional<FVdjmEncoderInitRequestRuntimePolicy> FVdjmEncoderInitRequestRuntimePolicy::CreateDefaultForCurrentPlatform()
+{
+#if PLATFORM_WINDOWS
+	return FVdjmEncoderInitRequestRuntimePolicy{
+		.bRequireAVSync = true,
+		.AllowedDriftMs = 20,
+		.bStartMuxerWhenBothTracksReady = true
+	};
+#elif PLATFORM_ANDROID || defined(__RESHARPER__)
+	return FVdjmEncoderInitRequestRuntimePolicy{
+		.bRequireAVSync = true,
+		.AllowedDriftMs = 20,
+		.bStartMuxerWhenBothTracksReady = true
+	};
+#else
+	return TOptional<FVdjmEncoderInitRequestRuntimePolicy>();
+#endif
+}
+
+TOptional<FVdjmEncoderInitRequestPlatformExtension> FVdjmEncoderInitRequestPlatformExtension::
+CreateDefaultForCurrentPlatform()
+{
+	return TOptional<FVdjmEncoderInitRequestPlatformExtension>();
+}
+
+TOptional<FVdjmEncoderInitRequest> FVdjmEncoderInitRequest::CreateDefaultForCurrentPlatform()
+{
+	return FVdjmEncoderInitRequest{
+		.VideoConfig = FVdjmEncoderInitRequestVideo::CreateDefaultForCurrentPlatform().GetValue(),
+		.AudioConfig = FVdjmEncoderInitRequestAudio::CreateDefaultForCurrentPlatform().GetValue(),
+		.OutputConfig = FVdjmEncoderInitRequestOutput::CreateDefaultForCurrentPlatform().GetValue(),
+		.RuntimePolicyConfig = FVdjmEncoderInitRequestRuntimePolicy::CreateDefaultForCurrentPlatform().GetValue(),
+		.PlatformExtensionConfig = FVdjmEncoderInitRequestPlatformExtension::CreateDefaultForCurrentPlatform().GetValue()
+	};
+}
+
 
