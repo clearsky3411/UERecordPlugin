@@ -403,8 +403,8 @@ bool UVdjmRecordEnvCurrentInfo::InitializeCurrentEnvironment(AVdjmRecordBridgeAc
 			float floatBitrate = 
 				mAllBitrateMap.Contains(ownerBridge->SelectedBitrateType)?
 					FVdjmFunctionLibraryHelper::ConvertToBitrateValue(mAllBitrateMap[ownerBridge->SelectedBitrateType]) :
-					mAllBitrateMap.Contains(EVdjmRecordBitrateType::EDefault)?
-						mAllBitrateMap[EVdjmRecordBitrateType::EDefault] : 2000000.0f;
+					mAllBitrateMap.Contains(EVdjmRecordQualityTiers::EDefault)?
+						mAllBitrateMap[EVdjmRecordQualityTiers::EDefault] : 2000000.0f;
 			mCurrentBitrate = FVdjmFunctionLibraryHelper::ConvertToBitrateValue(floatBitrate);
 			
 			//mCurrentBitrate =
@@ -496,6 +496,45 @@ FString UVdjmRecordEnvCurrentInfo::MakeFinalFilePath(const FString& customFileNa
 	}
 	
 	return FPaths::Combine(basePath, finalPath + TEXT(".mp4"));
+}
+
+UVdjmRecordResource* UVdjmRecordEnvResolver::CreateResolvedRecordResource(AVdjmRecordBridgeActor* ownerBridge,const FVdjmRecordEnvPlatformPreset* presetData) 
+{
+	if (ownerBridge == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - ownerBridge is null."));
+		return nullptr;
+	}
+	if (not ResolveEnvPlatform(presetData))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to resolve environment platform."));
+		return nullptr;
+	}
+	if (UVdjmRecordResource* newResource = NewObject<UVdjmRecordResource>(this,mResolvedPreset.RecordResourceClass))
+	{
+		if (not newResource->InitializeResourceExtended(this))
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to initialize record resource with resolver."));
+			newResource = nullptr;
+			return nullptr;
+		}
+	}
+	else
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to create record resource instance."));
+		return nullptr;
+	}
+	
+}
+
+bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPreset* presetData)
+{
+	//	TODO(20260410 refactoring) : 하드웨어나 그런 것들을 통해서 presetData 를 검증하는거임.
+	//	그런데 FVdjmRecordEnvPlatformPreset 여기안에 검증기를 넣을까? isValid 들을 각자 만들어 놓는게 책임 분산에 맞는건가?
+	mResolvedPreset = *presetData;
+	
+	
+	
 }
 
 /*
@@ -1108,6 +1147,10 @@ EVdjmRecordEnvPlatform AVdjmRecordBridgeActor::GetTargetPlatform()
 #endif
 }
 
+bool AVdjmRecordBridgeActor::EvaluateInitRequest(const FVdjmEncoderInitRequest* initPreset)
+{
+}
+
 bool AVdjmRecordBridgeActor::TryResolveViewportSize(FIntPoint& OutSize) const
 {
 	OutSize = FIntPoint::ZeroValue;
@@ -1328,7 +1371,32 @@ void AVdjmRecordBridgeActor::ChainInit_InitializeCurrentEnvironment()
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitErrorEnd);
 		return;
 	}
+	//	TODO(20260410 env control)
+	const FVdjmRecordEnvPlatformPreset* envPreset = mRecordConfigureDataAsset->GetPlatformPreset(GetTargetPlatform());
 	
+	if (envPreset == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_InitializeCurrentEnvironment - No platform preset found for target platform. Continuing with initialization, but default values may be used."));
+		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitErrorEnd);
+		return;
+	}
+	const FVdjmEncoderInitRequest* initPreset = envPreset->GetEncoderInitRequest(mCurrentQualityTier);
+	if (initPreset == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_InitializeCurrentEnvironment - No encoder init preset found for current quality tier. Continuing with initialization, but default values may be used."));
+		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitErrorEnd);
+		return;
+	}
+	if (not EvaluateInitRequest(initPreset))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_InitializeCurrentEnvironment - Failed to evaluate encoder init preset. Continuing with initialization, but default values may be used."));
+		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitErrorEnd);
+		return;
+	}
+	
+	/*
+	 * TODO(20260410 new env) 여기 변경
+	 */
 	if (FVdjmRecordEnvPlatformInfo* platformInfo = mRecordConfigureDataAsset->GetPlatformInfo(GetTargetPlatform()))
 	{
 		if (mCurrentEnvInfo == nullptr)

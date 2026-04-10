@@ -326,13 +326,14 @@ struct VDJMRECORDER_API FVdjmRecordGlobalRules
 };
 
 /*
-§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
-	↓							UENUM s							↓
-	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+§	↓	↓	↓	↓	↓	↓	↓
+							UENUM s							
+	Tier
 */
 UENUM(Blueprintable)
-enum class EVdjmRecordBitrateType : uint8
+enum class EVdjmRecordQualityTiers : uint8
 {
+	EUndefined UMETA(DisplayName="Undefined",Hidden),
 	EDefault UMETA(DisplayName="Default"),
 	EUltra UMETA(DisplayName="Ultra"),
 	EHigh UMETA(DisplayName="High"),
@@ -341,6 +342,8 @@ enum class EVdjmRecordBitrateType : uint8
 	EMdeiumLow UMETA(DisplayName="MediumLow"),
 	ELow UMETA(DisplayName="Low"),
 	ELowest UMETA(DisplayName="Lowest"),
+	ECustom UMETA(DisplayName="Custom"),
+	EMax UMETA(Hidden)
 };
 UENUM(Blueprintable)
 enum class EVdjmRecordSavePathDirectoryType : uint8
@@ -476,7 +479,8 @@ protected:
 #define DECLARE_VDJM_ENCODER_BOILERPLATE(StructType) \
 static TOptional<StructType> CreateDefaultForCurrentPlatform(); \
 void ApplyOptional(const TOptional<StructType>& Optional) { if (Optional.IsSet()) { *this = Optional.GetValue(); } else { Clear(); } } \
-void Clear() { ApplyOptional(CreateDefaultForCurrentPlatform()); }
+void Clear() { ApplyOptional(CreateDefaultForCurrentPlatform()); } \
+bool EvaluateValidation() const;
 
 USTRUCT(Blueprintable)
 struct VDJMRECORDER_API FVdjmEncoderInitRequestVideo
@@ -620,10 +624,15 @@ struct VDJMRECORDER_API FVdjmEncoderInitRequest
 {
 	GENERATED_BODY()
 	
+	UPROPERTY(EditAnywhere, Category="EncoderInitRequest|Video")
 	FVdjmEncoderInitRequestVideo VideoConfig;
+	UPROPERTY(EditAnywhere, Category="EncoderInitRequest|Audio")
 	FVdjmEncoderInitRequestAudio AudioConfig;
+	UPROPERTY(EditAnywhere, Category="EncoderInitRequest|Output")
 	FVdjmEncoderInitRequestOutput OutputConfig;
+	UPROPERTY(EditAnywhere, Category="EncoderInitRequest|RuntimPolicy")
 	FVdjmEncoderInitRequestRuntimePolicy RuntimePolicyConfig;
+	UPROPERTY(EditAnywhere, Category="EncoderInitRequest|PlatformExtension")
 	FVdjmEncoderInitRequestPlatformExtension PlatformExtensionConfig;
 	
 	void Clear()
@@ -643,6 +652,7 @@ struct VDJMRECORDER_API FVdjmEncoderInitRequest
 			*RuntimePolicyConfig.ToString(),
 			*PlatformExtensionConfig.ToString());
 	}
+	bool EvaluateValidation() const;
 	static TOptional<FVdjmEncoderInitRequest> CreateDefaultForCurrentPlatform();
 };
 
