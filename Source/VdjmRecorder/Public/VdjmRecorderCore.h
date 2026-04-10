@@ -530,6 +530,9 @@ protected:
 USTRUCT(Blueprintable)
 struct VDJMRECORDER_API FVdjmRecordEnvPlatformInfo 
 {
+	/*
+	* TODO(260410-cofigs) 
+	*/
 	GENERATED_BODY()
 	UPROPERTY(Category ="Record|Env",EditAnywhere)
 	bool bUseAutoTargetPlatformResolution = false;
@@ -592,6 +595,9 @@ public:
 	UPROPERTY(EditAnywhere)
 	TMap<EVdjmRecordEnvPlatform,FVdjmRecordEnvPlatformInfo> PlatformInfoMap;
 
+	/*
+	* TODO(260410-cofigs) : GetPlatformInfo 여기에서 FVdjmRecordEnvPlatformInfo 이걸 검증해주는 거라 FVdjmRecordEnvPlatformInfo의 검증부분을 늘리면 될듯.
+	*/
 	FVdjmRecordEnvPlatformInfo* GetPlatformInfo(EVdjmRecordEnvPlatform targetPlatform)
     {
         if (FVdjmRecordEnvPlatformInfo* foundInfo = PlatformInfoMap.Find(targetPlatform))
@@ -869,8 +875,7 @@ public:
 	//	Platform Branch Function
 	static EVdjmRecordEnvPlatform GetTargetPlatform();
 	
-	//	not use
-	void PostResourceInit_depr(UVdjmRecordResource* resource);
+	
 	
 	UVdjmRecordEnvDataAsset* GetRecordEnvConfigureDataAsset()
 	{

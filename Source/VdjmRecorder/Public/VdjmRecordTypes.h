@@ -473,60 +473,34 @@ protected:
 	EVdjmRecordEventSessionState mReservedNextState = EVdjmRecordEventSessionState::EUndefined;
 };
 
-USTRUCT()
+#define DECLARE_VDJM_ENCODER_BOILERPLATE(StructType) \
+static TOptional<StructType> CreateDefaultForCurrentPlatform(); \
+void ApplyOptional(const TOptional<StructType>& Optional) { if (Optional.IsSet()) { *this = Optional.GetValue(); } else { Clear(); } } \
+void Clear() { ApplyOptional(CreateDefaultForCurrentPlatform()); }
+
+USTRUCT(Blueprintable)
 struct VDJMRECORDER_API FVdjmEncoderInitRequestVideo
 {
 	GENERATED_BODY()
 	
-	bool bResolutionFitToDisplay;
+	
+	UPROPERTY(EditAnywhere, Category="VideoConfig")
+	bool bResolutionFitToDisplay = true;
+	UPROPERTY(EditAnywhere, Category="VideoConfig")
 	int32 Width = 1920;
+	UPROPERTY(EditAnywhere, Category="VideoConfig")
 	int32 Height = 1080;
+	UPROPERTY(EditAnywhere, Category="VideoConfig")
 	int32 FrameRate = 30;
+	UPROPERTY(EditAnywhere, Category="VideoConfig")
 	int32 Bitrate = 5000000;
+	UPROPERTY(EditAnywhere, Category="VideoConfig")
 	int32 KeyframeInterval = 2;
+	UPROPERTY(EditAnywhere, Category="VideoConfig")
 	FString MimeType = TEXT("video/mp4");
 	
+	DECLARE_VDJM_ENCODER_BOILERPLATE(FVdjmEncoderInitRequestVideo);
 	
-
-	FVdjmEncoderInitRequestVideo& operator=(const TOptional<FVdjmEncoderInitRequestVideo>& other)
-	{
-		if (other.IsSet())
-		{
-			const FVdjmEncoderInitRequestVideo& otherValue = other.GetValue();
-			bResolutionFitToDisplay = otherValue.bResolutionFitToDisplay;
-			Width = otherValue.Width;
-			Height = otherValue.Height;
-			FrameRate = otherValue.FrameRate;
-			Bitrate = otherValue.Bitrate;
-			KeyframeInterval = otherValue.KeyframeInterval;
-			MimeType = otherValue.MimeType;
-		}
-		else
-		{
-			*this = FVdjmEncoderInitRequestVideo();
-		}
-		return *this;
-	}
-	FVdjmEncoderInitRequestVideo& operator=(TOptional<FVdjmEncoderInitRequestVideo>&& other)
-	{
-		if (other.IsSet())
-		{
-			FVdjmEncoderInitRequestVideo& otherValue = other.GetValue();
-			bResolutionFitToDisplay = otherValue.bResolutionFitToDisplay;
-			Width = otherValue.Width;
-			Height = otherValue.Height;
-			FrameRate = otherValue.FrameRate;
-			Bitrate = otherValue.Bitrate;
-			KeyframeInterval = otherValue.KeyframeInterval;
-			MimeType = MoveTemp(otherValue.MimeType);
-		}
-		else
-		{
-			*this = FVdjmEncoderInitRequestVideo();
-		}
-		return *this;	
-	}
-	void Clear();
 	FString ToString() const
 	{
 		return FString::Printf(TEXT("{ VideoInitRequest: FitToDisplay=%s, Resolution=%dx%d, FrameRate=%d, Bitrate=%d, KeyframeInterval=%d, MimeType=%s }"),
@@ -537,7 +511,7 @@ struct VDJMRECORDER_API FVdjmEncoderInitRequestVideo
 			KeyframeInterval,
 			*MimeType);
 	}
-	static TOptional<FVdjmEncoderInitRequestVideo> CreateDefaultForCurrentPlatform();
+	
 };
 
 USTRUCT()
@@ -545,55 +519,23 @@ struct VDJMRECORDER_API FVdjmEncoderInitRequestAudio
 {
 	GENERATED_BODY()
 	
+	UPROPERTY(EditAnywhere, Category="AudioConfig")
 	bool bEnableInternalAudioCapture = true;
+	UPROPERTY(EditAnywhere, Category="AudioConfig")
 	FString AudioMimeType = TEXT("audio/mp4a-latm");
+	UPROPERTY(EditAnywhere, Category="AudioConfig")
 	int32 SampleRate = 44100;
+	UPROPERTY(EditAnywhere, Category="AudioConfig")
 	int32 ChannelCount = 2;
+	UPROPERTY(EditAnywhere, Category="AudioConfig")
 	int32 Bitrate = 128000;
+	UPROPERTY(EditAnywhere, Category="AudioConfig")
 	int32 AacProfile = 2; // LC-AAC	
+	UPROPERTY(EditAnywhere, Category="AudioConfig")
 	FName SourceSubMixName = TEXT("Master"); // Unreal Engine의 오디오 믹싱 시스템에서 캡처할 서브믹스 이름. 예: "Master", "Music", "SFX" 등.
 	
-	FVdjmEncoderInitRequestAudio& operator=(const TOptional<FVdjmEncoderInitRequestAudio>& other)
-	{
-		if (other.IsSet())
-		{
-			const FVdjmEncoderInitRequestAudio& otherValue = other.GetValue();
-			bEnableInternalAudioCapture = otherValue.bEnableInternalAudioCapture;
-			AudioMimeType = otherValue.AudioMimeType;
-			SampleRate = otherValue.SampleRate;
-			ChannelCount = otherValue.ChannelCount;
-			Bitrate = otherValue.Bitrate;
-			AacProfile = otherValue.AacProfile;
-			SourceSubMixName = otherValue.SourceSubMixName;
-		}
-		else
-		{
-			*this = FVdjmEncoderInitRequestAudio();
-		}
-		
-		return *this;
-	}
-	FVdjmEncoderInitRequestAudio& operator=(TOptional<FVdjmEncoderInitRequestAudio>&& other)
-	{
-		if (other.IsSet())
-		{
-			FVdjmEncoderInitRequestAudio& otherValue = other.GetValue();
-			bEnableInternalAudioCapture = otherValue.bEnableInternalAudioCapture;
-			AudioMimeType = MoveTemp(otherValue.AudioMimeType);
-			SampleRate = otherValue.SampleRate;
-			ChannelCount = otherValue.ChannelCount;
-			Bitrate = otherValue.Bitrate;
-			AacProfile = otherValue.AacProfile;
-			SourceSubMixName = otherValue.SourceSubMixName;
-		}
-		else
-		{
-			*this = FVdjmEncoderInitRequestAudio();
-		}
-		return *this;	
-	}
+	DECLARE_VDJM_ENCODER_BOILERPLATE(FVdjmEncoderInitRequestAudio);
 	
-	void Clear();
 	FString ToString() const
 	{
 		return FString::Printf(TEXT("{ AudioInitRequest: EnableInternalAudioCapture=%s, AudioMimeType=%s, SampleRate=%d, ChannelCount=%d, Bitrate=%d, AacProfile=%d, SourceSubMixName=%s }"),
@@ -605,50 +547,21 @@ struct VDJMRECORDER_API FVdjmEncoderInitRequestAudio
 			AacProfile,
 			*SourceSubMixName.ToString());
 	}
-	
-	static TOptional<FVdjmEncoderInitRequestAudio> CreateDefaultForCurrentPlatform();
-	
 };
 USTRUCT()
 struct VDJMRECORDER_API FVdjmEncoderInitRequestOutput
 {
 	GENERATED_BODY()
 	
+	UPROPERTY(EditAnywhere, Category="OutputConfig")
 	FString OutputFilePath = TEXT("RecordingOutput.mp4");
+	UPROPERTY(EditAnywhere, Category="OutputConfig")
 	FString SessionId = TEXT("DefaultSession");
+	UPROPERTY(EditAnywhere, Category="OutputConfig")
 	bool bOverwriteExists = false;
 	
+	DECLARE_VDJM_ENCODER_BOILERPLATE(FVdjmEncoderInitRequestOutput);
 	
-	FVdjmEncoderInitRequestOutput& operator=(const TOptional<FVdjmEncoderInitRequestOutput>& other)
-	{
-		if (other.IsSet())
-		{
-			const FVdjmEncoderInitRequestOutput& otherValue = other.GetValue();
-			OutputFilePath = otherValue.OutputFilePath;
-			SessionId = otherValue.SessionId;
-			bOverwriteExists = otherValue.bOverwriteExists;
-		}
-		else
-		{
-			*this = FVdjmEncoderInitRequestOutput();
-		}
-		
-		return *this;
-	}
-	FVdjmEncoderInitRequestOutput& operator=(TOptional<FVdjmEncoderInitRequestOutput>&& other)
-	{
-		if (other.IsSet())		{
-			FVdjmEncoderInitRequestOutput& otherValue = other.GetValue();
-			OutputFilePath = MoveTemp(otherValue.OutputFilePath);
-			SessionId = MoveTemp(otherValue.SessionId);
-			bOverwriteExists = otherValue.bOverwriteExists;
-		}
-		else		{
-			*this = FVdjmEncoderInitRequestOutput();
-		}
-		return *this;	
-	}
-	void Clear();
 	FString ToString() const
 	{
 		return FString::Printf(TEXT("{ OutputInitRequest: OutputFilePath=%s, SessionId=%s, OverwriteExists=%s }"),
@@ -656,50 +569,21 @@ struct VDJMRECORDER_API FVdjmEncoderInitRequestOutput
 			*SessionId,
 			bOverwriteExists ? TEXT("True") : TEXT("False"));
 	}
-	
-	static TOptional<FVdjmEncoderInitRequestOutput> CreateDefaultForCurrentPlatform();
 };
 USTRUCT()
 struct VDJMRECORDER_API FVdjmEncoderInitRequestRuntimePolicy
 {
 	GENERATED_BODY()
 	
+	UPROPERTY(EditAnywhere, Category="RuntimPolicyConfig")
 	bool bRequireAVSync  = true;
+	UPROPERTY(EditAnywhere, Category="RuntimPolicyConfig")
 	int32 AllowedDriftMs = 20;
+	UPROPERTY(EditAnywhere, Category="RuntimPolicyConfig")
 	bool bStartMuxerWhenBothTracksReady = true;
 	
-	FVdjmEncoderInitRequestRuntimePolicy& operator=(const TOptional<FVdjmEncoderInitRequestRuntimePolicy>& other)
-	{
-		if (other.IsSet())
-		{
-			const FVdjmEncoderInitRequestRuntimePolicy& otherValue = other.GetValue();
-			bRequireAVSync = otherValue.bRequireAVSync;
-			AllowedDriftMs = otherValue.AllowedDriftMs;
-			bStartMuxerWhenBothTracksReady = otherValue.bStartMuxerWhenBothTracksReady;
-		}
-		else
-		{
-			*this = FVdjmEncoderInitRequestRuntimePolicy();
-		}
-		
-		return *this;
-	}
-	FVdjmEncoderInitRequestRuntimePolicy& operator=(TOptional<FVdjmEncoderInitRequestRuntimePolicy>&& other)
-	{
-		if (other.IsSet())		{
-			FVdjmEncoderInitRequestRuntimePolicy& otherValue = other.GetValue();
-			bRequireAVSync = otherValue.bRequireAVSync;
-			AllowedDriftMs = otherValue.AllowedDriftMs;
-			bStartMuxerWhenBothTracksReady = otherValue.bStartMuxerWhenBothTracksReady;
-		}
-		else
-		{
-			*this = FVdjmEncoderInitRequestRuntimePolicy();
-		}
-		return *this;	
-	}
+	DECLARE_VDJM_ENCODER_BOILERPLATE(FVdjmEncoderInitRequestRuntimePolicy);
 	
-	void Clear();
 	FString ToString() const
 	{
 		return FString::Printf(TEXT("{ RuntimePolicyInitRequest: RequireAVSync=%s, AllowedDriftMs=%d, StartMuxerWhenBothTracksReady=%s }"),
@@ -707,19 +591,18 @@ struct VDJMRECORDER_API FVdjmEncoderInitRequestRuntimePolicy
 			AllowedDriftMs,
 			bStartMuxerWhenBothTracksReady ? TEXT("True") : TEXT("False"));
 	}
-	static TOptional<FVdjmEncoderInitRequestRuntimePolicy> CreateDefaultForCurrentPlatform();
+	
 };
 USTRUCT()
 struct VDJMRECORDER_API FVdjmEncoderInitRequestPlatformExtension
 {
 	GENERATED_BODY()
 	
+	UPROPERTY(EditAnywhere, Category="PlatformExtensionConfig") 
 	TMap<FName,FString> PlatformSpecificParameters;
 	
-	void Clear()
-	{
-		PlatformSpecificParameters.Empty();
-	}
+	DECLARE_VDJM_ENCODER_BOILERPLATE(FVdjmEncoderInitRequestPlatformExtension)
+	
 	FString ToString() const
 	{
 		FString ParamsString;
@@ -730,7 +613,7 @@ struct VDJMRECORDER_API FVdjmEncoderInitRequestPlatformExtension
 			PlatformSpecificParameters.Num(),
 			*ParamsString);
 	}
-	static TOptional<FVdjmEncoderInitRequestPlatformExtension> CreateDefaultForCurrentPlatform();
+
 };
 USTRUCT()
 struct VDJMRECORDER_API FVdjmEncoderInitRequest

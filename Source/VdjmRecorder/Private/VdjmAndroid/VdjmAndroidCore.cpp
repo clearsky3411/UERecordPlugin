@@ -214,8 +214,8 @@ VdjmResult UVdjmRecordAndroidUnit::RecordStartCheck()
 	}
 	
 	/*
-	 * TODO: 20260409
-	 */
+	* TODO(260410-cofigs) 
+	*/
 	if (not mAndroidEncoderImpl->InitializeEncoder(
 		LinkedRecordResource->FinalFilePath,
 		LinkedRecordResource->OriginResolution.X,
@@ -306,7 +306,9 @@ void UVdjmAndroidRecordPipeline::InitializeRecordPipeline(UVdjmRecordResource* r
 		FVdjmRecordEnvPlatformInfo* platformInfo =
 			LinkedBridgeActor->GetRecordEnvConfigureDataAsset()
 				->GetPlatformInfo( AVdjmRecordBridgeActor::GetTargetPlatform());
-		
+		/*
+		* TODO(260410-cofigs) : 여기에다가 FVdjmRecordEnvPlatformInfo 의 검증을 해주는 기능을 넣으면 더 안전하긴 하겠다. 물론 안드로이드 파이프라인꺼니깐, 안드로이드에 맞춘 것만 받아들이게 하는것도 나쁘지 않을듯.
+		*/
 		
 		if (const TSubclassOf<UVdjmRecordUnit>* foundState = platformInfo->GetPipelineState(EVdjmRecordPipelineStages::ESurfaceEncodeAndWrite))
 		{

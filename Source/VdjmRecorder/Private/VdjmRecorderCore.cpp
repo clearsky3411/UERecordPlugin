@@ -1099,61 +1099,13 @@ EVdjmRecordEnvPlatform AVdjmRecordBridgeActor::GetTargetPlatform()
 {
 #if PLATFORM_WINDOWS
 	return EVdjmRecordEnvPlatform::EWindows;
-#elif PLATFORM_ANDROID
+#elif PLATFORM_ANDROID || defined(__RESHARPER__)
 	return EVdjmRecordEnvPlatform::EAndroid;
 #elif PLATFORM_IOS
 	return EVdjmRecordEnvPlatform::EIos;
 #else
 	return EVdjmRecordEnvPlatform::EUnknown;
 #endif
-}
-
-void AVdjmRecordBridgeActor::PostResourceInit_depr(UVdjmRecordResource* resource)
-{
-	if (mRecordConfigureDataAsset == nullptr)
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::PostResourceInit - Record configure data asset is null. Cannot initialize record pipeline."));
-		return;
-	}
-	
-	if (mRecordPipeline == nullptr)
-	{
-		UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::PostResourceInit - Initializing record pipeline after resource initialization."));
-		
-		if (FVdjmRecordEnvPlatformInfo* platformInfo = mRecordConfigureDataAsset->GetPlatformInfo(GetTargetPlatform()))
-		{
-			mRecordPipeline = NewObject<UVdjmRecordUnitPipeline>(
-			this,platformInfo->PipelineClass);
-			if (mRecordPipeline == nullptr)
-			{
-				UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::PostResourceInit - Failed to create record pipeline instance."));
-				return;
-			}
-			else
-			{
-				UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::PostResourceInit - Record pipeline instance created successfully."));
-			}
-			
-			mRecordPipeline->InitializeRecordPipeline(mRecordResource);
-			mCurrentEnvInfo->SetRecordUnitPipeline(mRecordPipeline);
-			
-			UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::PostResourceInit - Record pipeline initialized and resource setup complete."));
-			
-			if (DbcRecordStartableFull())
-			{	
-				UE_LOG(LogVdjmRecorderCore, Log, TEXT("AVdjmRecordBridgeActor::PostResourceInit - Starting recording immediately after resource initialization."));
-			}
-			else
-			{
-				UE_LOG(LogVdjmRecorderCore, Warning, TEXT("AVdjmRecordBridgeActor::PostResourceInit - Record is not startable immediately after resource initialization. Check DbcRecordStartableFull for details."));
-			}
-			
-		}
-		else
-		{
-			UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::PostResourceInit - No platform info found for target platform. Cannot initialize record pipeline."));
-		}
-	}
 }
 
 bool AVdjmRecordBridgeActor::TryResolveViewportSize(FIntPoint& OutSize) const

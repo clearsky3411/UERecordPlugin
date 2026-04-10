@@ -6,6 +6,7 @@
 #include "VdjmRecoderEncoderImpl.h"
 #include "VdjmRecordTypes.h"
 #if PLATFORM_ANDROID || defined(__RESHARPER__)
+#include "VdjmAndroidTypes.h"
 
 #include <media/NdkMediaCodec.h>
 #include <media/NdkMediaFormat.h>
@@ -133,6 +134,7 @@ public:
 	 *	여기 호출에 config 를 새롭게 만들고 검증한다. 
 	 */
 	virtual bool InitializeEncoder(const FString& outputFilePath, int32 width, int32 height, int32 bitrate,	int32 framerate) override;	
+	virtual bool InitializeEncoderExtended(const TWeakObjectPtr<UVdjmRecordResource> recordResource) override;
 	/*
 	 * mRecordSession 을 초기화 하고 다음 프레임에 녹화를 시작한다. pipeline 의 첫 프레임을 어떻게 하지.
 	 */

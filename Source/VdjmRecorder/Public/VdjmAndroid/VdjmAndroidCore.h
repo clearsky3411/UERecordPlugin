@@ -17,7 +17,9 @@ UCLASS(Blueprintable)
 class VDJMRECORDER_API UVdjmRecordAndroidResource : public UVdjmRecordResource
 {
 	GENERATED_BODY()
-
+	/*
+		 * TODO(260410-cofigs) 
+		 */
 public:
 	virtual void InitializeResource(AVdjmRecordBridgeActor* ownerBridge) override;
 	virtual void ReleaseResources() override;

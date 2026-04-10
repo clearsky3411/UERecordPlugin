@@ -4,7 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
-#include "VdjmAndroidTypes.generated.h"
+#include "VdjmAndroidTypes.h"
+
 
 enum class EVdjmAndroidGraphicBackend : uint8
 {
@@ -206,8 +207,3 @@ struct FVdjmAndroidEncoderConfigure
 /**
  * 
  */
-UCLASS()
-class VDJMRECORDER_API UVdjmAndroidTypes : public UObject
-{
-	GENERATED_BODY()
-};

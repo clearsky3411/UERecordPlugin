@@ -4,7 +4,6 @@
 
 #include "CoreMinimal.h"
 #include "VdjmRecordTypes.h"
-#include "VdjmAndroid/VdjmAndroidTypes.h"
 #include "UObject/Object.h"
 
 
@@ -124,6 +123,10 @@ public:
 	
 	virtual bool InitializeEncoder(const FString& outputFilePath,int32 width,int32 height,int32 bitrate,int32 framerate) = 0;
 	 
+	virtual bool InitializeEncoderExtended(const TWeakObjectPtr<UVdjmRecordResource> recordResource)
+	{
+		return false;
+	}
 	
 	
 	virtual VdjmResult StartEncoder() = 0;
@@ -164,6 +167,8 @@ protected:
 	virtual void ChangeStatusRunningToWaiting() {  }
 	virtual void ChangeStatusWaitingToReady() {  }
 		
+	FVdjmEncoderInitRequest mInitRequest;
 private:
 	EVdjmEncoderStatus CurrentStatus = EVdjmEncoderStatus::ENew;
+	
 };

@@ -503,7 +503,7 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoderExtended(const TWeakObjectPtr<UVd
 	if (const UVdjmRecordAndroidResource* androidRecordRes = Cast<UVdjmRecordAndroidResource>(recordResource.Get()))
 	{
 		/*
-		 * TODO: 20260409 UVdjmRecordAndroidResource 도 채워야 하고, 저 정보들을 에셋에 저장해야하니 그 부분도 작업해야함.
+		 * TODO(260410-cofigs) 
 		 */
 	}
 	else
