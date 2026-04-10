@@ -505,6 +505,8 @@ UVdjmRecordResource* UVdjmRecordEnvResolver::CreateResolvedRecordResource(AVdjmR
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - ownerBridge is null."));
 		return nullptr;
 	}
+	mOwnerBridge = ownerBridge;
+	mCurrentEnvInfo = ownerBridge->GetCurrentEnvInfo();
 	if (not ResolveEnvPlatform(presetData))
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to resolve environment platform."));
@@ -515,26 +517,114 @@ UVdjmRecordResource* UVdjmRecordEnvResolver::CreateResolvedRecordResource(AVdjmR
 		if (not newResource->InitializeResourceExtended(this))
 		{
 			UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to initialize record resource with resolver."));
-			newResource = nullptr;
 			return nullptr;
 		}
+		return newResource;
 	}
 	else
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to create record resource instance."));
 		return nullptr;
 	}
-	
+	return nullptr;
 }
 
 bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPreset* presetData)
 {
-	//	TODO(20260410 refactoring) : 하드웨어나 그런 것들을 통해서 presetData 를 검증하는거임.
-	//	그런데 FVdjmRecordEnvPlatformPreset 여기안에 검증기를 넣을까? isValid 들을 각자 만들어 놓는게 책임 분산에 맞는건가?
-	mResolvedPreset = *presetData;
-	
-	
-	
+	if (presetData == nullptr || !presetData->DbcIsValid())
+	{
+		return false;
+	}
+
+	const EVdjmRecordQualityTiers RequestedTier =
+		(mOwnerBridge.IsValid() && mOwnerBridge->SelectedBitrateType != EVdjmRecordQualityTiers::EUndefined)
+			? mOwnerBridge->SelectedBitrateType
+			: presetData->DefaultQualityTier;
+
+	constexpr EVdjmRecordQualityTiers TierOrder[] = {
+		EVdjmRecordQualityTiers::EUltra,
+		EVdjmRecordQualityTiers::EHigh,
+		EVdjmRecordQualityTiers::EMediumHigh,
+		EVdjmRecordQualityTiers::EMedium,
+		EVdjmRecordQualityTiers::EMdeiumLow,
+		EVdjmRecordQualityTiers::ELow,
+		EVdjmRecordQualityTiers::ELowest
+	};
+
+	auto FindTierIndex = [&](EVdjmRecordQualityTiers Tier)->int32
+	{
+		for (int32 i = 0; i < UE_ARRAY_COUNT(TierOrder); ++i)
+		{
+			if (TierOrder[i] == Tier)
+			{
+				return i;
+			}
+		}
+		return INDEX_NONE;
+	};
+
+	int32 StartIndex = FindTierIndex(RequestedTier);
+	if (StartIndex == INDEX_NONE)
+	{
+		StartIndex = FindTierIndex(presetData->DefaultQualityTier);
+	}
+	if (StartIndex == INDEX_NONE)
+	{
+		StartIndex = 0;
+	}
+
+	FIntPoint ViewportSize = FIntPoint::ZeroValue;
+	const bool bHasViewport = mOwnerBridge.IsValid() && mOwnerBridge->TryResolveViewportSize(ViewportSize);
+	if (!bHasViewport || ViewportSize.X <= 0 || ViewportSize.Y <= 0)
+	{
+		ViewportSize = FIntPoint(1280, 720);
+	}
+	const int64 ViewportPixels = static_cast<int64>(ViewportSize.X) * static_cast<int64>(ViewportSize.Y);
+	const int32 MaxFrameRate = mOwnerBridge.IsValid() ? mOwnerBridge->GetCurrentGlobalRules().MaxFrameRate : 30;
+	const int32 BitrateBudget = FMath::Max(1000000, static_cast<int32>(ViewportPixels * 4));
+
+	auto IsPresetFitForHardware = [&](const FVdjmEncoderInitRequest& InitRequest)->bool
+	{
+		const int64 ReqPixels = static_cast<int64>(InitRequest.VideoConfig.Width) * static_cast<int64>(InitRequest.VideoConfig.Height);
+		const bool bResolutionFit = ReqPixels <= (ViewportPixels * 2);
+		const bool bFrameRateFit = InitRequest.VideoConfig.FrameRate <= FMath::Max(1, MaxFrameRate);
+		const bool bBitrateFit = InitRequest.VideoConfig.Bitrate <= (BitrateBudget * 2);
+		return bResolutionFit && bFrameRateFit && bBitrateFit;
+	};
+
+	// 요청 tier에서 하향하면서 하드웨어 적합 + validation 통과 preset 탐색
+	for (int32 i = StartIndex; i < UE_ARRAY_COUNT(TierOrder); ++i)
+	{
+		const EVdjmRecordQualityTiers CandidateTier = TierOrder[i];
+		const FVdjmEncoderInitRequest* CandidateRequest = presetData->GetEncoderInitRequest(CandidateTier);
+		if (CandidateRequest == nullptr || !CandidateRequest->EvaluateValidation())
+		{
+			continue;
+		}
+		if (!IsPresetFitForHardware(*CandidateRequest))
+		{
+			continue;
+		}
+		mResolvedPreset = *presetData;
+		mResolvedPreset.DefaultQualityTier = CandidateTier;
+		return true;
+	}
+
+	// 최후 fallback: 하드웨어 적합 판정을 완화하고 validation 통과하는 최저 tier를 선택
+	for (int32 i = UE_ARRAY_COUNT(TierOrder) - 1; i >= 0; --i)
+	{
+		const EVdjmRecordQualityTiers CandidateTier = TierOrder[i];
+		const FVdjmEncoderInitRequest* CandidateRequest = presetData->GetEncoderInitRequest(CandidateTier);
+		if (CandidateRequest == nullptr || !CandidateRequest->EvaluateValidation())
+		{
+			continue;
+		}
+		mResolvedPreset = *presetData;
+		mResolvedPreset.DefaultQualityTier = CandidateTier;
+		return true;
+	}
+
+	return false;
 }
 
 /*
@@ -1149,6 +1239,11 @@ EVdjmRecordEnvPlatform AVdjmRecordBridgeActor::GetTargetPlatform()
 
 bool AVdjmRecordBridgeActor::EvaluateInitRequest(const FVdjmEncoderInitRequest* initPreset)
 {
+	if (initPreset == nullptr)
+	{
+		return false;
+	}
+	return initPreset->EvaluateValidation();
 }
 
 bool AVdjmRecordBridgeActor::TryResolveViewportSize(FIntPoint& OutSize) const
@@ -1738,5 +1833,3 @@ bool AVdjmRecordBridgeActor::DbcRecordStartableFull() const
 
 	return bOk;
 }
-
-
