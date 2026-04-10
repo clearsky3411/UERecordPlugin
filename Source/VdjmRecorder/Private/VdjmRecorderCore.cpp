@@ -531,6 +531,7 @@ UVdjmRecordResource* UVdjmRecordEnvResolver::CreateResolvedRecordResource(AVdjmR
 
 bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPreset* presetData)
 {
+	mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
 	if (presetData == nullptr || !presetData->DbcIsValid())
 	{
 		return false;
@@ -606,7 +607,7 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 			continue;
 		}
 		mResolvedPreset = *presetData;
-		mResolvedPreset.DefaultQualityTier = CandidateTier;
+		mResolvedQualityTier = CandidateTier;
 		return true;
 	}
 
@@ -620,10 +621,10 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 			continue;
 		}
 		mResolvedPreset = *presetData;
-		mResolvedPreset.DefaultQualityTier = CandidateTier;
+		mResolvedQualityTier = CandidateTier;
 		return true;
 	}
-
+	
 	return false;
 }
 

@@ -810,13 +810,67 @@ class VDJMRECORDER_API UVdjmRecordEnvResolver : public UObject
 public:
 	
 	UVdjmRecordResource* CreateResolvedRecordResource(AVdjmRecordBridgeActor* ownerBridge,const FVdjmRecordEnvPlatformPreset* presetData) ;
+	
+	const FVdjmRecordEnvPlatformPreset& GetResolvedEnvPreset() const { return mResolvedPreset; }
+	bool IsValidResolved() const { return mResolvedQualityTier != EVdjmRecordQualityTiers::EUndefined; }
+	bool IsPresetQualityTier()const { return IsValidResolved() && mResolvedQualityTier != EVdjmRecordQualityTiers::EDefault; }
+	bool IsCustomQualityTier()const { return mResolvedQualityTier == EVdjmRecordQualityTiers::ECustom; }
+	bool IsValidPreset() const { return mOwnerBridge.IsValid() && IsValidResolved() && mResolvedPreset.DbcIsValid(); }
+	
+	const FVdjmEncoderInitRequest* TryGetResolvedEncoderInitRequest() const
+	{
+		return mResolvedPreset.GetEncoderInitRequest(mResolvedQualityTier);
+	}
+	const FVdjmEncoderInitRequestVideo* TryGetResolvedVideoConfig() const
+	{
+		if (const FVdjmEncoderInitRequest* initRequest = TryGetResolvedEncoderInitRequest())
+		{
+			return &initRequest->VideoConfig;
+		} 
+		return nullptr;
+	}
+	const FVdjmEncoderInitRequestAudio* TryGetResolvedAudioConfig() const
+	{
+		if (const FVdjmEncoderInitRequest* initRequest = TryGetResolvedEncoderInitRequest())
+		{
+			return &initRequest->AudioConfig;
+		} 
+		return nullptr;
+	}
+	const FVdjmEncoderInitRequestOutput* TryGetResolvedOutputConfig() const
+	{
+		if (const FVdjmEncoderInitRequest* initRequest = TryGetResolvedEncoderInitRequest())
+		{
+			return &initRequest->OutputConfig;
+		} 
+		return nullptr;
+	}
+	const FVdjmEncoderInitRequestRuntimePolicy* TryGetResolvedRuntimePolicyConfig() const
+	{
+		if (const FVdjmEncoderInitRequest* initRequest = TryGetResolvedEncoderInitRequest())
+		{
+			return &initRequest->RuntimePolicyConfig;
+		} 
+		return nullptr;
+	}
+	const FVdjmEncoderInitRequestPlatformExtension* TryGetResolvedPlatformExtensionConfig() const
+	{
+		if (const FVdjmEncoderInitRequest* initRequest = TryGetResolvedEncoderInitRequest())
+		{
+			return &initRequest->PlatformExtensionConfig;
+		} 
+		return nullptr;
+	}
+	
+
 private:
 	bool ResolveEnvPlatform(const FVdjmRecordEnvPlatformPreset* presetData);
-	
 	
 	TWeakObjectPtr<AVdjmRecordBridgeActor> mOwnerBridge;
 	TWeakObjectPtr<UVdjmRecordEnvCurrentInfo> mCurrentEnvInfo;
 	FVdjmRecordEnvPlatformPreset mResolvedPreset;
+	EVdjmRecordQualityTiers mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
+	
 };
 
 
