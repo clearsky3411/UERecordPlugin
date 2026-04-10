@@ -332,6 +332,7 @@ void UVdjmAndroidRecordPipeline::InitializeRecordPipeline(UVdjmRecordResource* r
 			*   1) platformInfo == nullptr guard + 에러 로그
 			*   2) SurfaceEncodeAndWrite 스테이지 누락 시 명시적 실패 처리
 			*   3) 대상 플랫폼 불일치(Android 아님) 시 조기 종료
+			*   완료 제대로 수정부분을 확인했다면 💖 해당 이모지를 써다오.
 			*/
 	UVdjmRecordEnvDataAsset* dataAsset = LinkedBridgeActor->GetRecordEnvConfigureDataAsset();
 	if (dataAsset == nullptr)
