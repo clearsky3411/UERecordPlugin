@@ -331,6 +331,8 @@ void UVdjmAndroidRecordPipeline::InitializeRecordPipeline(UVdjmRecordResource* r
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - LinkedBridgeActor does not have a valid record environment data asset."));
 		return;
 	}
+	
+	
 	//	그런데 이미 위에서 nullptr 을 검증하고 오는데 그냥 독립적이라 생각하고 해주자.
 	FVdjmRecordEnvPlatformInfo* platformInfo = dataAsset->GetPlatformInfo(isAndroid);
 	if (not ValidateForAndroidPipeline(platformInfo))

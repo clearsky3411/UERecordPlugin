@@ -439,6 +439,7 @@ public:
 	virtual void BeginDestroy() override;
 	
 	virtual void InitializeResource(AVdjmRecordBridgeActor* ownerBridge);
+	virtual bool InitializeResourceExtended(UVdjmRecordEnvResolver* resolver){return false;}
 	virtual void ResetResource();
 	virtual void ReleaseResources();
 	
@@ -580,15 +581,60 @@ struct VDJMRECORDER_API FVdjmRecordEnvPlatformInfo
 };
 //	vdjm 20260410
 USTRUCT()
-struct FVdjmRecordEnvPlatformData
+struct FVdjmRecordEnvPlatformPreset
 {
 	GENERATED_BODY()
 	
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(Category ="Record|Env",EditAnywhere)
 	EVdjmRecordQualityTiers DefaultQualityTier = EVdjmRecordQualityTiers::EDefault;
 	
-	UPROPERTY(EditAnywhere)
+	UPROPERTY(Category ="Record|Env",EditAnywhere)
+	TSubclassOf<UVdjmRecordResource> RecordResourceClass;
+	
+	UPROPERTY(Category ="Record|Env|Pipeline",EditAnywhere)
+	TSubclassOf<UVdjmRecordUnitPipeline> PipelineClass;
+	UPROPERTY(Category ="Record|Env|Pipeline",EditAnywhere)
+	TMap<EVdjmRecordPipelineStages,TSubclassOf<UVdjmRecordUnit>> PipelineUnitClassMap;
+	
+	UPROPERTY(Category ="Record|Env|InitRequest",EditAnywhere)
 	TMap<EVdjmRecordQualityTiers,FVdjmEncoderInitRequest> EncoderInitRequestMap;
+	
+	const TSubclassOf<UVdjmRecordUnit>* GetPipelineState(const EVdjmRecordPipelineStages& stage)
+	{
+		return PipelineUnitClassMap.Find(stage);
+	}
+	
+	bool DbcIsValid() const
+	{
+		return 
+			DefaultQualityTier != EVdjmRecordQualityTiers::EUndefined
+			&& RecordResourceClass != nullptr
+			&& PipelineClass != nullptr
+			&& PipelineUnitClassMap.Num() > 0
+			&& EncoderInitRequestMap.Num() > 0;
+	}
+	
+	const FVdjmEncoderInitRequest* GetEncoderInitRequest(EVdjmRecordQualityTiers qualityTier =EVdjmRecordQualityTiers::EUndefined ) const
+	{
+		if (qualityTier == EVdjmRecordQualityTiers::EUndefined)
+		{
+			qualityTier = DefaultQualityTier;
+			if (qualityTier == EVdjmRecordQualityTiers::EUndefined)
+			{
+				UE_LOG(LogVdjmRecorderCore, Warning, TEXT("FVdjmRecordEnvPlatforPreset::GetEncoderInitRequest - DefaultQualityTier is not set. Falling back to EDefault."));
+				qualityTier = EVdjmRecordQualityTiers::EDefault;
+			}
+		}
+		if (const FVdjmEncoderInitRequest* foundRequest = EncoderInitRequestMap.Find(qualityTier))
+		{
+			return foundRequest;
+		}
+		else if (const FVdjmEncoderInitRequest* defaultRequest = EncoderInitRequestMap.Find(EVdjmRecordQualityTiers::EDefault))
+		{
+			return defaultRequest;
+		}
+		return nullptr;
+	}
 };
 
 /*
@@ -609,7 +655,7 @@ public:
 	
 	//	vdjm 20260410
 	UPROPERTY(EditAnywhere)	
-	TMap<EVdjmRecordEnvPlatform,FVdjmRecordEnvPlatformData> PlatformDataMap;
+	TMap<EVdjmRecordEnvPlatform,FVdjmRecordEnvPlatformPreset> PlatformDataMap;
 	
 
 	/*
@@ -624,6 +670,11 @@ public:
         }
         return nullptr;
     }
+	const FVdjmRecordEnvPlatformPreset* GetPlatformPreset(EVdjmRecordEnvPlatform targetPlatform) const
+	{
+		return PlatformDataMap.Find(targetPlatform);
+	}
+	
 	bool DbcGlobalRulesValid() const
 	{
 		return GlobalRules.MaxRecordDurationSeconds > 0.0f
@@ -644,6 +695,19 @@ public:
 		}
 		return true;
 	}
+	bool DbcPlatformPresetValid() const
+	{
+		for (const auto& pair : PlatformDataMap)		
+		{
+			if (not pair.Value.DbcIsValid())
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+	
+	
 	bool DbcIsValid() const
 	{
 		return DbcGlobalRulesValid() && DbcPlatformInfoValid();
@@ -729,6 +793,22 @@ private:
 	
 	TWeakObjectPtr<UVdjmRecordEnvDataAsset> mLinkedDataAsset;
 };
+UCLASS()
+class VDJMRECORDER_API UVdjmRecordEnvResolver : public UObject
+{
+	GENERATED_BODY()
+public:
+	
+	UVdjmRecordResource* CreateResolvedRecordResource(AVdjmRecordBridgeActor* ownerBridge,const FVdjmRecordEnvPlatformPreset* presetData) ;
+private:
+	bool ResolveEnvPlatform(const FVdjmRecordEnvPlatformPreset* presetData);
+	
+	
+	TWeakObjectPtr<AVdjmRecordBridgeActor> mOwnerBridge;
+	TWeakObjectPtr<UVdjmRecordEnvCurrentInfo> mCurrentEnvInfo;
+	FVdjmRecordEnvPlatformPreset mResolvedPreset;
+};
+
 
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
@@ -933,9 +1013,9 @@ public:
 		OnRecordTick.Broadcast(mRecordResource, deltaTime);
 		OnRecordTickInner.Broadcast(mRecordResource, deltaTime);
 	}
-	
-	void SetSuccessEncoderImpl();
-	void SetSuccessEncoderStart();
+	//	TODO(20260410 env control) - 여길 채워야함.
+	bool EvaluateInitRequest(const FVdjmEncoderInitRequest* initPreset);
+
 	
 	/*	↓↓↓[			Delegators			]↓↓↓	*/
 	UPROPERTY(BlueprintAssignable,EditAnywhere)
@@ -1031,6 +1111,9 @@ protected:
 	double mFrameInterval = 0.0;
 	
 	int32 mRecordedFrameCount = 0;
+	
+	//	TODO(20260410 env control) - 
+	EVdjmRecordQualityTiers mCurrentQualityTier = EVdjmRecordQualityTiers::EDefault;	//	추후에 옵션을 바꿀 수 있는 인터페이스에 노출될 놈임.
 };
 
 

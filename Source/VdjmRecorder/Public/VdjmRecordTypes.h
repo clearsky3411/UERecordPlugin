@@ -333,6 +333,7 @@ struct VDJMRECORDER_API FVdjmRecordGlobalRules
 UENUM(Blueprintable)
 enum class EVdjmRecordQualityTiers : uint8
 {
+	EUndefined UMETA(DisplayName="Undefined",Hidden),
 	EDefault UMETA(DisplayName="Default"),
 	EUltra UMETA(DisplayName="Ultra"),
 	EHigh UMETA(DisplayName="High"),
@@ -341,6 +342,8 @@ enum class EVdjmRecordQualityTiers : uint8
 	EMdeiumLow UMETA(DisplayName="MediumLow"),
 	ELow UMETA(DisplayName="Low"),
 	ELowest UMETA(DisplayName="Lowest"),
+	ECustom UMETA(DisplayName="Custom"),
+	EMax UMETA(Hidden)
 };
 UENUM(Blueprintable)
 enum class EVdjmRecordSavePathDirectoryType : uint8
