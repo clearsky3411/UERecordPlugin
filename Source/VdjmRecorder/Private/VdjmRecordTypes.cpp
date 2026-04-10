@@ -306,6 +306,39 @@ bool FVdjmEncoderInitRequestAudio::EvaluateValidation() const
 		&& AacProfile > 0
 		&& !SourceSubMixName.IsNone();
 }
+
+namespace
+{
+	bool EvaluateOutputFilePathValidation(const FString& InOutputFilePath)
+	{
+		if (InOutputFilePath.IsEmpty())
+		{
+			return false;
+		}
+
+		const FString FullOutputFilePath = FPaths::ConvertRelativePathToFull(InOutputFilePath);
+		FText ValidationError;
+		if (!FPaths::ValidatePath(FullOutputFilePath, &ValidationError))
+		{
+			return false;
+		}
+
+		const FString FileName = FPaths::GetCleanFilename(FullOutputFilePath);
+		if (FileName.IsEmpty())
+		{
+			return false;
+		}
+
+		const FString Extension = FPaths::GetExtension(FileName, false).ToLower();
+		if (!(Extension == TEXT("mp4") || Extension == TEXT("mov")))
+		{
+			return false;
+		}
+
+		return true;
+	}
+}
+
 TOptional<FVdjmEncoderInitRequestOutput> FVdjmEncoderInitRequestOutput::CreateDefaultForCurrentPlatform()
 {
 #if PLATFORM_WINDOWS
@@ -327,8 +360,8 @@ TOptional<FVdjmEncoderInitRequestOutput> FVdjmEncoderInitRequestOutput::CreateDe
 
 bool FVdjmEncoderInitRequestOutput::EvaluateValidation() const
 {
-	return !OutputFilePath.IsEmpty()
-		&& !SessionId.IsEmpty();
+	return EvaluateOutputFilePathValidation(OutputFilePath)
+		&& !SessionId.TrimStartAndEnd().IsEmpty();
 }
 
 TOptional<FVdjmEncoderInitRequestRuntimePolicy>FVdjmEncoderInitRequestRuntimePolicy::CreateDefaultForCurrentPlatform()
@@ -385,4 +418,3 @@ bool FVdjmEncoderInitRequest::EvaluateValidation() const
 		&& RuntimePolicyConfig.EvaluateValidation()
 		&& PlatformExtensionConfig.EvaluateValidation();
 }
-
