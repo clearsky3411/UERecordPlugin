@@ -479,7 +479,8 @@ protected:
 #define DECLARE_VDJM_ENCODER_BOILERPLATE(StructType) \
 static TOptional<StructType> CreateDefaultForCurrentPlatform(); \
 void ApplyOptional(const TOptional<StructType>& Optional) { if (Optional.IsSet()) { *this = Optional.GetValue(); } else { Clear(); } } \
-void Clear() { ApplyOptional(CreateDefaultForCurrentPlatform()); }
+void Clear() { ApplyOptional(CreateDefaultForCurrentPlatform()); } \
+bool EvaluateValidation() const;
 
 USTRUCT(Blueprintable)
 struct VDJMRECORDER_API FVdjmEncoderInitRequestVideo
@@ -651,6 +652,7 @@ struct VDJMRECORDER_API FVdjmEncoderInitRequest
 			*RuntimePolicyConfig.ToString(),
 			*PlatformExtensionConfig.ToString());
 	}
+	bool EvaluateValidation() const;
 	static TOptional<FVdjmEncoderInitRequest> CreateDefaultForCurrentPlatform();
 };
 

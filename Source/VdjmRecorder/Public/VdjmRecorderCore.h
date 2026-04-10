@@ -604,15 +604,25 @@ struct FVdjmRecordEnvPlatformPreset
 		return PipelineUnitClassMap.Find(stage);
 	}
 	
-	bool DbcIsValid() const
-	{
-		return 
-			DefaultQualityTier != EVdjmRecordQualityTiers::EUndefined
-			&& RecordResourceClass != nullptr
-			&& PipelineClass != nullptr
-			&& PipelineUnitClassMap.Num() > 0
-			&& EncoderInitRequestMap.Num() > 0;
-	}
+		bool DbcIsValid() const
+		{
+			if (DefaultQualityTier == EVdjmRecordQualityTiers::EUndefined
+				|| RecordResourceClass == nullptr
+				|| PipelineClass == nullptr
+				|| PipelineUnitClassMap.Num() <= 0
+				|| EncoderInitRequestMap.Num() <= 0)
+			{
+				return false;
+			}
+			for (const auto& Pair : EncoderInitRequestMap)
+			{
+				if (!Pair.Value.EvaluateValidation())
+				{
+					return false;
+				}
+			}
+			return true;
+		}
 	
 	const FVdjmEncoderInitRequest* GetEncoderInitRequest(EVdjmRecordQualityTiers qualityTier =EVdjmRecordQualityTiers::EUndefined ) const
 	{
