@@ -306,7 +306,7 @@ void UVdjmAndroidRecordPipeline::InitializeRecordPipeline(UVdjmRecordResource* r
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - recordResource is null."));
 		return;
 	}
-	UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - Initializing pipeline with record resource for bridge actor: %s"), *recordResource->OwnerBridgeActor->GetName());
+	
 	LinkedBridgeActor = recordResource->OwnerBridgeActor;
 	if (not LinkedBridgeActor.IsValid())
 	{
@@ -324,23 +324,14 @@ void UVdjmAndroidRecordPipeline::InitializeRecordPipeline(UVdjmRecordResource* r
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - Target platform is not Android. Current platform: %d"), (int32)isAndroid);
 		return;
 	}
-	/*
-			* TODO(260410-cofigs): 위치 검증 OK (Pipeline init 시점의 platformInfo 취득 직후)
-			* - FVdjmRecordEnvPlatformInfo 유효성 검증 함수(예: ValidateForAndroidPipeline)를 추가해
-			*   Android 파이프라인에서 필요한 값/스테이지가 실제로 존재하는지 사전 확인한다.
-			* - 추가 권장:
-			*   1) platformInfo == nullptr guard + 에러 로그
-			*   2) SurfaceEncodeAndWrite 스테이지 누락 시 명시적 실패 처리
-			*   3) 대상 플랫폼 불일치(Android 아님) 시 조기 종료
-			*   완료 제대로 수정부분을 확인했다면 💖 해당 이모지를 써다오.
-			*/
+
 	UVdjmRecordEnvDataAsset* dataAsset = LinkedBridgeActor->GetRecordEnvConfigureDataAsset();
 	if (dataAsset == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - LinkedBridgeActor does not have a valid record environment data asset."));
 		return;
 	}
-	
+	//	그런데 이미 위에서 nullptr 을 검증하고 오는데 그냥 독립적이라 생각하고 해주자.
 	FVdjmRecordEnvPlatformInfo* platformInfo = dataAsset->GetPlatformInfo(isAndroid);
 	if (not ValidateForAndroidPipeline(platformInfo))
 	{

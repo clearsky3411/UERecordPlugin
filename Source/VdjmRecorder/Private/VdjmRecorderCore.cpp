@@ -403,8 +403,8 @@ bool UVdjmRecordEnvCurrentInfo::InitializeCurrentEnvironment(AVdjmRecordBridgeAc
 			float floatBitrate = 
 				mAllBitrateMap.Contains(ownerBridge->SelectedBitrateType)?
 					FVdjmFunctionLibraryHelper::ConvertToBitrateValue(mAllBitrateMap[ownerBridge->SelectedBitrateType]) :
-					mAllBitrateMap.Contains(EVdjmRecordBitrateType::EDefault)?
-						mAllBitrateMap[EVdjmRecordBitrateType::EDefault] : 2000000.0f;
+					mAllBitrateMap.Contains(EVdjmRecordQualityTiers::EDefault)?
+						mAllBitrateMap[EVdjmRecordQualityTiers::EDefault] : 2000000.0f;
 			mCurrentBitrate = FVdjmFunctionLibraryHelper::ConvertToBitrateValue(floatBitrate);
 			
 			//mCurrentBitrate =

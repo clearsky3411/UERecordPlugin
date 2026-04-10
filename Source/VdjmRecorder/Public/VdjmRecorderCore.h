@@ -325,10 +325,10 @@ public:
 	int32 FrameRate = 30;
     UPROPERTY(Category = "Config|Video",
     	EditAnywhere)
-	TMap<EVdjmRecordBitrateType,int32> BitrateMap;
+	TMap<EVdjmRecordQualityTiers,int32> BitrateMap;
 	UPROPERTY(Category = "Config|Video",
 			EditAnywhere)
-	EVdjmRecordBitrateType SelectedBitrateType = EVdjmRecordBitrateType::EDefault;
+	EVdjmRecordQualityTiers SelectedBitrateType = EVdjmRecordQualityTiers::EDefault;
 	/*
 	 *	pc
 	 *		high:		10,000,000	(	10Mbps	)
@@ -531,7 +531,7 @@ USTRUCT(Blueprintable)
 struct VDJMRECORDER_API FVdjmRecordEnvPlatformInfo 
 {
 	/*
-	* TODO(260410-cofigs) 
+	* TODO(260410-cofigs) 여기 안 오디오를 넣어야함.
 	*/
 	GENERATED_BODY()
 	UPROPERTY(Category ="Record|Env",EditAnywhere)
@@ -545,7 +545,7 @@ struct VDJMRECORDER_API FVdjmRecordEnvPlatformInfo
 	
 	UPROPERTY(Category ="Record|Env",EditAnywhere,
 		meta=(DisplayName="Bitrate Table (Mbps)", ClampMin="1", UIMin="1"))
-	TMap<EVdjmRecordBitrateType,float> BitrateMap;	//	Default 로 선택을 해놔라.
+	TMap<EVdjmRecordQualityTiers,float> BitrateMap;	//	Default 로 선택을 해놔라.
 	
     UPROPERTY(Category ="Record|Env",EditAnywhere)
 	TSubclassOf<UVdjmRecordResource> RecordResourceClass;
@@ -578,6 +578,18 @@ struct VDJMRECORDER_API FVdjmRecordEnvPlatformInfo
 			&& DbcIsValidResolution();
 	}
 };
+//	vdjm 20260410
+USTRUCT()
+struct FVdjmRecordEnvPlatformData
+{
+	GENERATED_BODY()
+	
+	UPROPERTY(EditAnywhere)
+	EVdjmRecordQualityTiers DefaultQualityTier = EVdjmRecordQualityTiers::EDefault;
+	
+	UPROPERTY(EditAnywhere)
+	TMap<EVdjmRecordQualityTiers,FVdjmEncoderInitRequest> EncoderInitRequestMap;
+};
 
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
@@ -594,6 +606,11 @@ public:
 	
 	UPROPERTY(EditAnywhere)
 	TMap<EVdjmRecordEnvPlatform,FVdjmRecordEnvPlatformInfo> PlatformInfoMap;
+	
+	//	vdjm 20260410
+	UPROPERTY(EditAnywhere)	
+	TMap<EVdjmRecordEnvPlatform,FVdjmRecordEnvPlatformData> PlatformDataMap;
+	
 
 	/*
 	* TODO(260410-cofigs) : GetPlatformInfo 여기에서 FVdjmRecordEnvPlatformInfo 이걸 검증해주는 거라 FVdjmRecordEnvPlatformInfo의 검증부분을 늘리면 될듯.
@@ -695,7 +712,7 @@ private:
 	UPROPERTY()
 	TEnumAsByte<EPixelFormat> mCurrentPixelFormat = EPixelFormat::PF_A8R8G8B8;
 	UPROPERTY()
-	TMap<EVdjmRecordBitrateType,float> mAllBitrateMap;
+	TMap<EVdjmRecordQualityTiers,float> mAllBitrateMap;
 	UPROPERTY()
 	int32 mCurrentBitrate;	//	Default 로 선택을 해놔라.
 	UPROPERTY()
@@ -949,7 +966,7 @@ public:
 	TWeakObjectPtr<APlayerController> mTargetPlayerController;
 
 	UPROPERTY(EditAnywhere)
-	EVdjmRecordBitrateType SelectedBitrateType = EVdjmRecordBitrateType::EDefault;
+	EVdjmRecordQualityTiers SelectedBitrateType = EVdjmRecordQualityTiers::EDefault;
 
 	bool TryResolveViewportSize(FIntPoint& OutSize) const;
 	static const TCHAR* GetInitStepName(EVdjmRecordBridgeInitStep step);

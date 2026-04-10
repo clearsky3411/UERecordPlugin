@@ -326,12 +326,12 @@ struct VDJMRECORDER_API FVdjmRecordGlobalRules
 };
 
 /*
-§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
-	↓							UENUM s							↓
-	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
+§	↓	↓	↓	↓	↓	↓	↓
+							UENUM s							
+	Tier
 */
 UENUM(Blueprintable)
-enum class EVdjmRecordBitrateType : uint8
+enum class EVdjmRecordQualityTiers : uint8
 {
 	EDefault UMETA(DisplayName="Default"),
 	EUltra UMETA(DisplayName="Ultra"),
@@ -620,10 +620,15 @@ struct VDJMRECORDER_API FVdjmEncoderInitRequest
 {
 	GENERATED_BODY()
 	
+	UPROPERTY(EditAnywhere, Category="EncoderInitRequest|Video")
 	FVdjmEncoderInitRequestVideo VideoConfig;
+	UPROPERTY(EditAnywhere, Category="EncoderInitRequest|Audio")
 	FVdjmEncoderInitRequestAudio AudioConfig;
+	UPROPERTY(EditAnywhere, Category="EncoderInitRequest|Output")
 	FVdjmEncoderInitRequestOutput OutputConfig;
+	UPROPERTY(EditAnywhere, Category="EncoderInitRequest|RuntimPolicy")
 	FVdjmEncoderInitRequestRuntimePolicy RuntimePolicyConfig;
+	UPROPERTY(EditAnywhere, Category="EncoderInitRequest|PlatformExtension")
 	FVdjmEncoderInitRequestPlatformExtension PlatformExtensionConfig;
 	
 	void Clear()
