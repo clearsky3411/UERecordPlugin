@@ -213,9 +213,16 @@ VdjmResult UVdjmRecordAndroidUnit::RecordStartCheck()
 			*LinkedRecordResource->FinalFilePath);
 	}
 	
-	/*
-	* TODO(260410-cofigs) 
-	*/
+		/*
+		* TODO(260410-cofigs): 위치 검증 OK (RecordStartCheck 직전 호출 지점)
+		* - 현재는 LinkedRecordResource의 개별 필드를 직접 넘겨 InitializeEncoder(...)를 호출한다.
+		* - 목표는 여기서 FVdjmEncoderInitRequest(또는 Android 전용 Config Snapshot)를 생성한 뒤
+		*   InitializeEncoderExtended(...)로 단일 전달하는 구조로 바꾸는 것.
+		* - 검증 포인트:
+		*   1) FinalFilePath/Resolution/Bitrate/FPS가 모두 스냅샷 값으로 고정되는지
+		*   2) Start 이후 LinkedRecordResource 변경이 인코더 런타임에 영향을 주지 않는지
+		*   3) 실패 로그에 어떤 필드 검증이 깨졌는지 명확히 남는지
+		*/
 	if (not mAndroidEncoderImpl->InitializeEncoder(
 		LinkedRecordResource->FinalFilePath,
 		LinkedRecordResource->OriginResolution.X,
@@ -299,22 +306,51 @@ void UVdjmAndroidRecordPipeline::InitializeRecordPipeline(UVdjmRecordResource* r
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - recordResource is null."));
 		return;
 	}
-	UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - Initializing pipeline with record resource for bridge actor: %s"), *recordResource->OwnerBridgeActor->GetName());
+	
 	LinkedBridgeActor = recordResource->OwnerBridgeActor;
-	if (LinkedBridgeActor.IsValid() && LinkedBridgeActor->DbcValidRecordResource())
+	if (not LinkedBridgeActor.IsValid())
 	{
-		FVdjmRecordEnvPlatformInfo* platformInfo =
-			LinkedBridgeActor->GetRecordEnvConfigureDataAsset()
-				->GetPlatformInfo( AVdjmRecordBridgeActor::GetTargetPlatform());
-		/*
-		* TODO(260410-cofigs) : 여기에다가 FVdjmRecordEnvPlatformInfo 의 검증을 해주는 기능을 넣으면 더 안전하긴 하겠다. 물론 안드로이드 파이프라인꺼니깐, 안드로이드에 맞춘 것만 받아들이게 하는것도 나쁘지 않을듯.
-		*/
-		
-		if (const TSubclassOf<UVdjmRecordUnit>* foundState = platformInfo->GetPipelineState(EVdjmRecordPipelineStages::ESurfaceEncodeAndWrite))
-		{
-			CreateUnit(*foundState);
-		}
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - LinkedBridgeActor is not valid."));
+		return;
 	}
+	if (not LinkedBridgeActor->DbcValidRecordResource())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - LinkedBridgeActor does not have a valid record resource."));
+		return;
+	}
+	EVdjmRecordEnvPlatform isAndroid = AVdjmRecordBridgeActor::GetTargetPlatform();
+	if (isAndroid != EVdjmRecordEnvPlatform::EAndroid)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - Target platform is not Android. Current platform: %d"), (int32)isAndroid);
+		return;
+	}
+
+	UVdjmRecordEnvDataAsset* dataAsset = LinkedBridgeActor->GetRecordEnvConfigureDataAsset();
+	if (dataAsset == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - LinkedBridgeActor does not have a valid record environment data asset."));
+		return;
+	}
+	
+	
+	//	그런데 이미 위에서 nullptr 을 검증하고 오는데 그냥 독립적이라 생각하고 해주자.
+	FVdjmRecordEnvPlatformInfo* platformInfo = dataAsset->GetPlatformInfo(isAndroid);
+	if (not ValidateForAndroidPipeline(platformInfo))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - Platform info validation failed for Android pipeline."));
+		return;
+	}
+	
+	if (const TSubclassOf<UVdjmRecordUnit>* foundState = platformInfo->GetPipelineState(EVdjmRecordPipelineStages::ESurfaceEncodeAndWrite))
+	{
+		CreateUnit(*foundState);
+	}
+	else
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - Platform info does not contain a valid unit class for ESurfaceEncodeAndWrite stage."));
+		return;
+	}
+	
 }
 
 void UVdjmAndroidRecordPipeline::ExecuteRecordPipeline(const FVdjmRecordUnitParamContext& context,
@@ -370,4 +406,19 @@ void UVdjmAndroidRecordPipeline::ReleaseRecordPipeline()
 bool UVdjmAndroidRecordPipeline::DbcIsValid() const
 {
 	return Super::DbcIsValid();
+}
+
+bool UVdjmAndroidRecordPipeline::ValidateForAndroidPipeline(FVdjmRecordEnvPlatformInfo* platformInfo) const
+{
+	if (platformInfo == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmAndroidRecordPipeline::ValidateForAndroidPipeline - platformInfo is null."));
+		return false;
+	}
+	/*
+	 * TODO(260410-cofigs): 여기에 안드로이드를 벗어난 혹은 하드웨어 검증을 실시한다.
+	 * 최소 사양이나 그런걸 여기에서 검사해준다 생각하면 편함.
+	 */
+	
+	return true;
 }
