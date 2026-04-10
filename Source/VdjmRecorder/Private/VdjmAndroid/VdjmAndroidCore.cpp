@@ -308,12 +308,23 @@ void UVdjmAndroidRecordPipeline::InitializeRecordPipeline(UVdjmRecordResource* r
 	}
 	UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - Initializing pipeline with record resource for bridge actor: %s"), *recordResource->OwnerBridgeActor->GetName());
 	LinkedBridgeActor = recordResource->OwnerBridgeActor;
-	if (LinkedBridgeActor.IsValid() && LinkedBridgeActor->DbcValidRecordResource())
+	if (not LinkedBridgeActor.IsValid())
 	{
-		FVdjmRecordEnvPlatformInfo* platformInfo =
-			LinkedBridgeActor->GetRecordEnvConfigureDataAsset()
-				->GetPlatformInfo( AVdjmRecordBridgeActor::GetTargetPlatform());
-			/*
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - LinkedBridgeActor is not valid."));
+		return;
+	}
+	if (not LinkedBridgeActor->DbcValidRecordResource())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - LinkedBridgeActor does not have a valid record resource."));
+		return;
+	}
+	EVdjmRecordEnvPlatform isAndroid = AVdjmRecordBridgeActor::GetTargetPlatform();
+	if (isAndroid != EVdjmRecordEnvPlatform::EAndroid)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - Target platform is not Android. Current platform: %d"), (int32)isAndroid);
+		return;
+	}
+	/*
 			* TODO(260410-cofigs): 위치 검증 OK (Pipeline init 시점의 platformInfo 취득 직후)
 			* - FVdjmRecordEnvPlatformInfo 유효성 검증 함수(예: ValidateForAndroidPipeline)를 추가해
 			*   Android 파이프라인에서 필요한 값/스테이지가 실제로 존재하는지 사전 확인한다.
@@ -322,12 +333,30 @@ void UVdjmAndroidRecordPipeline::InitializeRecordPipeline(UVdjmRecordResource* r
 			*   2) SurfaceEncodeAndWrite 스테이지 누락 시 명시적 실패 처리
 			*   3) 대상 플랫폼 불일치(Android 아님) 시 조기 종료
 			*/
-		
-		if (const TSubclassOf<UVdjmRecordUnit>* foundState = platformInfo->GetPipelineState(EVdjmRecordPipelineStages::ESurfaceEncodeAndWrite))
-		{
-			CreateUnit(*foundState);
-		}
+	UVdjmRecordEnvDataAsset* dataAsset = LinkedBridgeActor->GetRecordEnvConfigureDataAsset();
+	if (dataAsset == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - LinkedBridgeActor does not have a valid record environment data asset."));
+		return;
 	}
+	
+	FVdjmRecordEnvPlatformInfo* platformInfo = dataAsset->GetPlatformInfo(isAndroid);
+	if (not ValidateForAndroidPipeline(platformInfo))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - Platform info validation failed for Android pipeline."));
+		return;
+	}
+	
+	if (const TSubclassOf<UVdjmRecordUnit>* foundState = platformInfo->GetPipelineState(EVdjmRecordPipelineStages::ESurfaceEncodeAndWrite))
+	{
+		CreateUnit(*foundState);
+	}
+	else
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - Platform info does not contain a valid unit class for ESurfaceEncodeAndWrite stage."));
+		return;
+	}
+	
 }
 
 void UVdjmAndroidRecordPipeline::ExecuteRecordPipeline(const FVdjmRecordUnitParamContext& context,
@@ -383,4 +412,19 @@ void UVdjmAndroidRecordPipeline::ReleaseRecordPipeline()
 bool UVdjmAndroidRecordPipeline::DbcIsValid() const
 {
 	return Super::DbcIsValid();
+}
+
+bool UVdjmAndroidRecordPipeline::ValidateForAndroidPipeline(FVdjmRecordEnvPlatformInfo* platformInfo) const
+{
+	if (platformInfo == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmAndroidRecordPipeline::ValidateForAndroidPipeline - platformInfo is null."));
+		return false;
+	}
+	/*
+	 * TODO(260410-cofigs): 여기에 안드로이드를 벗어난 혹은 하드웨어 검증을 실시한다.
+	 * 최소 사양이나 그런걸 여기에서 검사해준다 생각하면 편함.
+	 */
+	
+	return true;
 }
