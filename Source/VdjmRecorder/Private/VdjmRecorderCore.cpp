@@ -550,17 +550,25 @@ bool UVdjmRecordEnvResolver::InitComplete(AVdjmRecordBridgeActor* ownerBridge, U
 
 bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPreset* presetData)
 {
+	mResolvedPreset.Clear();
 	mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
-	if (presetData == nullptr || not presetData->DbcIsValid())
+
+	if (presetData == nullptr || !presetData->DbcIsValid())
 	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform - presetData is null or invalid."));
 		return false;
 	}
 
-	const auto currPlatform = VdjmRecordUtils::GetTargetPlatform();
-	
-	
-	const EVdjmRecordQualityTiers presetRequestTier =
-		(LinkedOwnerBridge.IsValid() && LinkedOwnerBridge->SelectedBitrateType != EVdjmRecordQualityTiers::EUndefined)
+	if (!LinkedOwnerBridge.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform - LinkedOwnerBridge is invalid."));
+		return false;
+	}
+
+	const EVdjmRecordQualityTiers RequestedTier =
+		(LinkedOwnerBridge->SelectedBitrateType != EVdjmRecordQualityTiers::EUndefined)
 			? LinkedOwnerBridge->SelectedBitrateType
 			: presetData->DefaultQualityTier;
 
@@ -574,7 +582,7 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 		EVdjmRecordQualityTiers::ELowest
 	};
 
-	auto FindTierIndexFunctor = [&](EVdjmRecordQualityTiers Tier)->int32
+	auto FindTierIndex = [](EVdjmRecordQualityTiers Tier) -> int32
 	{
 		for (int32 i = 0; i < UE_ARRAY_COUNT(TierOrder); ++i)
 		{
@@ -586,86 +594,186 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 		return INDEX_NONE;
 	};
 
-	int32 beginTier = FindTierIndexFunctor(presetRequestTier);
-	if (beginTier == INDEX_NONE)
+	int32 BeginTier = FindTierIndex(RequestedTier);
+	if (BeginTier == INDEX_NONE)
 	{
-		beginTier = FindTierIndexFunctor(presetData->DefaultQualityTier);
+		BeginTier = FindTierIndex(presetData->DefaultQualityTier);
 	}
-	if (beginTier == INDEX_NONE)
+	if (BeginTier == INDEX_NONE)
 	{
-		beginTier = 0;
+		BeginTier = 0;
 	}
 
-	FIntPoint resolvedViewPortSize = FIntPoint::ZeroValue;
-	const bool bHasViewport = LinkedOwnerBridge.IsValid() && LinkedOwnerBridge->TryResolveViewportSize(resolvedViewPortSize);
-	if (!bHasViewport || 
-		resolvedViewPortSize.X <= 0 || resolvedViewPortSize.Y <= 0)
+	FIntPoint ViewportSize = FIntPoint::ZeroValue;
+	if (!LinkedOwnerBridge->TryResolveViewportSize(ViewportSize) ||
+		ViewportSize.X <= 0 || ViewportSize.Y <= 0)
 	{
-		resolvedViewPortSize = GetPresetFeatureResolution(0);
+		ViewportSize = GetPresetFeatureResolution(BeginTier);
 	}
-	
-	/*
-	 * TODO(20260413 refactoring and audio) : resolution, bitrate,frame rate, file path, 즉, FVdjmRecordEnvPlatformPreset 이거를 한번 처리.
-	 */
-	
-	
-	
+
+	const UVdjmRecordEnvDataAsset* ConfigAsset = LinkedOwnerBridge->GetRecordEnvConfigureDataAsset();
+	const int32 MaxFrameRate =
+		ConfigAsset ? FMath::Max(1, ConfigAsset->GlobalRules.MaxFrameRate) : 60;
+
+	const FString CustomFileName = LinkedOwnerBridge->GetCurrentFileName();
+
+	auto TryResolveTier = [&](EVdjmRecordQualityTiers CandidateTier, int32 CandidateTierIndex) -> bool
+	{
+		const FVdjmEncoderInitRequest* SourceRequest = presetData->GetEncoderInitRequest(CandidateTier);
+		if (SourceRequest == nullptr)
+		{
+			return false;
+		}
+
+		FVdjmEncoderInitRequest CandidateRequest = *SourceRequest;
+		if (!CandidateRequest.EvaluateValidation())
+		{
+			return false;
+		}
+
+		const FIntPoint TierMaxResolution =
+			GetPresetFeatureResolution(FMath::Max(0, CandidateTierIndex));
+
+		const FIntPoint RawRequestedResolution =
+			CandidateRequest.VideoConfig.bResolutionFitToDisplay
+				? ViewportSize
+				: FIntPoint(CandidateRequest.VideoConfig.Width, CandidateRequest.VideoConfig.Height);
+
+		const FIntPoint FittedResolution =
+			 VdjmRecordUtils::FitResolutionWithin(RawRequestedResolution, TierMaxResolution);
+
+		FIntPoint SafeResolution;
+		if (!VdjmRecordUtils::Validations::DbcValidateResolution(
+			FittedResolution,
+			SafeResolution,
+			TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform")))
+		{
+			return false;
+		}
+
+		int32 SafeBitrate = 0;
+		if (!VdjmRecordUtils::Validations::DbcValidateBitrate(
+			CandidateRequest.VideoConfig.Bitrate,
+			SafeBitrate,
+			TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform")))
+		{
+			return false;
+		}
+
+		CandidateRequest.VideoConfig.Width = SafeResolution.X;
+		CandidateRequest.VideoConfig.Height = SafeResolution.Y;
+		CandidateRequest.VideoConfig.Bitrate = SafeBitrate;
+		CandidateRequest.VideoConfig.FrameRate =
+			FMath::Min(FMath::Max(1, CandidateRequest.VideoConfig.FrameRate), MaxFrameRate);
+
+		FVdjmRecordEnvPlatformPreset CandidatePreset = *presetData;
+		CandidatePreset.EncoderInitRequestMap.FindOrAdd(CandidateTier) = CandidateRequest;
+
+		mResolvedPreset = MoveTemp(CandidatePreset);
+		mResolvedQualityTier = CandidateTier;
+
+		if (!ResolvedFinalFilePath(CustomFileName))
+		{
+			mResolvedPreset.Clear();
+			mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
+			return false;
+		}
+
+		const FVdjmEncoderInitRequest* FinalResolvedRequest = TryGetResolvedEncoderInitRequest();
+		if (FinalResolvedRequest == nullptr || !FinalResolvedRequest->EvaluateValidation())
+		{
+			mResolvedPreset.Clear();
+			mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
+			return false;
+		}
+
+		if (!LinkedOwnerBridge->EvaluateInitRequest(FinalResolvedRequest))
+		{
+			UE_LOG(LogVdjmRecorderCore, Warning,
+				TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform - Tier %s rejected by hardware probe."),
+				*StaticEnum<EVdjmRecordQualityTiers>()->GetValueAsString(CandidateTier));
+
+			mResolvedPreset.Clear();
+			mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
+			return false;
+		}
+
+		return mResolvedPreset.DbcIsValid();
+	};
+
+	// 1) Requested/default 가 EDefault 면 그걸 먼저 시도
+	const bool bTryDefaultFirst =
+		RequestedTier == EVdjmRecordQualityTiers::EDefault ||
+		(RequestedTier == EVdjmRecordQualityTiers::EUndefined &&
+		 presetData->DefaultQualityTier == EVdjmRecordQualityTiers::EDefault);
+
+	if (bTryDefaultFirst &&
+		presetData->EncoderInitRequestMap.Contains(EVdjmRecordQualityTiers::EDefault))
+	{
+		if (TryResolveTier(EVdjmRecordQualityTiers::EDefault, 0))
+		{
+			return true;
+		}
+	}
+
+	// 2) ordered tier down
+	for (int32 TierIndex = BeginTier; TierIndex < UE_ARRAY_COUNT(TierOrder); ++TierIndex)
+	{
+		if (TryResolveTier(TierOrder[TierIndex], TierIndex))
+		{
+			return true;
+		}
+	}
+
+	// 3) 마지막 fallback 으로 EDefault
+	if (presetData->EncoderInitRequestMap.Contains(EVdjmRecordQualityTiers::EDefault))
+	{
+		if (TryResolveTier(EVdjmRecordQualityTiers::EDefault, 0))
+		{
+			return true;
+		}
+	}
+
+	mResolvedPreset.Clear();
+	mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
+	return false;
 }
 
 bool UVdjmRecordEnvResolver::ResolvedFinalFilePath(const FString& customFileName)
 {
-	FString basePath;
-	if (not LinkedOwnerBridge.IsValid())
+	if (!LinkedOwnerBridge.IsValid())
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::ResolvedFinalFilePath - LinkedOwnerBridge is invalid."));
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("UVdjmRecordEnvResolver::ResolvedFinalFilePath - LinkedOwnerBridge is invalid."));
 		return false;
 	}
-	switch (VdjmRecordUtils::GetTargetPlatform())
+
+	FVdjmEncoderInitRequest* MutableRequest =
+		mResolvedPreset.EncoderInitRequestMap.Find(mResolvedQualityTier);
+
+	if (MutableRequest == nullptr)
 	{
-	case EVdjmRecordEnvPlatform::EWindows:
-		basePath = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());
-		break;
-	case EVdjmRecordEnvPlatform::EAndroid:
-		basePath =  FPaths::ConvertRelativePathToFull(FPaths::ProjectPersistentDownloadDir());
-		break;
-	case EVdjmRecordEnvPlatform::EIOS:
-		basePath = FPaths::ProjectSavedDir();
-		break;
-	case EVdjmRecordEnvPlatform::EMac:
-		basePath = FPaths::ProjectSavedDir();
-		break;
-	case EVdjmRecordEnvPlatform::ELinux:
-		basePath = FPaths::ProjectSavedDir();
-		break;
-	default:
-		basePath = FPaths::ProjectSavedDir();
-		break;
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("UVdjmRecordEnvResolver::ResolvedFinalFilePath - No mutable request found for tier %s."),
+			*StaticEnum<EVdjmRecordQualityTiers>()->GetValueAsString(mResolvedQualityTier));
+		return false;
 	}
-	if (const FVdjmEncoderInitRequest* initRequest =mResolvedPreset.GetEncoderInitRequest(mResolvedQualityTier))
+
+	const FString SafeOutputPath = VdjmRecordUtils::BuildResolvedOutputPath(
+		LinkedOwnerBridge->GetTargetPlatform(),
+		MutableRequest->OutputConfig.OutputFilePath,
+		customFileName,
+		MutableRequest->OutputConfig.SessionId, 
+		MutableRequest->OutputConfig.bOverwriteExists,
+		TEXT("UVdjmRecordEnvResolver::ResolvedFinalFilePath"));
+
+	if (SafeOutputPath.IsEmpty())
 	{
-		
+		return false;
 	}
-	
-	if(mCurrentFilePrefix.IsEmpty())
-	{
-		mCurrentFilePrefix = TEXT("Vcard");
-	}
-	if (mCurrentFilePrefix.EndsWith(TEXT("_")))
-	{
-		mCurrentFilePrefix.RemoveFromEnd(TEXT("_"));
-	}
-	FString finalPath = mCurrentFilePrefix + TEXT("_");
-	if(customFileName.IsEmpty())
-	{
-		finalPath += TEXT("_")+FString::FromInt(FDateTime::Now().ToUnixTimestamp());
-	}
-	else
-	{
-		mFileName = customFileName;
-		finalPath += customFileName + TEXT("_") + FString::FromInt(FDateTime::Now().ToUnixTimestamp());
-	}
-	
-	return FPaths::Combine(basePath, finalPath + TEXT(".mp4"));
+
+	MutableRequest->OutputConfig.OutputFilePath = SafeOutputPath;
+	return MutableRequest->OutputConfig.EvaluateValidation();
 }
 
 FIntPoint UVdjmRecordEnvResolver::GetPresetFeatureResolution(uint32 tier) const
@@ -843,6 +951,22 @@ bool UVdjmRecordResource::InitializeResourceExtended(UVdjmRecordEnvResolver* res
 	}
 	LinkedResolver = resolver;
 	
+	const FVdjmEncoderInitRequest* resolvedIniRequest = resolver->TryGetResolvedEncoderInitRequest();
+	if (resolvedIniRequest == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("UVdjmRecordResource::InitializeResourceExtended - Resolved init request is null."));
+		return false;
+	}
+	OriginResolution = FIntPoint(
+		resolvedIniRequest->VideoConfig.Width,
+		resolvedIniRequest->VideoConfig.Height);
+	
+	TextureResolution = OriginResolution;
+	FinalFrameRate = resolvedIniRequest->VideoConfig.FrameRate;
+	FinalBitrate = resolvedIniRequest->VideoConfig.Bitrate;
+	FinalFilePath = resolvedIniRequest->OutputConfig.OutputFilePath;
+	
 	return true;
 }
 
@@ -887,7 +1011,7 @@ FTextureRHIRef UVdjmRecordResource::CreateTextureForNV12(FIntPoint resolution, E
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 */
 
-bool VdjmRecorderValidation::DbcValidateResolution(const FIntPoint& InResolution, FIntPoint& OutSafeResolution,
+bool VdjmRecordUtils::Validations::DbcValidateResolution(const FIntPoint& InResolution, FIntPoint& OutSafeResolution,
 	const TCHAR* DebugOwner)
 {
 	OutSafeResolution = FIntPoint::ZeroValue;
@@ -920,7 +1044,7 @@ bool VdjmRecorderValidation::DbcValidateResolution(const FIntPoint& InResolution
 	return true;
 }
 
-bool VdjmRecorderValidation::DbcValidateBitrate(const int32 InBitrate, int32& OutSafeBitrate, const TCHAR* DebugOwner)
+bool VdjmRecordUtils::Validations::DbcValidateBitrate(const int32 InBitrate, int32& OutSafeBitrate, const TCHAR* DebugOwner)
 {
 	OutSafeBitrate = 0;
 
@@ -952,7 +1076,7 @@ bool VdjmRecorderValidation::DbcValidateBitrate(const int32 InBitrate, int32& Ou
 	return true;
 }
 
-bool VdjmRecorderValidation::DbcValidateOutputFilePath(const FString& InFilePath, FString& OutSafeFilePath,
+bool VdjmRecordUtils::Validations::DbcValidateOutputFilePath(const FString& InFilePath, FString& OutSafeFilePath,
 	const TCHAR* DebugOwner)
 {
 	OutSafeFilePath.Reset();
@@ -1665,7 +1789,8 @@ void AVdjmRecordBridgeActor::ChainInit_InitializeCurrentEnvironment()
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitErrorEnd);
 		return;
 	}
-	if (not EvaluateInitRequest(initPreset))
+	
+	if (not initPreset->EvaluateValidation())
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_InitializeCurrentEnvironment - Failed to evaluate encoder init preset. Continuing with initialization, but default values may be used."));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitErrorEnd);

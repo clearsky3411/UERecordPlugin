@@ -130,6 +130,24 @@ enum class EVdjmRecordEnvPlatform : uint8
 
 namespace VdjmRecordUtils
 {
+	namespace Validations
+	{
+		static bool DbcValidateResolution(
+			const FIntPoint& InResolution,
+			FIntPoint& OutSafeResolution,
+			const TCHAR* DebugOwner);
+
+		static bool DbcValidateBitrate(
+			const int32 InBitrate,
+			int32& OutSafeBitrate,
+			const TCHAR* DebugOwner);
+
+		static bool DbcValidateOutputFilePath(
+			const FString& InFilePath,
+			FString& OutSafeFilePath,
+			const TCHAR* DebugOwner);
+	}
+	
 	inline EVdjmRecordEnvPlatform GetTargetPlatform()
 	{
 #if PLATFORM_WINDOWS
@@ -141,6 +159,119 @@ namespace VdjmRecordUtils
 #else
 		return EVdjmRecordEnvPlatform::EUnknown;
 #endif
+	}
+	inline FString GetPlatformRecordBaseDir(EVdjmRecordEnvPlatform InPlatform)
+	{
+		switch (InPlatform)
+		{
+		case EVdjmRecordEnvPlatform::EAndroid:
+			return FPaths::ConvertRelativePathToFull(FPaths::ProjectPersistentDownloadDir());
+
+		case EVdjmRecordEnvPlatform::EWindows:
+		case EVdjmRecordEnvPlatform::EIOS:
+		case EVdjmRecordEnvPlatform::EMac:
+		case EVdjmRecordEnvPlatform::ELinux:
+		case EVdjmRecordEnvPlatform::EDefault:
+		default:
+			return FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());
+		}
+	}
+
+	inline FString MakeSafeBaseName(const FString& InCustomFileName, const FString& InSessionId)
+	{
+		FString BaseName = !InCustomFileName.TrimStartAndEnd().IsEmpty()
+			? InCustomFileName
+			: (!InSessionId.TrimStartAndEnd().IsEmpty() ? InSessionId : TEXT("VdjmRecord"));
+
+		BaseName = FPaths::MakeValidFileName(BaseName);
+		if (BaseName.IsEmpty())
+		{
+			BaseName = TEXT("VdjmRecord");
+		}
+		return BaseName;
+	}
+
+	inline FIntPoint FitResolutionWithin(const FIntPoint& Desired, const FIntPoint& MaxSize)
+	{
+		if (Desired.X <= 0 || Desired.Y <= 0)
+		{
+			return MaxSize;
+		}
+		if (MaxSize.X <= 0 || MaxSize.Y <= 0)
+		{
+			return Desired;
+		}
+
+		const double ScaleX = static_cast<double>(MaxSize.X) / static_cast<double>(Desired.X);
+		const double ScaleY = static_cast<double>(MaxSize.Y) / static_cast<double>(Desired.Y);
+		const double Scale = FMath::Min(1.0, FMath::Min(ScaleX, ScaleY));
+
+		return FIntPoint(
+			FMath::Max(2, FMath::FloorToInt(static_cast<double>(Desired.X) * Scale)),
+			FMath::Max(2, FMath::FloorToInt(static_cast<double>(Desired.Y) * Scale))
+		);
+	}
+
+	inline FString BuildResolvedOutputPath(
+		EVdjmRecordEnvPlatform InPlatform,
+		const FString& InRequestedPath,
+		const FString& InCustomFileName,
+		const FString& InSessionId,
+		const bool bOverwriteExists,
+		const TCHAR* DebugOwner)
+	{
+		const FString BaseDir = GetPlatformRecordBaseDir(InPlatform);
+
+		FString CandidatePath = InRequestedPath;
+		CandidatePath.TrimStartAndEndInline();
+
+		if (CandidatePath.IsEmpty())
+		{
+			const FString BaseName = MakeSafeBaseName(InCustomFileName, InSessionId);
+			CandidatePath = FPaths::Combine(
+				BaseDir,
+				FString::Printf(TEXT("%s_%lld.mp4"), *BaseName, FDateTime::Now().GetTicks()));
+		}
+		else
+		{
+			if (FPaths::IsRelative(CandidatePath))
+			{
+				CandidatePath = FPaths::Combine(BaseDir, CandidatePath);
+			}
+
+			const FString Dir = FPaths::GetPath(CandidatePath);
+			const FString BaseName = FPaths::GetBaseFilename(CandidatePath, false);
+			CandidatePath = FPaths::Combine(Dir, BaseName + TEXT(".mp4"));
+		}
+
+		FString SafePath;
+		if (!Validations::DbcValidateOutputFilePath(CandidatePath, SafePath, DebugOwner))
+		{
+			return FString();
+		}
+
+		if (!bOverwriteExists && IFileManager::Get().FileExists(*SafePath))
+		{
+			const FString Dir = FPaths::GetPath(SafePath);
+			const FString BaseName = FPaths::GetBaseFilename(SafePath, false);
+
+			const FString UniquePath = FPaths::Combine(
+				Dir,
+				FString::Printf(TEXT("%s_%lld.mp4"), *BaseName, FDateTime::Now().GetTicks()));
+
+			FString UniqueSafePath;
+			if (!Validations::DbcValidateOutputFilePath(
+				UniquePath,
+				UniqueSafePath,
+				DebugOwner))
+			{
+				return FString();
+			}
+
+			SafePath = MoveTemp(UniqueSafePath);
+		}
+
+		return SafePath;
 	}
 }
 

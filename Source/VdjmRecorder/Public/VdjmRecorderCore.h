@@ -1005,24 +1005,6 @@ protected:
 	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 */
 
-namespace VdjmRecorderValidation
-{
-	static bool DbcValidateResolution(
-		const FIntPoint& InResolution,
-		FIntPoint& OutSafeResolution,
-		const TCHAR* DebugOwner);
-
-	static bool DbcValidateBitrate(
-		const int32 InBitrate,
-		int32& OutSafeBitrate,
-		const TCHAR* DebugOwner);
-
-	static bool DbcValidateOutputFilePath(
-		const FString& InFilePath,
-		FString& OutSafeFilePath,
-		const TCHAR* DebugOwner);
-}
-
 
 
 
