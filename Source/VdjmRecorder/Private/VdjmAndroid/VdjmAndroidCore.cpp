@@ -307,7 +307,7 @@ void UVdjmAndroidRecordPipeline::InitializeRecordPipeline(UVdjmRecordResource* r
 		return;
 	}
 	
-	LinkedBridgeActor = recordResource->LinkedOwnerBridge;
+	LinkedBridgeActor = recordResource->OwnerBridgeActor;
 	if (not LinkedBridgeActor.IsValid())
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - LinkedBridgeActor is not valid."));

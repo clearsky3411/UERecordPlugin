@@ -505,8 +505,8 @@ UVdjmRecordResource* UVdjmRecordEnvResolver::CreateResolvedRecordResource(AVdjmR
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - ownerBridge is null."));
 		return nullptr;
 	}
-	LinkedOwnerBridge = ownerBridge;
-	
+	mOwnerBridge = ownerBridge;
+	mCurrentEnvInfo = ownerBridge->GetCurrentEnvInfo();
 	if (not ResolveEnvPlatform(presetData))
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to resolve environment platform."));
@@ -529,25 +529,6 @@ UVdjmRecordResource* UVdjmRecordEnvResolver::CreateResolvedRecordResource(AVdjmR
 	return nullptr;
 }
 
-bool UVdjmRecordEnvResolver::InitComplete(AVdjmRecordBridgeActor* ownerBridge, UVdjmRecordResource* resource,
-	UVdjmRecordUnitPipeline* pipeline)
-{
-	if (ownerBridge != nullptr && resource != nullptr && pipeline != nullptr)
-	{
-		LinkedOwnerBridge = ownerBridge;
-		LinkedRecordResource = resource;
-		LinkedPipeline = pipeline;
-	}
-	else
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::InitComplete - One or more parameters are null. ownerBridge: %s, resource: %s, pipeline: %s"),
-			ownerBridge ? *ownerBridge->GetName() : TEXT("null"),
-			resource ? *resource->GetName() : TEXT("null"),
-			pipeline ? *pipeline->GetName() : TEXT("null"));
-	}
-	return IsValidInitEnvResolver();
-}
-
 bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPreset* presetData)
 {
 	mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
@@ -557,8 +538,8 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 	}
 
 	const EVdjmRecordQualityTiers RequestedTier =
-		(LinkedOwnerBridge.IsValid() && LinkedOwnerBridge->SelectedBitrateType != EVdjmRecordQualityTiers::EUndefined)
-			? LinkedOwnerBridge->SelectedBitrateType
+		(mOwnerBridge.IsValid() && mOwnerBridge->SelectedBitrateType != EVdjmRecordQualityTiers::EUndefined)
+			? mOwnerBridge->SelectedBitrateType
 			: presetData->DefaultQualityTier;
 
 	constexpr EVdjmRecordQualityTiers TierOrder[] = {
@@ -594,13 +575,13 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 	}
 
 	FIntPoint ViewportSize = FIntPoint::ZeroValue;
-	const bool bHasViewport = LinkedOwnerBridge.IsValid() && LinkedOwnerBridge->TryResolveViewportSize(ViewportSize);
+	const bool bHasViewport = mOwnerBridge.IsValid() && mOwnerBridge->TryResolveViewportSize(ViewportSize);
 	if (!bHasViewport || ViewportSize.X <= 0 || ViewportSize.Y <= 0)
 	{
 		ViewportSize = FIntPoint(1280, 720);
 	}
 	const int64 ViewportPixels = static_cast<int64>(ViewportSize.X) * static_cast<int64>(ViewportSize.Y);
-	const int32 MaxFrameRate = LinkedOwnerBridge.IsValid() ? LinkedOwnerBridge->GetCurrentGlobalRules().MaxFrameRate : 30;
+	const int32 MaxFrameRate = mOwnerBridge.IsValid() ? mOwnerBridge->GetCurrentGlobalRules().MaxFrameRate : 30;
 	const int32 BitrateBudget = FMath::Max(1000000, static_cast<int32>(ViewportPixels * 4));
 
 	auto IsPresetFitForHardware = [&](const FVdjmEncoderInitRequest& InitRequest)->bool
@@ -1561,19 +1542,26 @@ void AVdjmRecordBridgeActor::ChainInit_InitializeCurrentEnvironment()
 		return;
 	}
 	
-	if (mEnvResolver == nullptr)
-	{
-		mEnvResolver = NewObject<UVdjmRecordEnvResolver>(this, UVdjmRecordEnvResolver::StaticClass());
-		UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_InitializeCurrentEnvironment - Environment resolver instance created."));
+		if (mCurrentEnvInfo == nullptr)
+		{
+			//	DataAsset 을 넣어서 CurrentEnvInfo 가 만들어지도록 한다.
+			mCurrentEnvInfo = NewObject<UVdjmRecordEnvCurrentInfo>(this,UVdjmRecordEnvCurrentInfo::StaticClass());
+		}
+		
+		if (mCurrentEnvInfo->InitializeCurrentEnvironment(this))
+		{
+			//	이때는 무조건 mCurrentEnvInfo 가 존재함.
+			OnTryChainInitNext(EVdjmRecordBridgeInitStep::ECreateRecordResource);
+		}
+		else
+		{
+			if (!mRecordConfigureDataAsset->DbcIsValid())
+			{
+				UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_InitializeCurrentEnvironment - Record configure data asset is not valid."));
+			}
+			OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitializeCurrentEnvironment);
+		}
 	}
-	else
-	{
-		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("ChainInit_InitializeCurrentEnvironment - Environment resolver instance already exists. Clearing existing resolver state."));
-		mEnvResolver->Clear();
-	}
-	
-	OnTryChainInitNext(EVdjmRecordBridgeInitStep::ECreateRecordResource);
-}
 
 void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
 {
@@ -1584,17 +1572,13 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
 	//	TODO(20260410 env control)
 	const FVdjmRecordEnvPlatformPreset* envPreset = mRecordConfigureDataAsset->GetPlatformPreset(GetTargetPlatform());
 	
+	const FVdjmRecordEnvPlatformPreset* envPreset = mRecordConfigureDataAsset
+		? mRecordConfigureDataAsset->GetPlatformPreset(GetTargetPlatform())
+		: nullptr;
 	if (envPreset == nullptr)
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordResource - No platform preset found for target platform. Cannot create record resource without platform preset."));
-		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitErrorEnd);
-		return;
-	}
-	const FVdjmEncoderInitRequest* initPreset = envPreset->GetEncoderInitRequest(mCurrentQualityTier);
-	if (initPreset == nullptr)
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordResource - No encoder init preset found for current quality tier. Cannot create record resource without encoder init preset."));
-		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitErrorEnd);
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordResource - No platform preset found for target platform."));
+		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
 	
@@ -1602,9 +1586,8 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
 	mRecordResource = mEnvResolver->CreateResolvedRecordResource(this,envPreset);
 	if (mRecordResource == nullptr)
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordResource - Failed to create record resource from environment resolver."));
-		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
-		return;
+		mRecordResource = NewObject<UVdjmRecordResource>(this,envPreset->RecordResourceClass);
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordResource - Record resource instance created."));
 	}
 	
 	//	여기에서 resolved 된 값들로 record resource 초기화 시도
@@ -1660,10 +1643,12 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordPipeline()
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
-	
-	if (mRecordResource == nullptr)
+	const FVdjmRecordEnvPlatformPreset* envPreset = mRecordConfigureDataAsset
+		? mRecordConfigureDataAsset->GetPlatformPreset(GetTargetPlatform())
+		: nullptr;
+	if (envPreset == nullptr)
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Record resource is null. Cannot create record pipeline without valid record resource."));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - No platform preset found for target platform."));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
@@ -1671,9 +1656,8 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordPipeline()
 	TSubclassOf<UVdjmRecordUnitPipeline> pipelineCls = mEnvResolver->TryGetResolvedPipelineClass();
 	if (pipelineCls == nullptr)
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Environment resolver did not provide a valid pipeline class. Cannot create record pipeline without valid pipeline class."));
-		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
-		return;
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordPipeline - Creating record pipeline instance."));
+		mRecordPipeline = NewObject<UVdjmRecordUnitPipeline>(this,envPreset->PipelineClass);
 	}
 	
 	if (not BindingRecordPipeline(pipelineCls,mRecordResource))
@@ -1741,8 +1725,136 @@ bool AVdjmRecordBridgeActor::DbcValidInitializeComplete() const
 
 bool AVdjmRecordBridgeActor::DbcRecordStartableFull() const
 {
-	/*
-	 * TODO(20260413 refactoring and audio) : 각각 UVdjmRecordEnvDataAsset 랑 
-	 */
-	
+	bool bOk = true;
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("{{  AVdjmRecordBridgeActor::DbcRecordStartableFull - Starting full record startability check. }}"));
+	auto Fail = [&bOk](const TCHAR* Reason)
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("AVdjmRecordBridgeActor::DbcRecordStartableFull - %s"), Reason);
+		bOk = false;
+	};
+
+	if (bIsRecording)
+	{
+		Fail(TEXT("DbcRecordStartableFull - bIsRecording == true"));
+	}
+
+	const double Now = FPlatformTime::Seconds();
+	if (mRecordEndTime > 0.0 && Now >= mRecordEndTime)
+	{
+		Fail(TEXT("DbcRecordStartableFull - record end time already passed"));
+	}
+
+	if (mRecordConfigureDataAsset == nullptr)
+	{
+		Fail(TEXT("DbcRecordStartableFull - mRecordConfigureDataAsset == nullptr"));
+	}
+	else
+	{
+		const FVdjmRecordEnvPlatformPreset* PlatformPreset =
+			mRecordConfigureDataAsset->GetPlatformPreset(GetTargetPlatform());
+		if (PlatformPreset == nullptr)
+		{
+			Fail(TEXT("DbcRecordStartableFull - PlatformPreset == nullptr for target platform"));
+		}
+		else
+		{
+			if (!PlatformPreset->DbcIsValid())
+			{
+				Fail(TEXT("DbcRecordStartableFull - PlatformPreset->DbcIsValid == false"));
+			}
+			else
+			{
+				const FVdjmEncoderInitRequest* InitPreset =
+					PlatformPreset->GetEncoderInitRequest(mCurrentQualityTier);
+				if (InitPreset == nullptr)
+				{
+					Fail(TEXT("DbcRecordStartableFull - InitPreset == nullptr for current quality tier"));
+				}
+				else if (!InitPreset->EvaluateValidation())
+				{
+					Fail(TEXT("DbcRecordStartableFull - InitPreset->EvaluateValidation == false"));
+				}
+			}
+		}
+	}
+
+	if (mCurrentEnvInfo == nullptr)
+	{
+		Fail(TEXT("DbcRecordStartableFull - mCurrentEnvInfo == nullptr"));
+	}
+	else
+	{
+		if (!mCurrentEnvInfo->DbcIsValidCurrentInfo())
+		{
+			Fail(TEXT("DbcRecordStartableFull - mCurrentEnvInfo->DbcIsValidCurrentInfo == false"));
+		}
+
+		if (mCurrentEnvInfo->GetCurrentResolution().X <= 0 || mCurrentEnvInfo->GetCurrentResolution().Y <= 0)
+		{
+			Fail(TEXT("DbcRecordStartableFull - CurrentResolution is invalid"));
+		}
+		if (mCurrentEnvInfo->GetCurrentFrameRate() <= 0)
+		{
+			Fail(TEXT("DbcRecordStartableFull - CurrentFrameRate <= 0"));
+		}
+		if (mCurrentEnvInfo->GetCurrentBitrate() <= 0)
+		{
+			Fail(TEXT("DbcRecordStartableFull - CurrentBitrate <= 0"));
+		}
+		if (mCurrentEnvInfo->GetCurrentFilePrefix().IsEmpty())
+		{
+			Fail(TEXT("DbcRecordStartableFull - CurrentFilePrefix is empty"));
+		}
+
+		FString CurrentPath = mCurrentEnvInfo->GetCurrentFilePath();
+		if (CurrentPath.IsEmpty())
+		{
+			Fail(TEXT("DbcRecordStartableFull - CurrentFilePath is empty"));
+		}
+		else
+		{
+			FPaths::NormalizeDirectoryName(CurrentPath);
+			if (FPaths::IsRelative(CurrentPath))
+			{
+				Fail(TEXT("DbcRecordStartableFull - CurrentFilePath is relative"));
+			}
+			else if (!IFileManager::Get().DirectoryExists(*CurrentPath))
+			{
+				Fail(TEXT("DbcRecordStartableFull - CurrentFilePath directory does not exist"));
+			}
+		}
+	}
+
+	if (mRecordResource == nullptr)
+	{
+		Fail(TEXT("DbcRecordStartableFull - mRecordResource == nullptr"));
+	}
+	else if (!mRecordResource->DbcIsValidResourceInit())
+	{
+		Fail(TEXT("DbcRecordStartableFull - mRecordResource->DbcIsValidResourceInit == false"));
+	}
+
+	if (mRecordPipeline == nullptr)
+	{
+		Fail(TEXT("DbcRecordStartableFull - mRecordPipeline == nullptr"));
+	}
+	else if (!mRecordPipeline->DbcIsValid())
+	{
+		Fail(TEXT("DbcRecordStartableFull - mRecordPipeline->DbcIsValid == false"));
+	}
+
+	if (mTargetViewport == nullptr)
+	{
+		Fail(TEXT("DbcRecordStartableFull - mTargetViewport == nullptr"));
+	}
+	if (!mTargetPlayerController.IsValid())
+	{
+		Fail(TEXT("DbcRecordStartableFull - mTargetPlayerController is invalid"));
+	}
+	if (!FSlateApplication::IsInitialized())
+	{
+		Fail(TEXT("DbcRecordStartableFull - SlateApplication is not initialized"));
+	}
+
+	return bOk;
 }
