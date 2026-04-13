@@ -503,8 +503,17 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoderExtended(const TWeakObjectPtr<UVd
 	if (const UVdjmRecordAndroidResource* androidRecordRes = Cast<UVdjmRecordAndroidResource>(recordResource.Get()))
 	{
 		/*
-		 * TODO(260410-cofigs) 
+		 * TODO(260410-cofigs): 위치 검증 OK (EncoderImpl 내부 config snapshot 생성 지점)
+		 * - androidRecordRes -> mConfig(FVdjmAndroidEncoderConfigure) 매핑을 여기서 1회 수행한다.
+		 * - 추가 권장 매핑:
+		 *   1) Video: OutputFilePath, Width/Height, Bitrate, FPS, GraphicBackend
+		 *   2) Audio: bEnableAudio, SampleRate, ChannelCount, Bitrate, DriftToleranceMs, AudioSourceId
+		 *   3) RuntimePolicy: RequireAVSync/AllowedDriftMs/BothTracksReady를 Android Audio 정책으로 투영
+		 * - 검증 포인트:
+		 *   a) mConfig.IsValidateEncoderArguments() 실패 시 상세 필드 로그
+		 *   b) StartEncoder() 이후 mConfig immutability 보장(외부 resource 재참조 금지)
 		 */
+		(void)androidRecordRes;
 	}
 	else
 	{

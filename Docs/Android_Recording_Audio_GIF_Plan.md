@@ -235,3 +235,94 @@
 ## 변경 이력
 - v1 (2026-04-08): 초안 생성
 - v2 (2026-04-08): 우선순위/요구기간/담당자/완료기준 반영, Session 단일소유 원칙 명시
+
+---
+
+## 멀티플랫폼/사양 프리셋 설계안 (v3 제안)
+
+### 배경
+- `FVdjmRecordGlobalRules`는 계속 공통 규칙으로 유지한다.
+- 기존 `PlatformInfoMap`은 하위호환을 위해 유지한다.
+- 새 요구사항은 "플랫폼별 + 사양등급별(최저/권장/최고) + 콘텐츠 유형별" 사전 설정 저장이다.
+
+### 핵심 원칙
+1. **하위호환 유지**
+   - 기존 `TMap<EVdjmRecordEnvPlatform, FVdjmRecordEnvPlatformInfo> PlatformInfoMap` 삭제 금지.
+2. **프리셋 분리**
+   - 기존 `PlatformInfoMap`은 레거시/기본 fallback.
+   - 신규 프리셋 저장소에서 실제 선택값을 우선 결정.
+3. **단조성 보장**
+   - 저사양 <= 권장 <= 고사양 규칙을 강제한다(해상도/FPS/비트레이트/오디오).
+4. **콘텐츠 프로파일링**
+   - 콘텐츠 유형(예: Gameplay/Cinematic/UI-heavy)에 따라 프리셋을 분기할 수 있게 한다.
+
+### 제안 데이터 모델
+#### A. 기존 유지 (Legacy fallback)
+- `PlatformInfoMap[Platform] -> FVdjmRecordEnvPlatformInfo`
+
+#### B. 신규 추가 (Profiled presets)
+- `PlatformProfiles[Platform][ContentType][Tier] -> FVdjmRecordEnvPreset`
+
+#### C. 식별 키 제안
+- `Platform` : Android / Windows / ...
+- `ContentType` : Default, Gameplay, Cinematic, UIHeavy ...
+- `Tier` : Low, Recommended, High
+
+### `FVdjmRecordEnvPreset`에 담을 항목(권장)
+1. **Video**
+   - Width / Height / FPS / Bitrate / Codec / Keyframe interval
+2. **Audio**
+   - EnableAudio / SampleRate / Channel / Bitrate / AAC profile / DriftToleranceMs / SourceSubmix
+3. **RuntimePolicy**
+   - RequireAVSync / AllowedDriftMs / StartMuxerWhenBothTracksReady
+4. **Postprocess**
+   - GIF enable / sampling fps / target size / fallback policy
+5. **Compatibility Hint**
+   - 최소 API level / 권장 GPU class / known blacklist(optional)
+
+### 프리셋 선택 알고리즘(런타임)
+1. 플랫폼 결정 (`TargetPlatform`)
+2. 콘텐츠 타입 결정(없으면 `Default`)
+3. 단말 capability 점수화 후 tier 결정(Low/Recommended/High)
+4. 신규 프리셋 맵에서 정확 매칭 탐색
+5. 없으면 순차 fallback
+   - Tier fallback: Recommended -> Low -> High
+   - Content fallback: SelectedType -> Default
+   - 최종 fallback: 기존 `PlatformInfoMap[Platform]`
+
+### 검증 규칙(필수)
+#### V1. 구조 검증
+- 각 Platform 최소 1개 preset 보유
+- 각 ContentType에 Recommended tier 필수
+
+#### V2. 값 검증
+- Width/Height/FPS/Bitrate > 0
+- Audio enable 시 SampleRate/Channel/AudioBitrate/AAC profile 유효
+- Runtime drift >= 0
+
+#### V3. 단조성 검증
+- Low <= Recommended <= High
+  - Resolution pixel count
+  - FPS
+  - Video bitrate
+  - Audio bitrate
+
+#### V4. 글로벌 룰 교차 검증
+- `GlobalRules.MinFrameRate <= preset.FPS <= GlobalRules.MaxFrameRate`
+- Global duration/thread 규칙 위반 시 실패
+
+### 마이그레이션 전략
+1. 단계 1: 신규 프리셋 필드 추가(읽기만)
+2. 단계 2: `GetPlatformInfo`는 유지하되, 새 API `GetBestPreset(...)` 추가
+3. 단계 3: Android pipeline부터 `GetBestPreset(...)` 우선 사용
+4. 단계 4: 안정화 후 Windows 등으로 확장
+
+### TODO(설계 기반 구현 순서)
+- [ ] DataAsset에 `PlatformProfiles` 신규 필드 추가
+- [ ] `GetBestPreset(platform, contentType, deviceTier)` API 추가
+- [ ] Validation 함수 분리: `ValidatePresetShape/ValidateMonotonicity/ValidateAgainstGlobalRules`
+- [ ] Android pipeline에서 preset -> immutable init request snapshot 매핑
+- [ ] 실패 로그 표준화(선택 실패 원인: platform/content/tier/fallback 경로)
+
+### 변경 이력 (추가)
+- v3 (2026-04-10): 멀티플랫폼/사양 프리셋 설계안 추가, PlatformInfoMap 하위호환 유지 전략 및 검증 규칙 정의
