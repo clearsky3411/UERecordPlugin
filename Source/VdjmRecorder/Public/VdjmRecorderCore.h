@@ -17,6 +17,7 @@
 	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 */
 
+class UVdjmRecordEnvResolver;
 class UVdjmRecordUnitPipeline;
 
 class UVdjmRecordPlatform;
@@ -452,7 +453,7 @@ public:
 	}
 	bool DbcIsDefaultReady() const
 	{
-		return 	DbcIsValidResourceInit() && LinkedCurrentInfo.IsValid();
+		return 	DbcIsValidResourceInit() && LinkedCurrentInfo_deprecate.IsValid();
 	}
 	
 	virtual bool DbcIsValidResource() const
@@ -516,7 +517,7 @@ public:
 	FString		FinalFilePath;	//	이거는 여기에서 해줄게 아님. platform 마다 달라야함.
 	EPixelFormat FinalPixelFormat = PF_A8R8G8B8;
 	
-	TWeakObjectPtr<UVdjmRecordEnvCurrentInfo> LinkedCurrentInfo;
+	TWeakObjectPtr<UVdjmRecordEnvCurrentInfo> LinkedCurrentInfo_deprecate;
 	TWeakObjectPtr<AVdjmRecordBridgeActor> LinkedOwnerBridge;
 	TWeakObjectPtr<UVdjmRecordEnvResolver> LinkedResolver;
 protected:
@@ -941,7 +942,17 @@ public:
 	TWeakObjectPtr<UVdjmRecordUnitPipeline> LinkedPipeline = nullptr;
 private:
 	bool ResolveEnvPlatform(const FVdjmRecordEnvPlatformPreset* presetData);
+	bool ResolvedFinalFilePath(const FString& customFileName);
 	
+	
+	FIntPoint GetPresetFeatureResolution(uint32 tier = 0) const;
+	FIntPoint GetPresetFeatureResolution_Window(uint32 tier = 0) const;
+	FIntPoint GetPresetFeatureResolution_Android(uint32 tier = 0) const;
+	FIntPoint GetPresetFeatureResolution_Ios(uint32 tier = 0) const;
+	FIntPoint GetPresetFeatureResolution_Mac(uint32 tier = 0) const;
+	FIntPoint GetPresetFeatureResolution_Linux(uint32 tier = 0) const;
+	
+
 	FVdjmRecordEnvPlatformPreset mResolvedPreset;
 	EVdjmRecordQualityTiers mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
 	
@@ -1011,7 +1022,6 @@ namespace VdjmRecorderValidation
 		FString& OutSafeFilePath,
 		const TCHAR* DebugOwner);
 }
-
 
 
 

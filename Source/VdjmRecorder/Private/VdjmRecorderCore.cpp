@@ -551,12 +551,29 @@ bool UVdjmRecordEnvResolver::InitComplete(AVdjmRecordBridgeActor* ownerBridge, U
 bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPreset* presetData)
 {
 	mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
-	if (presetData == nullptr || !presetData->DbcIsValid())
+	if (presetData == nullptr || not presetData->DbcIsValid())
 	{
 		return false;
 	}
 
-	const EVdjmRecordQualityTiers RequestedTier =
+	const auto currPlatform = LinkedOwnerBridge.IsValid() ? 
+	LinkedOwnerBridge->GetTargetPlatform() : 
+#ifdef PLATFORM_WINDOWS
+		EVdjmRecordEnvPlatform::EWindows;
+#elif PLATFORM_ANDROID|| defined(__RESHARPER__)
+		EVdjmRecordEnvPlatform::EAndroid;
+#elif PLATFORM_IOS
+		EVdjmRecordEnvPlatform::EIOS;
+#elif PLATFORM_MAC
+		EVdjmRecordEnvPlatform::EMac;
+#elif PLATFORM_LINUX
+		EVdjmRecordEnvPlatform::ELinux;
+#else
+		EVdjmRecordEnvPlatform::EDefault;
+#endif
+	
+	
+	const EVdjmRecordQualityTiers presetRequestTier =
 		(LinkedOwnerBridge.IsValid() && LinkedOwnerBridge->SelectedBitrateType != EVdjmRecordQualityTiers::EUndefined)
 			? LinkedOwnerBridge->SelectedBitrateType
 			: presetData->DefaultQualityTier;
@@ -571,7 +588,7 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 		EVdjmRecordQualityTiers::ELowest
 	};
 
-	auto FindTierIndex = [&](EVdjmRecordQualityTiers Tier)->int32
+	auto FindTierIndexFunctor = [&](EVdjmRecordQualityTiers Tier)->int32
 	{
 		for (int32 i = 0; i < UE_ARRAY_COUNT(TierOrder); ++i)
 		{
@@ -583,68 +600,205 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 		return INDEX_NONE;
 	};
 
-	int32 StartIndex = FindTierIndex(RequestedTier);
-	if (StartIndex == INDEX_NONE)
+	int32 beginTier = FindTierIndexFunctor(presetRequestTier);
+	if (beginTier == INDEX_NONE)
 	{
-		StartIndex = FindTierIndex(presetData->DefaultQualityTier);
+		beginTier = FindTierIndexFunctor(presetData->DefaultQualityTier);
 	}
-	if (StartIndex == INDEX_NONE)
+	if (beginTier == INDEX_NONE)
 	{
-		StartIndex = 0;
-	}
-
-	FIntPoint ViewportSize = FIntPoint::ZeroValue;
-	const bool bHasViewport = LinkedOwnerBridge.IsValid() && LinkedOwnerBridge->TryResolveViewportSize(ViewportSize);
-	if (!bHasViewport || ViewportSize.X <= 0 || ViewportSize.Y <= 0)
-	{
-		ViewportSize = FIntPoint(1280, 720);
-	}
-	const int64 ViewportPixels = static_cast<int64>(ViewportSize.X) * static_cast<int64>(ViewportSize.Y);
-	const int32 MaxFrameRate = LinkedOwnerBridge.IsValid() ? LinkedOwnerBridge->GetCurrentGlobalRules().MaxFrameRate : 30;
-	const int32 BitrateBudget = FMath::Max(1000000, static_cast<int32>(ViewportPixels * 4));
-
-	auto IsPresetFitForHardware = [&](const FVdjmEncoderInitRequest& InitRequest)->bool
-	{
-		const int64 ReqPixels = static_cast<int64>(InitRequest.VideoConfig.Width) * static_cast<int64>(InitRequest.VideoConfig.Height);
-		const bool bResolutionFit = ReqPixels <= (ViewportPixels * 2);
-		const bool bFrameRateFit = InitRequest.VideoConfig.FrameRate <= FMath::Max(1, MaxFrameRate);
-		const bool bBitrateFit = InitRequest.VideoConfig.Bitrate <= (BitrateBudget * 2);
-		return bResolutionFit && bFrameRateFit && bBitrateFit;
-	};
-
-	// 요청 tier에서 하향하면서 하드웨어 적합 + validation 통과 preset 탐색
-	for (int32 i = StartIndex; i < UE_ARRAY_COUNT(TierOrder); ++i)
-	{
-		const EVdjmRecordQualityTiers CandidateTier = TierOrder[i];
-		const FVdjmEncoderInitRequest* CandidateRequest = presetData->GetEncoderInitRequest(CandidateTier);
-		if (CandidateRequest == nullptr || !CandidateRequest->EvaluateValidation())
-		{
-			continue;
-		}
-		if (!IsPresetFitForHardware(*CandidateRequest))
-		{
-			continue;
-		}
-		mResolvedPreset = *presetData;
-		mResolvedQualityTier = CandidateTier;
-		return true;
+		beginTier = 0;
 	}
 
-	// 최후 fallback: 하드웨어 적합 판정을 완화하고 validation 통과하는 최저 tier를 선택
-	for (int32 i = UE_ARRAY_COUNT(TierOrder) - 1; i >= 0; --i)
+	FIntPoint resolvedViewPortSize = FIntPoint::ZeroValue;
+	const bool bHasViewport = LinkedOwnerBridge.IsValid() && LinkedOwnerBridge->TryResolveViewportSize(resolvedViewPortSize);
+	if (!bHasViewport || 
+		resolvedViewPortSize.X <= 0 || resolvedViewPortSize.Y <= 0)
 	{
-		const EVdjmRecordQualityTiers CandidateTier = TierOrder[i];
-		const FVdjmEncoderInitRequest* CandidateRequest = presetData->GetEncoderInitRequest(CandidateTier);
-		if (CandidateRequest == nullptr || !CandidateRequest->EvaluateValidation())
-		{
-			continue;
-		}
-		mResolvedPreset = *presetData;
-		mResolvedQualityTier = CandidateTier;
-		return true;
+		resolvedViewPortSize = GetPresetFeatureResolution(0);
 	}
 	
-	return false;
+	/*
+	 * TODO(20260413 refactoring and audio) : resolution, bitrate,frame rate, file path, 즉, FVdjmRecordEnvPlatformPreset 이거를 한번 처리.
+	 */
+	
+}
+
+bool UVdjmRecordEnvResolver::ResolvedFinalFilePath(const FString& customFileName)
+{
+	FString basePath;
+	if (not LinkedOwnerBridge.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::ResolvedFinalFilePath - LinkedOwnerBridge is invalid."));
+		return false;
+	}
+	switch (VdjmRecordUtils::GetTargetPlatform())
+	{
+	case EVdjmRecordEnvPlatform::EWindows:
+		basePath = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());
+		break;
+	case EVdjmRecordEnvPlatform::EAndroid:
+		basePath =  FPaths::ConvertRelativePathToFull(FPaths::ProjectPersistentDownloadDir());
+		break;
+	case EVdjmRecordEnvPlatform::EIOS:
+		basePath = FPaths::ProjectSavedDir();
+		break;
+	case EVdjmRecordEnvPlatform::EMac:
+		basePath = FPaths::ProjectSavedDir();
+		break;
+	case EVdjmRecordEnvPlatform::ELinux:
+		basePath = FPaths::ProjectSavedDir();
+		break;
+	default:
+		basePath = FPaths::ProjectSavedDir();
+		break;
+	}
+	if (const FVdjmEncoderInitRequest* initRequest =mResolvedPreset.GetEncoderInitRequest(mResolvedQualityTier))
+	{
+		
+	}
+	
+	if(mCurrentFilePrefix.IsEmpty())
+	{
+		mCurrentFilePrefix = TEXT("Vcard");
+	}
+	if (mCurrentFilePrefix.EndsWith(TEXT("_")))
+	{
+		mCurrentFilePrefix.RemoveFromEnd(TEXT("_"));
+	}
+	FString finalPath = mCurrentFilePrefix + TEXT("_");
+	if(customFileName.IsEmpty())
+	{
+		finalPath += TEXT("_")+FString::FromInt(FDateTime::Now().ToUnixTimestamp());
+	}
+	else
+	{
+		mFileName = customFileName;
+		finalPath += customFileName + TEXT("_") + FString::FromInt(FDateTime::Now().ToUnixTimestamp());
+	}
+	
+	return FPaths::Combine(basePath, finalPath + TEXT(".mp4"));
+}
+
+FIntPoint UVdjmRecordEnvResolver::GetPresetFeatureResolution(uint32 tier) const
+{
+	switch (VdjmRecordUtils::GetTargetPlatform())
+	{
+	case EVdjmRecordEnvPlatform::EWindows:
+		return GetPresetFeatureResolution_Window(tier);
+		break;
+	case EVdjmRecordEnvPlatform::EAndroid:
+		return GetPresetFeatureResolution_Android(tier);
+		break;
+	case EVdjmRecordEnvPlatform::EIOS:
+		return GetPresetFeatureResolution_Ios(tier);
+		break;
+	case EVdjmRecordEnvPlatform::EMac:
+		return GetPresetFeatureResolution_Mac(tier);
+		break;
+	case EVdjmRecordEnvPlatform::ELinux:
+		return GetPresetFeatureResolution_Linux(tier);
+		break;
+	case EVdjmRecordEnvPlatform::EDefault:
+		return GetPresetFeatureResolution_Window(tier);
+		break;
+	default: return FIntPoint();
+	}
+}
+
+FIntPoint UVdjmRecordEnvResolver::GetPresetFeatureResolution_Window(uint32 tier) const
+{
+	const TArray<FIntPoint> resultResolution =
+	{
+		FIntPoint(1280, 720),	// HD (720p), Steam Deck (1280x800 for 16:10)
+		FIntPoint(1920, 1080),	// FHD (1080p), Standard PC Monitor
+		FIntPoint(1920, 1200),	// WUXGA (1200p), 16:10 Standard Monitor
+		FIntPoint(2560, 1440),	// QHD (1440p), 2K Gaming Monitor
+		FIntPoint(3440, 1440),	// UWQHD, 21:9 Ultrawide Monitor
+		FIntPoint(3840, 2160),	// UHD (4K), High-End PC Monitor
+		FIntPoint(7680, 4320),	// 8K, Enthusiast Monitor / TV
+	};
+	uint32 maxTierNum = resultResolution.Num();
+	if (tier < maxTierNum)
+	{
+		return resultResolution[tier];
+	}
+	else
+	{
+		return resultResolution[tier % maxTierNum];
+	}
+}
+
+FIntPoint UVdjmRecordEnvResolver::GetPresetFeatureResolution_Android(uint32 tier) const
+{
+	const TArray<FIntPoint> resultResolution =
+	{
+		FIntPoint(720, 1600),	// Budget Tier (HD+), Samsung Galaxy A12 / Older phones
+		FIntPoint(1080, 2340),	// Standard Flagship, Samsung Galaxy S22/S23 (SM-S901/S911)
+		FIntPoint(1080, 2400),	// Standard Flagship 2, Google Pixel 7/8
+		FIntPoint(1440, 3120),	// Premium Flagship, Samsung Galaxy S24 Ultra / Pixel 8 Pro
+		FIntPoint(1812, 2176),	// Foldable (Inner Screen), Samsung Galaxy Z Fold 5
+		FIntPoint(2560, 1600),	// Tablet (Landscape default), Samsung Galaxy Tab S8/S9
+	};
+	uint32 maxTierNum = resultResolution.Num();
+	if (tier < maxTierNum)
+	{
+		return resultResolution[tier];
+	}
+	else
+	{
+		return resultResolution[tier % maxTierNum];
+	}
+}
+
+FIntPoint UVdjmRecordEnvResolver::GetPresetFeatureResolution_Ios(uint32 tier) const
+{
+	const TArray<FIntPoint> resultResolution =
+	{
+		FIntPoint(750, 1334),	// iPhone SE (3rd Gen) / Older iPhones (8, 7)
+		FIntPoint(1170, 2532),	// iPhone 12 / 13 / 14 (Standard size)
+		FIntPoint(1179, 2556),	// iPhone 14 Pro / 15 Pro / 16 Pro
+		FIntPoint(1284, 2778),	// iPhone 12/13/14 Pro Max & Plus
+		FIntPoint(1290, 2796),	// iPhone 14/15/16 Pro Max
+		FIntPoint(1668, 2388),	// iPad Pro 11-inch
+		FIntPoint(2048, 2732),	// iPad Pro 12.9-inch / 13-inch
+	};
+	uint32 maxTierNum = resultResolution.Num();
+	if (tier < maxTierNum)
+	{
+		return resultResolution[tier];
+	}
+	else
+	{
+		return resultResolution[tier % maxTierNum];
+	}
+}
+
+FIntPoint UVdjmRecordEnvResolver::GetPresetFeatureResolution_Mac(uint32 tier) const
+{
+	const TArray<FIntPoint> resultResolution =
+	{
+		FIntPoint(2560, 1600),	// MacBook Air 13" (M1) / Older MacBook Pro
+		FIntPoint(2560, 1664),	// MacBook Air 13" (M2/M3) - Liquid Retina (Notch included)
+		FIntPoint(3024, 1964),	// MacBook Pro 14" (M1/M2/M3)
+		FIntPoint(3456, 2234),	// MacBook Pro 16" (M1/M2/M3)
+		FIntPoint(5120, 2880),	// Apple Studio Display / 27" iMac (5K Retina)
+		FIntPoint(6016, 3384),	// Pro Display XDR (6K)
+	};
+	uint32 maxTierNum = resultResolution.Num();
+	if (tier < maxTierNum)
+	{
+		return resultResolution[tier];
+	}
+	else
+	{
+		return resultResolution[tier % maxTierNum];
+	}
+}
+
+FIntPoint UVdjmRecordEnvResolver::GetPresetFeatureResolution_Linux(uint32 tier) const
+{
+	return GetPresetFeatureResolution_Window(tier);
 }
 
 /*
@@ -674,15 +828,15 @@ void UVdjmRecordResource::InitializeResource(AVdjmRecordBridgeActor* ownerBridge
 	
 	LinkedOwnerBridge = ownerBridge;
 	
-	LinkedCurrentInfo = ownerBridge->GetCurrentEnvInfo();
+	LinkedCurrentInfo_deprecate = ownerBridge->GetCurrentEnvInfo();
 	
-	CachedGroupCount = LinkedCurrentInfo->GetRecordCachedGroupCount();
-	TextureResolution = LinkedCurrentInfo->GetCurrentResolution();	//	LinkedRecordDesc의 규칙에 맞는 FinalResolution
+	CachedGroupCount = LinkedCurrentInfo_deprecate->GetRecordCachedGroupCount();
+	TextureResolution = LinkedCurrentInfo_deprecate->GetCurrentResolution();	//	LinkedRecordDesc의 규칙에 맞는 FinalResolution
 	OriginResolution = TextureResolution;	
-	FinalFrameRate = LinkedCurrentInfo->GetCurrentFrameRate();
-	FinalBitrate = LinkedCurrentInfo->GetCurrentBitrate();
-	FinalFilePath = LinkedCurrentInfo->MakeFinalFilePath(ownerBridge->GetCurrentFileName());
-	FinalPixelFormat = LinkedCurrentInfo->GetCurrentPixelFormat();
+	FinalFrameRate = LinkedCurrentInfo_deprecate->GetCurrentFrameRate();
+	FinalBitrate = LinkedCurrentInfo_deprecate->GetCurrentBitrate();
+	FinalFilePath = LinkedCurrentInfo_deprecate->MakeFinalFilePath(ownerBridge->GetCurrentFileName());
+	FinalPixelFormat = LinkedCurrentInfo_deprecate->GetCurrentPixelFormat();
 }
 
 bool UVdjmRecordResource::InitializeResourceExtended(UVdjmRecordEnvResolver* resolver)
@@ -711,7 +865,7 @@ void UVdjmRecordResource::ResetResource()
 void UVdjmRecordResource::ReleaseResources()
 {
 	LinkedOwnerBridge = nullptr;
-	LinkedCurrentInfo = nullptr;
+	LinkedCurrentInfo_deprecate = nullptr;
 	UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordResource::ReleaseResources - Resources released."));
 }
 
@@ -744,29 +898,6 @@ FTextureRHIRef UVdjmRecordResource::CreateTextureForNV12(FIntPoint resolution, E
 §	↓		class AVdjmRecordBridgeActor : public AActor		↓
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 */
-
-
-// UVdjmRecordDepreDataAsset* AVdjmRecordBridgeActor::TryGetRecordConfigure()
-//{
-// 	UVdjmRecordDepreDataAsset* result = nullptr;
-//
-// 	FSoftObjectPath configObjPath = FSoftObjectPath(TEXT("/Script/VdjmMobileUi.VdjmRecordConfigure'/VdjmMobileUi/Recorder/Bp_VdjmRecordConfigDataAsset.Bp_VdjmRecordConfigDataAsset'"));
-// 	
-// 	if (configObjPath.IsAsset() && configObjPath.IsValid())
-// 	{
-// 		UObject* configResolved = configObjPath.ResolveObject();
-// 		if (configResolved == nullptr)
-// 		{
-// 			configResolved = configObjPath.TryLoad();
-// 			if (configResolved == nullptr)
-// 			{
-// 				UE_LOG(LogVdjmRecorderCore,Warning,TEXT("Failed to load default VcardConfigDataAsset %s synchronously."),*configObjPath.ToString());
-// 			}
-// 		}
-// 		result = Cast<UVdjmRecordDepreDataAsset>(configResolved);
-// 	}
-// 	return result;
-// }
 
 bool VdjmRecorderValidation::DbcValidateResolution(const FIntPoint& InResolution, FIntPoint& OutSafeResolution,
 	const TCHAR* DebugOwner)
@@ -1046,7 +1177,7 @@ void AVdjmRecordBridgeActor::PrintLogErrors()
 					{
 						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       not mRecordResource->OwnerBridgeActor.IsValid() "));
 					}
-					if (not mRecordResource->LinkedCurrentInfo.IsValid())
+					if (not mRecordResource->LinkedCurrentInfo_deprecate.IsValid())
 					{
 						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       not mRecordResource->LinkedCurrentInfo.IsValid() "));
 					}
@@ -1309,15 +1440,7 @@ void AVdjmRecordBridgeActor::OnBackBufferReady_RenderThread(SWindow& SlateWindow
 
 EVdjmRecordEnvPlatform AVdjmRecordBridgeActor::GetTargetPlatform()
 {
-#if PLATFORM_WINDOWS
-	return EVdjmRecordEnvPlatform::EWindows;
-#elif PLATFORM_ANDROID || defined(__RESHARPER__)
-	return EVdjmRecordEnvPlatform::EAndroid;
-#elif PLATFORM_IOS
-	return EVdjmRecordEnvPlatform::EIos;
-#else
-	return EVdjmRecordEnvPlatform::EUnknown;
-#endif
+	return VdjmRecordUtils::GetTargetPlatform();
 }
 
 bool AVdjmRecordBridgeActor::EvaluateInitRequest(const FVdjmEncoderInitRequest* initPreset)
@@ -1744,5 +1867,92 @@ bool AVdjmRecordBridgeActor::DbcRecordStartableFull() const
 	/*
 	 * TODO(20260413 refactoring and audio) : 각각 UVdjmRecordEnvDataAsset 랑 
 	 */
-	
+		bool bOk = true;
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("{{  AVdjmRecordBridgeActor::DbcRecordStartableFull - Starting full record startability check. }}"));
+	auto Fail = [&bOk](const TCHAR* Reason)
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("AVdjmRecordBridgeActor::DbcRecordStartableFull - %s"), Reason);
+		bOk = false;
+	};
+
+	if (bIsRecording)
+	{
+		Fail(TEXT("DbcRecordStartableFull - bIsRecording == true"));
+	}
+
+	const double Now = FPlatformTime::Seconds();
+	if (mRecordEndTime > 0.0 && Now >= mRecordEndTime)
+	{
+		Fail(TEXT("DbcRecordStartableFull - record end time already passed"));
+	}
+
+	if (mRecordConfigureDataAsset == nullptr)
+	{
+		Fail(TEXT("DbcRecordStartableFull - mRecordConfigureDataAsset == nullptr"));
+	}
+
+	if (mEnvResolver == nullptr)
+	{
+		Fail(TEXT("DbcRecordStartableFull - mEnvResolver == nullptr"));
+	}
+	else
+	{
+		if (!mEnvResolver->IsValidPreset())
+		{
+			Fail(TEXT("DbcRecordStartableFull - mEnvResolver->IsValidPreset == false"));
+		}
+
+		const FVdjmEncoderInitRequest* InitPreset = mEnvResolver->TryGetResolvedEncoderInitRequest();
+		if (InitPreset == nullptr)
+		{
+			Fail(TEXT("DbcRecordStartableFull - mEnvResolver->TryGetResolvedEncoderInitRequest == nullptr"));
+		}
+		else if (!InitPreset->EvaluateValidation())
+		{
+			Fail(TEXT("DbcRecordStartableFull - ResolvedInitPreset->EvaluateValidation == false"));
+		}
+
+		if (mEnvResolver->TryGetResolvedPipelineClass() == nullptr)
+		{
+			Fail(TEXT("DbcRecordStartableFull - mEnvResolver->TryGetResolvedPipelineClass == nullptr"));
+		}
+		const FVdjmRecordEnvPlatformPreset& ResolvedPreset = mEnvResolver->GetResolvedEnvPreset();
+		if (ResolvedPreset.RecordResourceClass == nullptr)
+		{
+			Fail(TEXT("DbcRecordStartableFull - ResolvedPreset.RecordResourceClass == nullptr"));
+		}
+	}
+
+	if (mRecordResource == nullptr)
+	{
+		Fail(TEXT("DbcRecordStartableFull - mRecordResource == nullptr"));
+	}
+	else if (!mRecordResource->DbcIsValidResourceInit())
+	{
+		Fail(TEXT("DbcRecordStartableFull - mRecordResource->DbcIsValidResourceInit == false"));
+	}
+
+	if (mRecordPipeline == nullptr)
+	{
+		Fail(TEXT("DbcRecordStartableFull - mRecordPipeline == nullptr"));
+	}
+	else if (!mRecordPipeline->DbcIsValid())
+	{
+		Fail(TEXT("DbcRecordStartableFull - mRecordPipeline->DbcIsValid == false"));
+	}
+
+	if (mTargetViewport == nullptr)
+	{
+		Fail(TEXT("DbcRecordStartableFull - mTargetViewport == nullptr"));
+	}
+	if (!mTargetPlayerController.IsValid())
+	{
+		Fail(TEXT("DbcRecordStartableFull - mTargetPlayerController is invalid"));
+	}
+	if (!FSlateApplication::IsInitialized())
+	{
+		Fail(TEXT("DbcRecordStartableFull - SlateApplication is not initialized"));
+	}
+
+	return bOk;
 }

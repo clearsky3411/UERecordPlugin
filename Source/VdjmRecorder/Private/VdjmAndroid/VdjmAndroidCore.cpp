@@ -200,14 +200,14 @@ VdjmResult UVdjmRecordAndroidUnit::RecordStartCheck()
 		return VdjmResults::Fail;
 	}
 	//	20260409 스냅샷으로 증명하게 만들어야함.
-	if (LinkedRecordResource->LinkedCurrentInfo.IsValid())
+	if (LinkedRecordResource->LinkedCurrentInfo_deprecate.IsValid())
 	{
 		const FString CustomFileName =
 			LinkedRecordResource->LinkedOwnerBridge.IsValid()
 				? LinkedRecordResource->LinkedOwnerBridge->GetCurrentFileName()
 				: FString();
 		LinkedRecordResource->FinalFilePath =
-			LinkedRecordResource->LinkedCurrentInfo->MakeFinalFilePath(CustomFileName);
+			LinkedRecordResource->LinkedCurrentInfo_deprecate->MakeFinalFilePath(CustomFileName);
 		UE_LOG(LogVdjmRecorderCore, Log,
 			TEXT("UVdjmRecordAndroidUnit::RecordStartCheck - Refreshed output path: %s"),
 			*LinkedRecordResource->FinalFilePath);

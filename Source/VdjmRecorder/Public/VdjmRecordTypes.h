@@ -128,6 +128,23 @@ enum class EVdjmRecordEnvPlatform : uint8
 	EDefault     UMETA(DisplayName = "Default / Fallback")
 };
 
+namespace VdjmRecordUtils
+{
+	inline EVdjmRecordEnvPlatform GetTargetPlatform()
+	{
+#if PLATFORM_WINDOWS
+		return EVdjmRecordEnvPlatform::EWindows;
+#elif PLATFORM_ANDROID || defined(__RESHARPER__)
+		return EVdjmRecordEnvPlatform::EAndroid;
+#elif PLATFORM_IOS
+		return EVdjmRecordEnvPlatform::EIos;
+#else
+		return EVdjmRecordEnvPlatform::EUnknown;
+#endif
+	}
+}
+
+
 UENUM(BlueprintType)
 enum class EVdjmRecordBridgeInitStep : uint8
 {
@@ -343,6 +360,7 @@ enum class EVdjmRecordQualityTiers : uint8
 	ELow UMETA(DisplayName="Low"),
 	ELowest UMETA(DisplayName="Lowest"),
 	ECustom UMETA(DisplayName="Custom"),
+	EResolvedTier UMETA(DisplayName="ResolvedTier",Hidden),
 	EMax UMETA(Hidden)
 };
 
@@ -575,6 +593,7 @@ struct VDJMRECORDER_API FVdjmEncoderInitRequestOutput
 			*SessionId,
 			bOverwriteExists ? TEXT("True") : TEXT("False"));
 	}
+	
 };
 USTRUCT()
 struct VDJMRECORDER_API FVdjmEncoderInitRequestRuntimePolicy
