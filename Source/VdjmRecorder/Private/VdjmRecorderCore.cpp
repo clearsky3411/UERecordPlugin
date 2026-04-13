@@ -556,21 +556,7 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 		return false;
 	}
 
-	const auto currPlatform = LinkedOwnerBridge.IsValid() ? 
-	LinkedOwnerBridge->GetTargetPlatform() : 
-#ifdef PLATFORM_WINDOWS
-		EVdjmRecordEnvPlatform::EWindows;
-#elif PLATFORM_ANDROID|| defined(__RESHARPER__)
-		EVdjmRecordEnvPlatform::EAndroid;
-#elif PLATFORM_IOS
-		EVdjmRecordEnvPlatform::EIOS;
-#elif PLATFORM_MAC
-		EVdjmRecordEnvPlatform::EMac;
-#elif PLATFORM_LINUX
-		EVdjmRecordEnvPlatform::ELinux;
-#else
-		EVdjmRecordEnvPlatform::EDefault;
-#endif
+	const auto currPlatform = VdjmRecordUtils::GetTargetPlatform();
 	
 	
 	const EVdjmRecordQualityTiers presetRequestTier =
