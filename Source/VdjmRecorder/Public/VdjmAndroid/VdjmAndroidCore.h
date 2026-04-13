@@ -100,6 +100,8 @@ public:
 	virtual void StopRecordPipelineExecution() override;
 	virtual void ReleaseRecordPipeline() override;
 	virtual bool DbcIsValid() const override;
+	
+	bool ValidateForAndroidPipeline(FVdjmRecordEnvPlatformInfo* platformInfo) const;
 };
 
 
