@@ -622,6 +622,8 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 	 * TODO(20260413 refactoring and audio) : resolution, bitrate,frame rate, file path, 즉, FVdjmRecordEnvPlatformPreset 이거를 한번 처리.
 	 */
 	
+	
+	
 }
 
 bool UVdjmRecordEnvResolver::ResolvedFinalFilePath(const FString& customFileName)
