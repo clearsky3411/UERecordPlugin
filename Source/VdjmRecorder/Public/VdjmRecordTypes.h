@@ -345,6 +345,8 @@ enum class EVdjmRecordQualityTiers : uint8
 	ECustom UMETA(DisplayName="Custom"),
 	EMax UMETA(Hidden)
 };
+
+
 UENUM(Blueprintable)
 enum class EVdjmRecordSavePathDirectoryType : uint8
 {

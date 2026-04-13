@@ -439,7 +439,7 @@ public:
 	virtual void BeginDestroy() override;
 	
 	virtual void InitializeResource(AVdjmRecordBridgeActor* ownerBridge);
-	virtual bool InitializeResourceExtended(UVdjmRecordEnvResolver* resolver){return false;}
+	virtual bool InitializeResourceExtended(UVdjmRecordEnvResolver* resolver);
 	virtual void ResetResource();
 	virtual void ReleaseResources();
 	
@@ -448,7 +448,7 @@ public:
 	
 	bool DbcIsValidResourceInit() const
 	{
-		return (OwnerBridgeActor.IsValid());
+		return (LinkedOwnerBridge.IsValid());
 	}
 	bool DbcIsDefaultReady() const
 	{
@@ -517,7 +517,8 @@ public:
 	EPixelFormat FinalPixelFormat = PF_A8R8G8B8;
 	
 	TWeakObjectPtr<UVdjmRecordEnvCurrentInfo> LinkedCurrentInfo;
-	TWeakObjectPtr<AVdjmRecordBridgeActor> OwnerBridgeActor;
+	TWeakObjectPtr<AVdjmRecordBridgeActor> LinkedOwnerBridge;
+	TWeakObjectPtr<UVdjmRecordEnvResolver> LinkedResolver;
 protected:
 	FTextureRHIRef CreateTextureForNV12(FIntPoint resolution,EPixelFormat pixelformat,ETextureCreateFlags createFlags);
 	EVdjmResourceStatus CurrentResourceStatus = EVdjmResourceStatus::ENew;	
@@ -599,6 +600,30 @@ struct FVdjmRecordEnvPlatformPreset
 	UPROPERTY(Category ="Record|Env|InitRequest",EditAnywhere)
 	TMap<EVdjmRecordQualityTiers,FVdjmEncoderInitRequest> EncoderInitRequestMap;
 	
+	void Clear()
+	{
+		DefaultQualityTier = EVdjmRecordQualityTiers::EDefault;
+		RecordResourceClass = nullptr;
+		PipelineClass = nullptr;
+		PipelineUnitClassMap.Empty();
+		EncoderInitRequestMap.Empty();
+	}
+	FString ToString() const
+	{
+		FString result = FString::Printf(TEXT("DefaultQualityTier: %d\n"), static_cast<int32>(DefaultQualityTier));
+		result += FString::Printf(TEXT("RecordResourceClass: %s\n"), *GetNameSafe(RecordResourceClass));
+		result += FString::Printf(TEXT("PipelineClass: %s\n"), *GetNameSafe(PipelineClass));
+		result += FString::Printf(TEXT("PipelineUnitClassMap:\n"));
+		for (const auto& Pair : PipelineUnitClassMap)		{
+			result += FString::Printf(TEXT("  Stage: %d, UnitClass: %s\n"), static_cast<int32>(Pair.Key), *GetNameSafe(Pair.Value));
+		}
+		result += FString::Printf(TEXT("EncoderInitRequestMap:\n"));
+		for (const auto& Pair : EncoderInitRequestMap)		{
+			result += FString::Printf(TEXT("  QualityTier: %d, EncoderInitRequest: %s\n"), static_cast<int32>(Pair.Key), *Pair.Value.ToString());
+		}
+		return result;
+	}
+	
 	const TSubclassOf<UVdjmRecordUnit>* GetPipelineState(const EVdjmRecordPipelineStages& stage)
 	{
 		return PipelineUnitClassMap.Find(stage);
@@ -614,10 +639,14 @@ struct FVdjmRecordEnvPlatformPreset
 			{
 				return false;
 			}
-			for (const auto& Pair : EncoderInitRequestMap)
+			for (const TPair<EVdjmRecordQualityTiers, FVdjmEncoderInitRequest>& Pair : EncoderInitRequestMap)
 			{
-				if (!Pair.Value.EvaluateValidation())
+				const FVdjmEncoderInitRequest& request = Pair.Value;
+				
+				if (not request.EvaluateValidation())
 				{
+					const EVdjmRecordQualityTiers qualityTier = Pair.Key;
+					UE_LOG(LogVdjmRecorderCore, Warning, TEXT("FVdjmRecordEnvPlatformPreset::DbcIsValid - EncoderInitRequest for QualityTier { %s } is not valid."),*StaticEnum<EVdjmRecordQualityTiers>()->GetValueAsString(qualityTier) );
 					return false;
 				}
 			}
@@ -811,11 +840,21 @@ public:
 	
 	UVdjmRecordResource* CreateResolvedRecordResource(AVdjmRecordBridgeActor* ownerBridge,const FVdjmRecordEnvPlatformPreset* presetData) ;
 	
+	void Clear() 
+	{
+		mResolvedPreset.Clear();
+		mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
+	}
+	FString ToString() const
+	{
+		return FString::Printf(TEXT("ResolvedQualityTier: %s\nResolvedPreset: %s"), *StaticEnum<EVdjmRecordQualityTiers>()->GetValueAsString(mResolvedQualityTier), *mResolvedPreset.ToString());
+	}
+	
 	const FVdjmRecordEnvPlatformPreset& GetResolvedEnvPreset() const { return mResolvedPreset; }
 	bool IsValidResolved() const { return mResolvedQualityTier != EVdjmRecordQualityTiers::EUndefined; }
 	bool IsPresetQualityTier()const { return IsValidResolved() && mResolvedQualityTier != EVdjmRecordQualityTiers::EDefault; }
 	bool IsCustomQualityTier()const { return mResolvedQualityTier == EVdjmRecordQualityTiers::ECustom; }
-	bool IsValidPreset() const { return mOwnerBridge.IsValid() && IsValidResolved() && mResolvedPreset.DbcIsValid(); }
+	bool IsValidPreset() const { return LinkedOwnerBridge.IsValid() && IsValidResolved() && mResolvedPreset.DbcIsValid(); }
 	
 	const FVdjmEncoderInitRequest* TryGetResolvedEncoderInitRequest() const
 	{
@@ -861,13 +900,29 @@ public:
 		} 
 		return nullptr;
 	}
+	TSubclassOf<UVdjmRecordUnitPipeline> TryGetResolvedPipelineClass() const
+	{
+		return IsValidPreset() ? mResolvedPreset.PipelineClass : nullptr;
+	}
+	TSubclassOf<UVdjmRecordResource> TryGetResolvedRecordResourceClass() const
+	{
+		 return IsValidPreset() ? mResolvedPreset.RecordResourceClass : nullptr;
+	}
+	TSubclassOf<UVdjmRecordUnit> TryGetResolvedPipelineUnitClass(EVdjmRecordPipelineStages stage) const
+	{
+		if (IsValidPreset())
+		{
+			return *mResolvedPreset.PipelineUnitClassMap.Find(stage);
+		}
+		return nullptr;
+	}
 	
+	TWeakObjectPtr<AVdjmRecordBridgeActor> LinkedOwnerBridge = nullptr;
 
 private:
 	bool ResolveEnvPlatform(const FVdjmRecordEnvPlatformPreset* presetData);
 	
-	TWeakObjectPtr<AVdjmRecordBridgeActor> mOwnerBridge;
-	TWeakObjectPtr<UVdjmRecordEnvCurrentInfo> mCurrentEnvInfo;
+
 	FVdjmRecordEnvPlatformPreset mResolvedPreset;
 	EVdjmRecordQualityTiers mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
 	
@@ -1178,6 +1233,8 @@ protected:
 	
 	//	TODO(20260410 env control) - 
 	EVdjmRecordQualityTiers mCurrentQualityTier = EVdjmRecordQualityTiers::EDefault;	//	추후에 옵션을 바꿀 수 있는 인터페이스에 노출될 놈임.
+	UPROPERTY()
+	TObjectPtr<UVdjmRecordEnvResolver> mEnvResolver;
 };
 
 

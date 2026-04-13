@@ -203,8 +203,8 @@ VdjmResult UVdjmRecordAndroidUnit::RecordStartCheck()
 	if (LinkedRecordResource->LinkedCurrentInfo.IsValid())
 	{
 		const FString CustomFileName =
-			LinkedRecordResource->OwnerBridgeActor.IsValid()
-				? LinkedRecordResource->OwnerBridgeActor->GetCurrentFileName()
+			LinkedRecordResource->LinkedOwnerBridge.IsValid()
+				? LinkedRecordResource->LinkedOwnerBridge->GetCurrentFileName()
 				: FString();
 		LinkedRecordResource->FinalFilePath =
 			LinkedRecordResource->LinkedCurrentInfo->MakeFinalFilePath(CustomFileName);
@@ -307,7 +307,7 @@ void UVdjmAndroidRecordPipeline::InitializeRecordPipeline(UVdjmRecordResource* r
 		return;
 	}
 	
-	LinkedBridgeActor = recordResource->OwnerBridgeActor;
+	LinkedBridgeActor = recordResource->LinkedOwnerBridge;
 	if (not LinkedBridgeActor.IsValid())
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - LinkedBridgeActor is not valid."));
