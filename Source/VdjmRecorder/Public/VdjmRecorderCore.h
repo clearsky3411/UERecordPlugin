@@ -448,7 +448,7 @@ public:
 	
 	bool DbcIsValidResourceInit() const
 	{
-		return (OwnerBridgeActor.IsValid());
+		return (LinkedOwnerBridge.IsValid());
 	}
 	bool DbcIsDefaultReady() const
 	{
@@ -517,7 +517,8 @@ public:
 	EPixelFormat FinalPixelFormat = PF_A8R8G8B8;
 	
 	TWeakObjectPtr<UVdjmRecordEnvCurrentInfo> LinkedCurrentInfo;
-	TWeakObjectPtr<AVdjmRecordBridgeActor> OwnerBridgeActor;
+	TWeakObjectPtr<AVdjmRecordBridgeActor> LinkedOwnerBridge;
+	TWeakObjectPtr<UVdjmRecordEnvResolver> LinkedResolver;
 protected:
 	FTextureRHIRef CreateTextureForNV12(FIntPoint resolution,EPixelFormat pixelformat,ETextureCreateFlags createFlags);
 	EVdjmResourceStatus CurrentResourceStatus = EVdjmResourceStatus::ENew;	
@@ -999,9 +1000,13 @@ public:
 	{
 		return mRecordConfigureDataAsset != nullptr;
 	}
-	bool DbcValidCurrentEnvInfo() const
+	bool DbcValidCurrentEnvInfo_deprecated() const
 	{
-		return DbcValidConfigureDataAsset() && mCurrentEnvInfo != nullptr && mCurrentEnvInfo->DbcIsValidCurrentInfo();
+		return DbcValidConfigureDataAsset() && mCurrentEnvInfo_deprecated != nullptr && mCurrentEnvInfo_deprecated->DbcIsValidCurrentInfo();
+	}
+	bool DbcValidRecordPreset() const
+	{
+		return IsValid(mEnvResolver) && mEnvResolver->IsValidPreset();
 	}
 	bool DbcValidRecordResource() const
 	{
@@ -1013,7 +1018,7 @@ public:
 	}
 	bool DbcRecordingPossible()  const
 	{
-		return DbcValidRecordPipeline() && DbcValidCurrentEnvInfo();
+		return DbcValidRecordPipeline() && DbcValidCurrentEnvInfo_deprecated();
 	}
 	
 	bool DbcRecordStartable() const
@@ -1044,7 +1049,7 @@ public:
 	}
 	UVdjmRecordEnvCurrentInfo* GetCurrentEnvInfo()
 	{
-        return mCurrentEnvInfo;
+        return mCurrentEnvInfo_deprecated;
     }
 	FVdjmRecordEnvPlatformInfo* GetCurrentPlatformInfo() const
 	{
@@ -1056,7 +1061,7 @@ public:
 	}
 	FVdjmRecordGlobalRules GetCurrentGlobalRules() const
 	{
-		return mCurrentEnvInfo ? mCurrentEnvInfo->GetCurrentGlobalRules() : FVdjmRecordGlobalRules();
+		return mCurrentEnvInfo_deprecated ? mCurrentEnvInfo_deprecated->GetCurrentGlobalRules() : FVdjmRecordGlobalRules();
 	}
 	UVdjmRecordResource* GetRecordResource()
 	{
@@ -1115,7 +1120,6 @@ public:
 	bool TryResolveViewportSize(FIntPoint& OutSize) const;
 	static const TCHAR* GetInitStepName(EVdjmRecordBridgeInitStep step);
 
-	UVdjmRecordEventSession* DbcGetRecordEventSession();
 	
 protected:
 	virtual void BeginPlay() override;
@@ -1129,6 +1133,9 @@ protected:
 	void ChainInit_CreateRecordPipeline();
 	void ChainInit_FinalizeInitialization();
 	void UnBindBackBufferReady(FSlateApplication& slateApp);
+	
+	bool BindingRecordPipeline(TSubclassOf<UVdjmRecordUnitPipeline> pipelineClass,UVdjmRecordResource* recordResource);
+	void UnBindingRecordPipeline();
 	
 	UPROPERTY()
 	int32 mChainTryInitCount = 8;
@@ -1161,13 +1168,11 @@ protected:
 	TObjectPtr<UVdjmRecordEnvDataAsset> mRecordConfigureDataAsset;
 	
 	UPROPERTY()
-	TObjectPtr<UVdjmRecordEnvCurrentInfo> mCurrentEnvInfo;
+	TObjectPtr<UVdjmRecordEnvCurrentInfo> mCurrentEnvInfo_deprecated;	//	이거 이제 제거해야함.
 
 	UPROPERTY()
 	TObjectPtr<USceneComponent> mRootScene;
 	
-	UPROPERTY()
-	TObjectPtr<UVdjmRecordEventSession> mCurrentRecordEventSession; 
 	
 	UPROPERTY()
 	double mRecordEndTime = 0.0;

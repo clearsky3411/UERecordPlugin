@@ -203,8 +203,8 @@ VdjmResult UVdjmRecordAndroidUnit::RecordStartCheck()
 	if (LinkedRecordResource->LinkedCurrentInfo.IsValid())
 	{
 		const FString CustomFileName =
-			LinkedRecordResource->OwnerBridgeActor.IsValid()
-				? LinkedRecordResource->OwnerBridgeActor->GetCurrentFileName()
+			LinkedRecordResource->LinkedOwnerBridge.IsValid()
+				? LinkedRecordResource->LinkedOwnerBridge->GetCurrentFileName()
 				: FString();
 		LinkedRecordResource->FinalFilePath =
 			LinkedRecordResource->LinkedCurrentInfo->MakeFinalFilePath(CustomFileName);

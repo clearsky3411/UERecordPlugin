@@ -33,9 +33,9 @@ void UVdjmRecordWMFResource::InitializeTexturePool(FIntPoint textureResolution, 
 		
 		FVdjmEncoderStatus::DbcGameThreadTask([weakThis = TWeakObjectPtr<UVdjmRecordResource>(this)]()
 		{
-			if (weakThis.IsValid() && weakThis->OwnerBridgeActor.IsValid())
+			if (weakThis.IsValid() && weakThis->LinkedOwnerBridge.IsValid())
 			{
-				weakThis->OwnerBridgeActor->OnResourceReadyForPostInit(weakThis.Get());
+				weakThis->LinkedOwnerBridge->OnResourceReadyForPostInit(weakThis.Get());
 				
 			}
 		});
@@ -506,7 +506,7 @@ void UVdjmRecordWMFUnitDefaultPipeline::InitializeRecordPipeline(UVdjmRecordReso
 		return;
 	}
 	UE_LOG(LogVdjmRecorderCore,Log,TEXT("UVdjmRecordUnitDefaultPipeline::InitializeRecordPipeline - Initializing pipeline for record resource."));
-	LinkedBridgeActor = recordResource->OwnerBridgeActor;
+	LinkedBridgeActor = recordResource->LinkedOwnerBridge;
 	if (LinkedBridgeActor.IsValid() && LinkedBridgeActor->DbcValidRecordResource())
 	{
 		FVdjmRecordEnvPlatformInfo* platformInfo =

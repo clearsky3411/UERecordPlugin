@@ -137,7 +137,7 @@ class UVdjmRecordUnitPipeline : public UObject
 void UVdjmRecordUnitPipeline::InitializeRecordPipeline(UVdjmRecordResource* recordResource)
 {
 	LinkedRecordResource = recordResource;
-	LinkedBridgeActor = recordResource->OwnerBridgeActor;
+	LinkedBridgeActor = recordResource->LinkedOwnerBridge;
 }
 
 bool UVdjmRecordUnitPipeline::DbcUnitCheck() const
@@ -653,7 +653,7 @@ void UVdjmRecordResource::InitializeResource(AVdjmRecordBridgeActor* ownerBridge
 		return;
 	}
 	
-	OwnerBridgeActor = ownerBridge;
+	LinkedOwnerBridge = ownerBridge;
 	
 	LinkedCurrentInfo = ownerBridge->GetCurrentEnvInfo();
 	
@@ -666,13 +666,32 @@ void UVdjmRecordResource::InitializeResource(AVdjmRecordBridgeActor* ownerBridge
 	FinalPixelFormat = LinkedCurrentInfo->GetCurrentPixelFormat();
 }
 
+bool UVdjmRecordResource::InitializeResourceExtended(UVdjmRecordEnvResolver* resolver)
+{
+	if (resolver == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordResource::InitializeResourceExtended - resolver is null."));
+		return false;
+	}
+	
+	LinkedOwnerBridge = resolver->LinkedOwnerBridge;
+	if (not LinkedOwnerBridge.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordResource::InitializeResourceExtended - resolver's LinkedOwnerBridge is invalid."));
+		return false;
+	}
+	LinkedResolver = resolver;
+	
+	return true;
+}
+
 void UVdjmRecordResource::ResetResource()
 {
 }
 
 void UVdjmRecordResource::ReleaseResources()
 {
-	OwnerBridgeActor = nullptr;
+	LinkedOwnerBridge = nullptr;
 	LinkedCurrentInfo = nullptr;
 	UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordResource::ReleaseResources - Resources released."));
 }
@@ -968,9 +987,9 @@ void AVdjmRecordBridgeActor::PrintLogErrors()
 	{
 		UE_LOG(LogTemp, Warning, TEXT("mRecordConfigureDataAsset == nullptr"));
 	}
-	if (mCurrentEnvInfo == nullptr)
+	if (mEnvResolver == nullptr)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("mCurrentEnvInfo == nullptr"));
+		UE_LOG(LogTemp, Warning, TEXT("mEnvResolver == nullptr"));
 	}
 	if (bIsRecording)
 	{
@@ -1004,7 +1023,7 @@ void AVdjmRecordBridgeActor::PrintLogErrors()
 				if (mRecordResource != nullptr && not mRecordResource->DbcIsValidResourceInit())
 				{
 					UE_LOG(LogTemp, Warning, TEXT("StartRecording - 4               mRecordResource->DbcIsValidResource() "));
-					if (not mRecordResource->OwnerBridgeActor.IsValid())
+					if (not mRecordResource->LinkedOwnerBridge.IsValid())
 					{
 						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       not mRecordResource->OwnerBridgeActor.IsValid() "));
 					}
@@ -1027,7 +1046,7 @@ void AVdjmRecordBridgeActor::PrintLogErrors()
 				UE_LOG(LogTemp, Warning, TEXT("StartRecording - 3            mRecordPipeline->DbcIsValid()"));
 			}
 		}
-		if (not DbcValidCurrentEnvInfo())
+		if (not DbcValidCurrentEnvInfo_deprecated())
 		{
 			UE_LOG(LogTemp, Warning, TEXT("StartRecording - 2       DbcValidRecordPipeline() == false"));
 		}
@@ -1044,6 +1063,50 @@ void AVdjmRecordBridgeActor::UnBindBackBufferReady(FSlateApplication& slateApp)
 		UE_LOG(LogTemp, Warning, TEXT("OnBindSlateBackBufferReadyToPresentEvent - Removed existing BackBufferReadyToPresent delegate"));
 	}
 
+}
+
+bool AVdjmRecordBridgeActor::BindingRecordPipeline(TSubclassOf<UVdjmRecordUnitPipeline> pipelineClass,UVdjmRecordResource* recordResource)
+{
+	if (pipelineClass == nullptr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BindingRecordPipeline - pipelineClass is null"));
+		return false;
+	}
+	if (recordResource == nullptr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BindingRecordPipeline - recordResource is null"));
+		return false;
+	}
+	
+	if (mRecordPipeline)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BindingRecordPipeline - mRecordPipeline already exists. Unbinding existing pipeline before binding new one."));
+		UnBindingRecordPipeline();
+	}
+	
+	UVdjmRecordUnitPipeline* newPipeline = NewObject<UVdjmRecordUnitPipeline>(this, pipelineClass);
+	if (newPipeline == nullptr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BindingRecordPipeline - Failed to create record pipeline instance"));
+		return false;
+	}
+	newPipeline->InitializeRecordPipeline(recordResource);
+	
+	mRecordPipeline = newPipeline;
+	return true;
+}
+
+void AVdjmRecordBridgeActor::UnBindingRecordPipeline()
+{
+	if (IsValid(mRecordPipeline))
+	{
+		mRecordPipeline->ReleaseRecordPipeline();
+		mRecordPipeline = nullptr;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UnBindingRecordPipeline - No existing record pipeline to unbind"));
+	}
 }
 
 void AVdjmRecordBridgeActor::OnBindSlateBackBufferReadyToPresentEvent()
@@ -1069,11 +1132,11 @@ void AVdjmRecordBridgeActor::StartRecording()
 		if (FSlateApplication::IsInitialized())
 		{
 			double Now = FPlatformTime::Seconds();
+			mEnvResolver->TryGetResolvedVideoConfig();
+			double currentFPS = mCurrentEnvInfo_deprecated->GetCurrentFrameRate();
 			
-			double currentFPS = mCurrentEnvInfo->GetCurrentFrameRate();
-			
-			mFrameInterval = 1.0 / FMath::Max(currentFPS, mCurrentEnvInfo->GetCurrentGlobalRules().MinFrameRate);
-			mRecordEndTime = Now + mCurrentEnvInfo->GetMaxDurationSecond();
+			mFrameInterval = 1.0 / FMath::Max(currentFPS, mCurrentEnvInfo_deprecated->GetCurrentGlobalRules().MinFrameRate);
+			mRecordEndTime = Now + mCurrentEnvInfo_deprecated->GetMaxDurationSecond();
             mNextFrameTime = Now; // 첫 프레임은 즉시 기록
 			bIsRecording = true;
 			mRecordedFrameCount = 0;
@@ -1195,7 +1258,7 @@ void AVdjmRecordBridgeActor::OnBackBufferReady_RenderThread(SWindow& SlateWindow
 	recordUnitContext.DbcSetupContext(
 		GetWorld()
 		,this
-		,mCurrentEnvInfo
+		,mCurrentEnvInfo_deprecated
 		,mRecordResource
 		,&RDGBuilder
 		,Now);
@@ -1302,17 +1365,6 @@ const TCHAR* AVdjmRecordBridgeActor::GetInitStepName(EVdjmRecordBridgeInitStep s
 	case EVdjmRecordBridgeInitStep::EComplete:	return TEXT("EComplete");
 	default: return TEXT("Unknown");
 	}
-}
-
-UVdjmRecordEventSession* AVdjmRecordBridgeActor::DbcGetRecordEventSession()
-{
-	if (mCurrentRecordEventSession != nullptr)
-	{
-		mCurrentRecordEventSession->StopSession();
-		mCurrentRecordEventSession = nullptr;
-	}
-	mCurrentRecordEventSession = NewObject<UVdjmRecordEventSession>(this, UVdjmRecordEventSession::StaticClass());
-	return mCurrentRecordEventSession;
 }
 
 void AVdjmRecordBridgeActor::BeginPlay()
@@ -1517,6 +1569,8 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
 	{
 		return;
 	}
+	//	TODO(20260410 env control)
+	const FVdjmRecordEnvPlatformPreset* envPreset = mRecordConfigureDataAsset->GetPlatformPreset(GetTargetPlatform());
 	
 	const FVdjmRecordEnvPlatformPreset* envPreset = mRecordConfigureDataAsset
 		? mRecordConfigureDataAsset->GetPlatformPreset(GetTargetPlatform())
@@ -1528,23 +1582,30 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
 		return;
 	}
 	
+	//	resolver 통해서 record resource 생성 시도
+	mRecordResource = mEnvResolver->CreateResolvedRecordResource(this,envPreset);
 	if (mRecordResource == nullptr)
 	{
 		mRecordResource = NewObject<UVdjmRecordResource>(this,envPreset->RecordResourceClass);
 		UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordResource - Record resource instance created."));
 	}
 	
-	if (mRecordResource == nullptr)
+	//	여기에서 resolved 된 값들로 record resource 초기화 시도
+	if (not mRecordResource->InitializeResourceExtended(mEnvResolver))
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordResource - Failed to create record resource instance."));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordResource - Record resource failed extended initialization with environment resolver."));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
-	mRecordResource->InitializeResource(this);
+	
 	if (not mRecordResource->IsLazyPostInitializeCheck())
 	{
-		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EPostResourceInitResolve);
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordResource - Record resource failed extended initialization with environment resolver."));
+		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
+		return;
 	}
+	
+	OnTryChainInitNext(EVdjmRecordBridgeInitStep::EPostResourceInitResolve);
 }
 
 void AVdjmRecordBridgeActor::ChainInit_PostResourceInitResolve()
@@ -1553,7 +1614,7 @@ void AVdjmRecordBridgeActor::ChainInit_PostResourceInitResolve()
 	{
 		return;
 	}
-	
+	//	TODO(20260410 env control)
 	if (mRecordResource == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_PostResourceInitResolve - Record resource is null after initialization."));
@@ -1561,42 +1622,11 @@ void AVdjmRecordBridgeActor::ChainInit_PostResourceInitResolve()
 		return;
 	}
 	UVdjmRecordResource& recordResource = *mRecordResource;
+	/*
+	 * 이거 단계는 필요한가? 이미 resolver 가 존재하고 그놈이 resource 를 생성하기에..
+	 */
 	
-	FIntPoint resolvResolution = FIntPoint::ZeroValue;
-	if (VdjmRecorderValidation::DbcValidateResolution(recordResource.OriginResolution,resolvResolution,TEXT("ChainInit_PostResourceInitResolve - Invalid resolution from record resource after initialization.")))
-	{
-		recordResource.OriginResolution = resolvResolution;
-		recordResource.TextureResolution = resolvResolution;
-	}
-	else
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_PostResourceInitResolve - Failed to resolve valid resolution from record resource."));
-		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
-		return;
-	}
-	int32 resolvedFrameRate = 0;
-	if (VdjmRecorderValidation::DbcValidateBitrate( recordResource.FinalBitrate,resolvedFrameRate,TEXT("ChainInit_PostResourceInitResolve - Invalid bitrate from record resource after initialization.")))
-	{
-		recordResource.FinalBitrate = resolvedFrameRate;
-	}
-	else
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_PostResourceInitResolve - Failed to resolve valid bitrate from record resource."));
-		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
-		return;
-	}
-	FString resolvedFilePath;
-	if (VdjmRecorderValidation::DbcValidateOutputFilePath(recordResource.FinalFilePath,resolvedFilePath,TEXT("ChainInit_PostResourceInitResolve - Invalid file path from record resource after initialization.")))
-	{
-		recordResource.FinalFilePath = resolvedFilePath;
-	}
-	else
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_PostResourceInitResolve - Failed to resolve valid file path from record resource."));
-		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
-		return;
-	}
-	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_PostResourceInitResolve - Successfully resolved record resource parameters. Resolution: %s, Bitrate: %d, FilePath: %s"), *recordResource.OriginResolution.ToString(), recordResource.FinalBitrate, *recordResource.FinalFilePath);
+	
 	OnTryChainInitNext(EVdjmRecordBridgeInitStep::ECreatePipelines);
 }
 
@@ -1606,9 +1636,10 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordPipeline()
 	{
 		return;
 	}
-	if (mCurrentEnvInfo == nullptr)
+	
+	if (mEnvResolver == nullptr)
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Current environment info is null. Cannot create record pipeline."));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Environment resolver is null. Cannot create record pipeline without environment resolver."));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
@@ -1622,23 +1653,29 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordPipeline()
 		return;
 	}
 	
-	if (mRecordPipeline == nullptr)
+	TSubclassOf<UVdjmRecordUnitPipeline> pipelineCls = mEnvResolver->TryGetResolvedPipelineClass();
+	if (pipelineCls == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordPipeline - Creating record pipeline instance."));
 		mRecordPipeline = NewObject<UVdjmRecordUnitPipeline>(this,envPreset->PipelineClass);
 	}
 	
-	if (mRecordPipeline == nullptr)
+	if (not BindingRecordPipeline(pipelineCls,mRecordResource))
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Failed to create record pipeline instance."));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Failed to bind record pipeline with class %s."), *pipelineCls->GetName());
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
 	
-	mRecordPipeline->InitializeRecordPipeline(mRecordResource);
-	mCurrentEnvInfo->SetRecordUnitPipeline(mRecordPipeline);
+	if (not mEnvResolver->InitComplete(this,mRecordResource,mRecordPipeline))
+	{
 	
-	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordPipeline - Record pipeline created and initialized successfully."));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Environment resolver is not valid after pipeline initialization. Transitioning to EInitError."));
+		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
+		return;
+	}
+	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordPipeline - Record pipeline created and bound successfully."));
 	OnTryChainInitNext(EVdjmRecordBridgeInitStep::EFinalizeInitialization);
 }
 
@@ -1673,7 +1710,7 @@ bool AVdjmRecordBridgeActor::DbcValidInitializeComplete() const
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mTargetViewport == nullptr"));
 		return false;
 	}
-	if (mCurrentEnvInfo == nullptr)
+	if (mCurrentEnvInfo_deprecated == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mCurrentEnvInfo == nullptr"));
 		return false;
