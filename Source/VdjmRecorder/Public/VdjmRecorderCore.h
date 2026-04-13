@@ -840,6 +840,8 @@ public:
 	
 	UVdjmRecordResource* CreateResolvedRecordResource(AVdjmRecordBridgeActor* ownerBridge,const FVdjmRecordEnvPlatformPreset* presetData) ;
 	
+	bool InitComplete(AVdjmRecordBridgeActor* ownerBridge,UVdjmRecordResource* resource, UVdjmRecordUnitPipeline* pipeline);
+	
 	void Clear() 
 	{
 		mResolvedPreset.Clear();
@@ -851,11 +853,15 @@ public:
 	}
 	
 	const FVdjmRecordEnvPlatformPreset& GetResolvedEnvPreset() const { return mResolvedPreset; }
-	bool IsValidResolved() const { return mResolvedQualityTier != EVdjmRecordQualityTiers::EUndefined; }
-	bool IsPresetQualityTier()const { return IsValidResolved() && mResolvedQualityTier != EVdjmRecordQualityTiers::EDefault; }
-	bool IsCustomQualityTier()const { return mResolvedQualityTier == EVdjmRecordQualityTiers::ECustom; }
-	bool IsValidPreset() const { return LinkedOwnerBridge.IsValid() && IsValidResolved() && mResolvedPreset.DbcIsValid(); }
 	
+	TSubclassOf<UVdjmRecordResource> TryGetResolvedRecordResourceClass() const
+	{
+		return IsValidPreset() ? mResolvedPreset.RecordResourceClass : nullptr;
+	}
+	TSubclassOf<UVdjmRecordUnitPipeline> TryGetResolvedPipelineClass() const
+	{
+		return IsValidPreset() ? mResolvedPreset.PipelineClass : nullptr;
+	}
 	const FVdjmEncoderInitRequest* TryGetResolvedEncoderInitRequest() const
 	{
 		return mResolvedPreset.GetEncoderInitRequest(mResolvedQualityTier);
@@ -900,14 +906,6 @@ public:
 		} 
 		return nullptr;
 	}
-	TSubclassOf<UVdjmRecordUnitPipeline> TryGetResolvedPipelineClass() const
-	{
-		return IsValidPreset() ? mResolvedPreset.PipelineClass : nullptr;
-	}
-	TSubclassOf<UVdjmRecordResource> TryGetResolvedRecordResourceClass() const
-	{
-		 return IsValidPreset() ? mResolvedPreset.RecordResourceClass : nullptr;
-	}
 	TSubclassOf<UVdjmRecordUnit> TryGetResolvedPipelineUnitClass(EVdjmRecordPipelineStages stage) const
 	{
 		if (IsValidPreset())
@@ -916,13 +914,34 @@ public:
 		}
 		return nullptr;
 	}
+	bool IsValidResolved() const
+	{
+		return mResolvedQualityTier != EVdjmRecordQualityTiers::EUndefined;
+	}
+	bool IsPresetQualityTier()const
+	{
+		return IsValidResolved() && mResolvedQualityTier != EVdjmRecordQualityTiers::EDefault;
+	}
+	bool IsCustomQualityTier()const
+	{
+		return mResolvedQualityTier == EVdjmRecordQualityTiers::ECustom;
+	}
+	bool IsValidPreset() const
+	{
+		return LinkedOwnerBridge.IsValid() && IsValidResolved() && mResolvedPreset.DbcIsValid();
+	}
+	bool IsValidInitEnvResolver() const
+	{
+		return IsValidPreset() && LinkedRecordResource.IsValid() && LinkedPipeline.IsValid();
+	}
+	
 	
 	TWeakObjectPtr<AVdjmRecordBridgeActor> LinkedOwnerBridge = nullptr;
-
+	TWeakObjectPtr<UVdjmRecordResource> LinkedRecordResource = nullptr;
+	TWeakObjectPtr<UVdjmRecordUnitPipeline> LinkedPipeline = nullptr;
 private:
 	bool ResolveEnvPlatform(const FVdjmRecordEnvPlatformPreset* presetData);
 	
-
 	FVdjmRecordEnvPlatformPreset mResolvedPreset;
 	EVdjmRecordQualityTiers mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
 	
@@ -1054,9 +1073,13 @@ public:
 	{
 		return mRecordConfigureDataAsset != nullptr;
 	}
-	bool DbcValidCurrentEnvInfo() const
+	bool DbcValidCurrentEnvInfo_deprecated() const
 	{
-		return DbcValidConfigureDataAsset() && mCurrentEnvInfo != nullptr && mCurrentEnvInfo->DbcIsValidCurrentInfo();
+		return DbcValidConfigureDataAsset() && mCurrentEnvInfo_deprecated != nullptr && mCurrentEnvInfo_deprecated->DbcIsValidCurrentInfo();
+	}
+	bool DbcValidRecordPreset() const
+	{
+		return IsValid(mEnvResolver) && mEnvResolver->IsValidPreset();
 	}
 	bool DbcValidRecordResource() const
 	{
@@ -1068,7 +1091,7 @@ public:
 	}
 	bool DbcRecordingPossible()  const
 	{
-		return DbcValidRecordPipeline() && DbcValidCurrentEnvInfo();
+		return DbcValidRecordPipeline() && DbcValidCurrentEnvInfo_deprecated();
 	}
 	
 	bool DbcRecordStartable() const
@@ -1099,7 +1122,7 @@ public:
 	}
 	UVdjmRecordEnvCurrentInfo* GetCurrentEnvInfo()
 	{
-        return mCurrentEnvInfo;
+        return mCurrentEnvInfo_deprecated;
     }
 	FVdjmRecordEnvPlatformInfo* GetCurrentPlatformInfo() const
 	{
@@ -1111,7 +1134,7 @@ public:
 	}
 	FVdjmRecordGlobalRules GetCurrentGlobalRules() const
 	{
-		return mCurrentEnvInfo ? mCurrentEnvInfo->GetCurrentGlobalRules() : FVdjmRecordGlobalRules();
+		return mCurrentEnvInfo_deprecated ? mCurrentEnvInfo_deprecated->GetCurrentGlobalRules() : FVdjmRecordGlobalRules();
 	}
 	UVdjmRecordResource* GetRecordResource()
 	{
@@ -1170,7 +1193,6 @@ public:
 	bool TryResolveViewportSize(FIntPoint& OutSize) const;
 	static const TCHAR* GetInitStepName(EVdjmRecordBridgeInitStep step);
 
-	UVdjmRecordEventSession* DbcGetRecordEventSession();
 	
 protected:
 	virtual void BeginPlay() override;
@@ -1184,6 +1206,9 @@ protected:
 	void ChainInit_CreateRecordPipeline();
 	void ChainInit_FinalizeInitialization();
 	void UnBindBackBufferReady(FSlateApplication& slateApp);
+	
+	bool BindingRecordPipeline(TSubclassOf<UVdjmRecordUnitPipeline> pipelineClass,UVdjmRecordResource* recordResource);
+	void UnBindingRecordPipeline();
 	
 	UPROPERTY()
 	int32 mChainTryInitCount = 8;
@@ -1216,13 +1241,11 @@ protected:
 	TObjectPtr<UVdjmRecordEnvDataAsset> mRecordConfigureDataAsset;
 	
 	UPROPERTY()
-	TObjectPtr<UVdjmRecordEnvCurrentInfo> mCurrentEnvInfo;
+	TObjectPtr<UVdjmRecordEnvCurrentInfo> mCurrentEnvInfo_deprecated;	//	이거 이제 제거해야함.
 
 	UPROPERTY()
 	TObjectPtr<USceneComponent> mRootScene;
 	
-	UPROPERTY()
-	TObjectPtr<UVdjmRecordEventSession> mCurrentRecordEventSession; 
 	
 	UPROPERTY()
 	double mRecordEndTime = 0.0;

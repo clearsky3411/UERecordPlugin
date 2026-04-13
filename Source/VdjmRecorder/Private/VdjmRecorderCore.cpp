@@ -529,6 +529,25 @@ UVdjmRecordResource* UVdjmRecordEnvResolver::CreateResolvedRecordResource(AVdjmR
 	return nullptr;
 }
 
+bool UVdjmRecordEnvResolver::InitComplete(AVdjmRecordBridgeActor* ownerBridge, UVdjmRecordResource* resource,
+	UVdjmRecordUnitPipeline* pipeline)
+{
+	if (ownerBridge != nullptr && resource != nullptr && pipeline != nullptr)
+	{
+		LinkedOwnerBridge = ownerBridge;
+		LinkedRecordResource = resource;
+		LinkedPipeline = pipeline;
+	}
+	else
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::InitComplete - One or more parameters are null. ownerBridge: %s, resource: %s, pipeline: %s"),
+			ownerBridge ? *ownerBridge->GetName() : TEXT("null"),
+			resource ? *resource->GetName() : TEXT("null"),
+			pipeline ? *pipeline->GetName() : TEXT("null"));
+	}
+	return IsValidInitEnvResolver();
+}
+
 bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPreset* presetData)
 {
 	mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
@@ -987,9 +1006,9 @@ void AVdjmRecordBridgeActor::PrintLogErrors()
 	{
 		UE_LOG(LogTemp, Warning, TEXT("mRecordConfigureDataAsset == nullptr"));
 	}
-	if (mCurrentEnvInfo == nullptr)
+	if (mEnvResolver == nullptr)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("mCurrentEnvInfo == nullptr"));
+		UE_LOG(LogTemp, Warning, TEXT("mEnvResolver == nullptr"));
 	}
 	if (bIsRecording)
 	{
@@ -1046,7 +1065,7 @@ void AVdjmRecordBridgeActor::PrintLogErrors()
 				UE_LOG(LogTemp, Warning, TEXT("StartRecording - 3            mRecordPipeline->DbcIsValid()"));
 			}
 		}
-		if (not DbcValidCurrentEnvInfo())
+		if (not DbcValidCurrentEnvInfo_deprecated())
 		{
 			UE_LOG(LogTemp, Warning, TEXT("StartRecording - 2       DbcValidRecordPipeline() == false"));
 		}
@@ -1063,6 +1082,50 @@ void AVdjmRecordBridgeActor::UnBindBackBufferReady(FSlateApplication& slateApp)
 		UE_LOG(LogTemp, Warning, TEXT("OnBindSlateBackBufferReadyToPresentEvent - Removed existing BackBufferReadyToPresent delegate"));
 	}
 
+}
+
+bool AVdjmRecordBridgeActor::BindingRecordPipeline(TSubclassOf<UVdjmRecordUnitPipeline> pipelineClass,UVdjmRecordResource* recordResource)
+{
+	if (pipelineClass == nullptr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BindingRecordPipeline - pipelineClass is null"));
+		return false;
+	}
+	if (recordResource == nullptr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BindingRecordPipeline - recordResource is null"));
+		return false;
+	}
+	
+	if (mRecordPipeline)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BindingRecordPipeline - mRecordPipeline already exists. Unbinding existing pipeline before binding new one."));
+		UnBindingRecordPipeline();
+	}
+	
+	UVdjmRecordUnitPipeline* newPipeline = NewObject<UVdjmRecordUnitPipeline>(this, pipelineClass);
+	if (newPipeline == nullptr)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("BindingRecordPipeline - Failed to create record pipeline instance"));
+		return false;
+	}
+	newPipeline->InitializeRecordPipeline(recordResource);
+	
+	mRecordPipeline = newPipeline;
+	return true;
+}
+
+void AVdjmRecordBridgeActor::UnBindingRecordPipeline()
+{
+	if (IsValid(mRecordPipeline))
+	{
+		mRecordPipeline->ReleaseRecordPipeline();
+		mRecordPipeline = nullptr;
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UnBindingRecordPipeline - No existing record pipeline to unbind"));
+	}
 }
 
 void AVdjmRecordBridgeActor::OnBindSlateBackBufferReadyToPresentEvent()
@@ -1088,11 +1151,11 @@ void AVdjmRecordBridgeActor::StartRecording()
 		if (FSlateApplication::IsInitialized())
 		{
 			double Now = FPlatformTime::Seconds();
+			mEnvResolver->TryGetResolvedVideoConfig();
+			double currentFPS = mCurrentEnvInfo_deprecated->GetCurrentFrameRate();
 			
-			double currentFPS = mCurrentEnvInfo->GetCurrentFrameRate();
-			
-			mFrameInterval = 1.0 / FMath::Max(currentFPS, mCurrentEnvInfo->GetCurrentGlobalRules().MinFrameRate);
-			mRecordEndTime = Now + mCurrentEnvInfo->GetMaxDurationSecond();
+			mFrameInterval = 1.0 / FMath::Max(currentFPS, mCurrentEnvInfo_deprecated->GetCurrentGlobalRules().MinFrameRate);
+			mRecordEndTime = Now + mCurrentEnvInfo_deprecated->GetMaxDurationSecond();
             mNextFrameTime = Now; // 첫 프레임은 즉시 기록
 			bIsRecording = true;
 			mRecordedFrameCount = 0;
@@ -1214,7 +1277,7 @@ void AVdjmRecordBridgeActor::OnBackBufferReady_RenderThread(SWindow& SlateWindow
 	recordUnitContext.DbcSetupContext(
 		GetWorld()
 		,this
-		,mCurrentEnvInfo
+		,mCurrentEnvInfo_deprecated
 		,mRecordResource
 		,&RDGBuilder
 		,Now);
@@ -1321,17 +1384,6 @@ const TCHAR* AVdjmRecordBridgeActor::GetInitStepName(EVdjmRecordBridgeInitStep s
 	case EVdjmRecordBridgeInitStep::EComplete:	return TEXT("EComplete");
 	default: return TEXT("Unknown");
 	}
-}
-
-UVdjmRecordEventSession* AVdjmRecordBridgeActor::DbcGetRecordEventSession()
-{
-	if (mCurrentRecordEventSession != nullptr)
-	{
-		mCurrentRecordEventSession->StopSession();
-		mCurrentRecordEventSession = nullptr;
-	}
-	mCurrentRecordEventSession = NewObject<UVdjmRecordEventSession>(this, UVdjmRecordEventSession::StaticClass());
-	return mCurrentRecordEventSession;
 }
 
 void AVdjmRecordBridgeActor::BeginPlay()
@@ -1601,6 +1653,7 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordPipeline()
 	{
 		return;
 	}
+	
 	if (mEnvResolver == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Environment resolver is null. Cannot create record pipeline without environment resolver."));
@@ -1615,38 +1668,30 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordPipeline()
 		return;
 	}
 	
-	
-	if (mCurrentEnvInfo == nullptr)
+	TSubclassOf<UVdjmRecordUnitPipeline> pipelineCls = mEnvResolver->TryGetResolvedPipelineClass();
+	if (pipelineCls == nullptr)
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Current environment info is null. Cannot create record pipeline."));
-		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
-		return;
-	}
-	FVdjmRecordEnvPlatformInfo* platformInfo = mRecordConfigureDataAsset->GetPlatformInfo(GetTargetPlatform());
-	if (platformInfo == nullptr)
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - No platform info found for target platform."));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Environment resolver did not provide a valid pipeline class. Cannot create record pipeline without valid pipeline class."));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
 	
-	if (mRecordPipeline == nullptr)
+	if (not BindingRecordPipeline(pipelineCls,mRecordResource))
 	{
-		UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordPipeline - Creating record pipeline instance."));
-		mRecordPipeline = NewObject<UVdjmRecordUnitPipeline>(this,platformInfo->PipelineClass);
-	}
-	
-	if (mRecordPipeline == nullptr)
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Failed to create record pipeline instance."));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Failed to bind record pipeline with class %s."), *pipelineCls->GetName());
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
 	
-	mRecordPipeline->InitializeRecordPipeline(mRecordResource);
-	mCurrentEnvInfo->SetRecordUnitPipeline(mRecordPipeline);
+	if (not mEnvResolver->InitComplete(this,mRecordResource,mRecordPipeline))
+	{
 	
-	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordPipeline - Record pipeline created and initialized successfully."));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Environment resolver is not valid after pipeline initialization. Transitioning to EInitError."));
+		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
+		return;
+	}
+	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordPipeline - Record pipeline created and bound successfully."));
 	OnTryChainInitNext(EVdjmRecordBridgeInitStep::EFinalizeInitialization);
 }
 
@@ -1681,7 +1726,7 @@ bool AVdjmRecordBridgeActor::DbcValidInitializeComplete() const
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mTargetViewport == nullptr"));
 		return false;
 	}
-	if (mCurrentEnvInfo == nullptr)
+	if (mCurrentEnvInfo_deprecated == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mCurrentEnvInfo == nullptr"));
 		return false;
@@ -1696,138 +1741,8 @@ bool AVdjmRecordBridgeActor::DbcValidInitializeComplete() const
 
 bool AVdjmRecordBridgeActor::DbcRecordStartableFull() const
 {
-	bool bOk = true;
-	UE_LOG(LogVdjmRecorderCore, Log, TEXT("{{  AVdjmRecordBridgeActor::DbcRecordStartableFull - Starting full record startability check. }}"));
-	auto Fail = [&bOk](const TCHAR* Reason)
-	{
-		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("AVdjmRecordBridgeActor::DbcRecordStartableFull - %s"), Reason);
-		bOk = false;
-	};
-
-	if (bIsRecording)
-	{
-		Fail(TEXT("DbcRecordStartableFull - bIsRecording == true"));
-	}
-
-	const double Now = FPlatformTime::Seconds();
-	if (mRecordEndTime > 0.0 && Now >= mRecordEndTime)
-	{
-		Fail(TEXT("DbcRecordStartableFull - record end time already passed"));
-	}
-
-	if (mRecordConfigureDataAsset == nullptr)
-	{
-		Fail(TEXT("DbcRecordStartableFull - mRecordConfigureDataAsset == nullptr"));
-	}
-
-	const FVdjmRecordEnvPlatformInfo* PlatformInfo = mRecordConfigureDataAsset
-		? mRecordConfigureDataAsset->GetPlatformInfo(GetTargetPlatform())
-		: nullptr;
-	if (PlatformInfo == nullptr)
-	{
-		Fail(TEXT("DbcRecordStartableFull - PlatformInfo == nullptr for target platform"));
-	}
-	else
-	{
-		if (PlatformInfo->PipelineClass == nullptr)
-		{
-			Fail(TEXT("DbcRecordStartableFull - PlatformInfo->PipelineClass == nullptr"));
-		}
-		if (PlatformInfo->PipelineUnitClassMap.Num() == 0)
-		{
-			Fail(TEXT("DbcRecordStartableFull - PlatformInfo->PipelineUnitClassMap.Num() == 0"));
-		}
-		if (PlatformInfo->Resolution.X <= 0 || PlatformInfo->Resolution.Y <= 0)
-		{
-			Fail(TEXT("DbcRecordStartableFull - PlatformInfo->Resolution is invalid"));
-		}
-		if (PlatformInfo->FrameRate <= 0)
-		{
-			Fail(TEXT("DbcRecordStartableFull - PlatformInfo->FrameRate <= 0"));
-		}
-		if (PlatformInfo->BitrateMap.Num() == 0)
-		{
-			Fail(TEXT("DbcRecordStartableFull - PlatformInfo->BitrateMap.Num() == 0"));
-		}
-	}
-
-	if (mCurrentEnvInfo == nullptr)
-	{
-		Fail(TEXT("DbcRecordStartableFull - mCurrentEnvInfo == nullptr"));
-	}
-	else
-	{
-		if (!mCurrentEnvInfo->DbcIsValidCurrentInfo())
-		{
-			Fail(TEXT("DbcRecordStartableFull - mCurrentEnvInfo->DbcIsValidCurrentInfo == false"));
-		}
-
-		if (mCurrentEnvInfo->GetCurrentResolution().X <= 0 || mCurrentEnvInfo->GetCurrentResolution().Y <= 0)
-		{
-			Fail(TEXT("DbcRecordStartableFull - CurrentResolution is invalid"));
-		}
-		if (mCurrentEnvInfo->GetCurrentFrameRate() <= 0)
-		{
-			Fail(TEXT("DbcRecordStartableFull - CurrentFrameRate <= 0"));
-		}
-		if (mCurrentEnvInfo->GetCurrentBitrate() <= 0)
-		{
-			Fail(TEXT("DbcRecordStartableFull - CurrentBitrate <= 0"));
-		}
-		if (mCurrentEnvInfo->GetCurrentFilePrefix().IsEmpty())
-		{
-			Fail(TEXT("DbcRecordStartableFull - CurrentFilePrefix is empty"));
-		}
-
-		FString CurrentPath = mCurrentEnvInfo->GetCurrentFilePath();
-		if (CurrentPath.IsEmpty())
-		{
-			Fail(TEXT("DbcRecordStartableFull - CurrentFilePath is empty"));
-		}
-		else
-		{
-			FPaths::NormalizeDirectoryName(CurrentPath);
-			if (FPaths::IsRelative(CurrentPath))
-			{
-				Fail(TEXT("DbcRecordStartableFull - CurrentFilePath is relative"));
-			}
-			else if (!IFileManager::Get().DirectoryExists(*CurrentPath))
-			{
-				Fail(TEXT("DbcRecordStartableFull - CurrentFilePath directory does not exist"));
-			}
-		}
-	}
-
-	if (mRecordResource == nullptr)
-	{
-		Fail(TEXT("DbcRecordStartableFull - mRecordResource == nullptr"));
-	}
-	else if (!mRecordResource->DbcIsValidResourceInit())
-	{
-		Fail(TEXT("DbcRecordStartableFull - mRecordResource->DbcIsValidResourceInit == false"));
-	}
-
-	if (mRecordPipeline == nullptr)
-	{
-		Fail(TEXT("DbcRecordStartableFull - mRecordPipeline == nullptr"));
-	}
-	else if (!mRecordPipeline->DbcIsValid())
-	{
-		Fail(TEXT("DbcRecordStartableFull - mRecordPipeline->DbcIsValid == false"));
-	}
-
-	if (mTargetViewport == nullptr)
-	{
-		Fail(TEXT("DbcRecordStartableFull - mTargetViewport == nullptr"));
-	}
-	if (!mTargetPlayerController.IsValid())
-	{
-		Fail(TEXT("DbcRecordStartableFull - mTargetPlayerController is invalid"));
-	}
-	if (!FSlateApplication::IsInitialized())
-	{
-		Fail(TEXT("DbcRecordStartableFull - SlateApplication is not initialized"));
-	}
-
-	return bOk;
+	/*
+	 * TODO(20260413 refactoring and audio) : 각각 UVdjmRecordEnvDataAsset 랑 
+	 */
+	
 }
