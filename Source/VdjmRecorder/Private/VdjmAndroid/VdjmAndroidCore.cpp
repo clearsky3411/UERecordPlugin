@@ -193,30 +193,7 @@ VdjmResult UVdjmRecordAndroidUnit::RecordStartCheck()
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidUnit::RecordStartCheck - LinkedRecordResource is not valid."));
 		return VdjmResults::Fail;
 	}
-	//	20260409 스냅샷으로 증명하게 만들어야함.
-	if (LinkedRecordResource->LinkedCurrentInfo_deprecate.IsValid())
-	{
-		const FString CustomFileName =
-			LinkedRecordResource->LinkedOwnerBridge.IsValid()
-				? LinkedRecordResource->LinkedOwnerBridge->GetCurrentFileName()
-				: FString();
-		LinkedRecordResource->FinalFilePath =LinkedRecordResource->LinkedResolver->TryGetResolvedOutputConfig()
-			LinkedRecordResource->LinkedCurrentInfo_deprecate->MakeFinalFilePath(CustomFileName);
-		UE_LOG(LogVdjmRecorderCore, Log,
-			TEXT("UVdjmRecordAndroidUnit::RecordStartCheck - Refreshed output path: %s"),
-			*LinkedRecordResource->FinalFilePath);
-	}
 	
-		/*
-		* TODO(260410-cofigs): 위치 검증 OK (RecordStartCheck 직전 호출 지점)
-		* - 현재는 LinkedRecordResource의 개별 필드를 직접 넘겨 InitializeEncoder(...)를 호출한다.
-		* - 목표는 여기서 FVdjmEncoderInitRequest(또는 Android 전용 Config Snapshot)를 생성한 뒤
-		*   InitializeEncoderExtended(...)로 단일 전달하는 구조로 바꾸는 것.
-		* - 검증 포인트:
-		*   1) FinalFilePath/Resolution/Bitrate/FPS가 모두 스냅샷 값으로 고정되는지
-		*   2) Start 이후 LinkedRecordResource 변경이 인코더 런타임에 영향을 주지 않는지
-		*   3) 실패 로그에 어떤 필드 검증이 깨졌는지 명확히 남는지
-		*/
 	if (not mAndroidEncoderImpl->InitializeEncoder(
 		LinkedRecordResource->FinalFilePath,
 		LinkedRecordResource->OriginResolution.X,
