@@ -377,137 +377,137 @@ EPixelFormat UVdjmRecordDescriptor::GetRenderTargetPixelFormat() const
 	class UVdjmRecordEnvDataAsset :public UPrimaryDataAsset
 	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 */
-bool UVdjmRecordEnvCurrentInfo_deprecated::InitializeCurrentEnvironment(AVdjmRecordBridgeActor* ownerBridge)
-{
-	if (ownerBridge && ownerBridge->DbcValidConfigureDataAsset())
-	{
-		mLinkedDataAsset = ownerBridge->GetRecordEnvConfigureDataAsset();
-		mCurrentGlobalRules = ownerBridge->GetGlobalRules();
-		
-		if (FVdjmRecordEnvPlatformInfo* perPlatform = ownerBridge->GetCurrentPlatformInfo())
-		{
-			mCurrentPlatform = ownerBridge->GetTargetPlatform();
-			mCurrentGlobalRules = ownerBridge->GetCurrentGlobalRules();
-			if (perPlatform->bUseAutoTargetPlatformResolution)
-			{
-				FIntPoint outputResolution = FIntPoint::ZeroValue;
-				if (ownerBridge->TryResolveViewportSize(outputResolution))
-				{
-					mCurrentResolution = outputResolution;
-				}
-				else
-				{
-					mCurrentResolution = FIntPoint(1920,1080);
-					ownerBridge->CriticalErrorStop(TEXT("Failed to resolve viewport size for recording. Recording cannot proceed."));
-					return false;
-				}
-			}
-			else
-			{
-				mCurrentResolution = perPlatform->Resolution;
-			}
-			
-			mCurrentFrameRate = perPlatform->FrameRate;
-			mCurrentPixelFormat = perPlatform->PixelFormat;
-			mAllBitrateMap = perPlatform->BitrateMap;
+// bool UVdjmRecordEnvCurrentInfo_deprecated::InitializeCurrentEnvironment(AVdjmRecordBridgeActor* ownerBridge)
+// {
+// 	if (ownerBridge && ownerBridge->DbcValidConfigureDataAsset())
+// 	{
+// 		mLinkedDataAsset = ownerBridge->GetRecordEnvConfigureDataAsset();
+// 		mCurrentGlobalRules = ownerBridge->GetGlobalRules();
+// 		
+// 		if (FVdjmRecordEnvPlatformInfo* perPlatform = ownerBridge->GetCurrentPlatformInfo())
+// 		{
+// 			mCurrentPlatform = ownerBridge->GetTargetPlatform();
+// 			mCurrentGlobalRules = ownerBridge->GetCurrentGlobalRules();
+// 			if (perPlatform->bUseAutoTargetPlatformResolution)
+// 			{
+// 				FIntPoint outputResolution = FIntPoint::ZeroValue;
+// 				if (ownerBridge->TryResolveViewportSize(outputResolution))
+// 				{
+// 					mCurrentResolution = outputResolution;
+// 				}
+// 				else
+// 				{
+// 					mCurrentResolution = FIntPoint(1920,1080);
+// 					ownerBridge->CriticalErrorStop(TEXT("Failed to resolve viewport size for recording. Recording cannot proceed."));
+// 					return false;
+// 				}
+// 			}
+// 			else
+// 			{
+// 				mCurrentResolution = perPlatform->Resolution;
+// 			}
+// 			
+// 			mCurrentFrameRate = perPlatform->FrameRate;
+// 			mCurrentPixelFormat = perPlatform->PixelFormat;
+// 			mAllBitrateMap = perPlatform->BitrateMap;
+//
+// 			float floatBitrate = 
+// 				mAllBitrateMap.Contains(ownerBridge->SelectedBitrateType)?
+// 					FVdjmFunctionLibraryHelper::ConvertToBitrateValue(mAllBitrateMap[ownerBridge->SelectedBitrateType]) :
+// 					mAllBitrateMap.Contains(EVdjmRecordQualityTiers::EDefault)?
+// 						mAllBitrateMap[EVdjmRecordQualityTiers::EDefault] : 2000000.0f;
+// 			mCurrentBitrate = FVdjmFunctionLibraryHelper::ConvertToBitrateValue(floatBitrate);
+// 			
+// 			//mCurrentBitrate =
+// 			mCurrentFilePrefix = perPlatform->FilePrefix;
+// 			FString defaultFilePath;
+// 			switch (mCurrentPlatform)
+// 			{
+// 			case EVdjmRecordEnvPlatform::EAndroid:
+// 				defaultFilePath = FPaths::ConvertRelativePathToFull(FPaths::ProjectPersistentDownloadDir());
+// 				break;
+// 			case EVdjmRecordEnvPlatform::EWindows:
+// 			default:
+// 				defaultFilePath = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());
+// 				break;
+// 			}
+// 			if (perPlatform->CustomFileSaverClass != nullptr)
+// 			{
+// 				// TODO
+// 			}
+// 			mCurrentFilePath = defaultFilePath;
+// 			return true;
+// 		}
+// 		else
+// 		{
+// 			UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecorderCore::Initialize - ownerBridge->SelectedBitrateType is invalid."));
+// 		}
+// 	}
+// 	else
+// 	{
+// 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecorderCore::Initialize - ownerBridge is null."));
+// 	}
+// 	return false;
+// }
 
-			float floatBitrate = 
-				mAllBitrateMap.Contains(ownerBridge->SelectedBitrateType)?
-					FVdjmFunctionLibraryHelper::ConvertToBitrateValue(mAllBitrateMap[ownerBridge->SelectedBitrateType]) :
-					mAllBitrateMap.Contains(EVdjmRecordQualityTiers::EDefault)?
-						mAllBitrateMap[EVdjmRecordQualityTiers::EDefault] : 2000000.0f;
-			mCurrentBitrate = FVdjmFunctionLibraryHelper::ConvertToBitrateValue(floatBitrate);
-			
-			//mCurrentBitrate =
-			mCurrentFilePrefix = perPlatform->FilePrefix;
-			FString defaultFilePath;
-			switch (mCurrentPlatform)
-			{
-			case EVdjmRecordEnvPlatform::EAndroid:
-				defaultFilePath = FPaths::ConvertRelativePathToFull(FPaths::ProjectPersistentDownloadDir());
-				break;
-			case EVdjmRecordEnvPlatform::EWindows:
-			default:
-				defaultFilePath = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());
-				break;
-			}
-			if (perPlatform->CustomFileSaverClass != nullptr)
-			{
-				// TODO
-			}
-			mCurrentFilePath = defaultFilePath;
-			return true;
-		}
-		else
-		{
-			UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecorderCore::Initialize - ownerBridge->SelectedBitrateType is invalid."));
-		}
-	}
-	else
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecorderCore::Initialize - ownerBridge is null."));
-	}
-	return false;
-}
+//
+// bool UVdjmRecordEnvCurrentInfo_deprecated::DbcIsValidCurrentInfo() const
+// {
+// 	/*
+// 	 * 원래라면 mCurrentCustomFileSaverInstance 이걸 가지게 해야함.
+// 	* if(mCurrentCustomFileSaverInstance)
+// 	{
+// 	}
+// 	 */
+// 	return mLinkedDataAsset.IsValid() && not mAllBitrateMap.IsEmpty();
+// }
 
-
-bool UVdjmRecordEnvCurrentInfo_deprecated::DbcIsValidCurrentInfo() const
-{
-	/*
-	 * 원래라면 mCurrentCustomFileSaverInstance 이걸 가지게 해야함.
-	* if(mCurrentCustomFileSaverInstance)
-	{
-	}
-	 */
-	return mLinkedDataAsset.IsValid() && not mAllBitrateMap.IsEmpty();
-}
-
-FString UVdjmRecordEnvCurrentInfo_deprecated::MakeFinalFilePath(const FString& customFileName)
-{
-	FString basePath;
-	
-	switch (mCurrentPlatform)
-	{
-	case EVdjmRecordEnvPlatform::EWindows:
-		basePath = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());
-		break;
-	case EVdjmRecordEnvPlatform::EAndroid:
-		basePath =  FPaths::ConvertRelativePathToFull(FPaths::ProjectPersistentDownloadDir());
-		break;
-	case EVdjmRecordEnvPlatform::EIOS:
-		basePath = FPaths::ProjectSavedDir();
-		break;
-	case EVdjmRecordEnvPlatform::EMac:
-		basePath = FPaths::ProjectSavedDir();
-		break;
-	case EVdjmRecordEnvPlatform::ELinux:
-		basePath = FPaths::ProjectSavedDir();
-		break;
-	default:
-		basePath = FPaths::ProjectSavedDir();
-		break;
-	}
-	if(mCurrentFilePrefix.IsEmpty())
-	{
-		mCurrentFilePrefix = TEXT("Vcard");
-	}
-	if (mCurrentFilePrefix.EndsWith(TEXT("_")))
-	{
-		mCurrentFilePrefix.RemoveFromEnd(TEXT("_"));
-	}
-	FString finalPath = mCurrentFilePrefix + TEXT("_");
-	if(customFileName.IsEmpty())
-	{
-		finalPath += TEXT("_")+FString::FromInt(FDateTime::Now().ToUnixTimestamp());
-	}
-	else
-	{
-		mFileName = customFileName;
-		finalPath += customFileName + TEXT("_") + FString::FromInt(FDateTime::Now().ToUnixTimestamp());
-	}
-	
-	return FPaths::Combine(basePath, finalPath + TEXT(".mp4"));
-}
+// FString UVdjmRecordEnvCurrentInfo_deprecated::MakeFinalFilePath(const FString& customFileName)
+// {
+// 	FString basePath;
+// 	
+// 	switch (mCurrentPlatform)
+// 	{
+// 	case EVdjmRecordEnvPlatform::EWindows:
+// 		basePath = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());
+// 		break;
+// 	case EVdjmRecordEnvPlatform::EAndroid:
+// 		basePath =  FPaths::ConvertRelativePathToFull(FPaths::ProjectPersistentDownloadDir());
+// 		break;
+// 	case EVdjmRecordEnvPlatform::EIOS:
+// 		basePath = FPaths::ProjectSavedDir();
+// 		break;
+// 	case EVdjmRecordEnvPlatform::EMac:
+// 		basePath = FPaths::ProjectSavedDir();
+// 		break;
+// 	case EVdjmRecordEnvPlatform::ELinux:
+// 		basePath = FPaths::ProjectSavedDir();
+// 		break;
+// 	default:
+// 		basePath = FPaths::ProjectSavedDir();
+// 		break;
+// 	}
+// 	if(mCurrentFilePrefix.IsEmpty())
+// 	{
+// 		mCurrentFilePrefix = TEXT("Vcard");
+// 	}
+// 	if (mCurrentFilePrefix.EndsWith(TEXT("_")))
+// 	{
+// 		mCurrentFilePrefix.RemoveFromEnd(TEXT("_"));
+// 	}
+// 	FString finalPath = mCurrentFilePrefix + TEXT("_");
+// 	if(customFileName.IsEmpty())
+// 	{
+// 		finalPath += TEXT("_")+FString::FromInt(FDateTime::Now().ToUnixTimestamp());
+// 	}
+// 	else
+// 	{
+// 		mFileName = customFileName;
+// 		finalPath += customFileName + TEXT("_") + FString::FromInt(FDateTime::Now().ToUnixTimestamp());
+// 	}
+// 	
+// 	return FPaths::Combine(basePath, finalPath + TEXT(".mp4"));
+// }
 
 bool UVdjmRecordEnvResolver::InitResolverEnvironment(AVdjmRecordBridgeActor* ownerBridge)
 {

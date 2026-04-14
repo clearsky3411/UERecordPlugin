@@ -200,7 +200,7 @@ VdjmResult UVdjmRecordAndroidUnit::RecordStartCheck()
 			LinkedRecordResource->LinkedOwnerBridge.IsValid()
 				? LinkedRecordResource->LinkedOwnerBridge->GetCurrentFileName()
 				: FString();
-		LinkedRecordResource->FinalFilePath =
+		LinkedRecordResource->FinalFilePath =LinkedRecordResource->LinkedResolver->TryGetResolvedOutputConfig()
 			LinkedRecordResource->LinkedCurrentInfo_deprecate->MakeFinalFilePath(CustomFileName);
 		UE_LOG(LogVdjmRecorderCore, Log,
 			TEXT("UVdjmRecordAndroidUnit::RecordStartCheck - Refreshed output path: %s"),

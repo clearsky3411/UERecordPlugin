@@ -759,13 +759,13 @@ class VDJMRECORDER_API UVdjmRecordEnvCurrentInfo_deprecated : public UObject
 {
 	GENERATED_BODY()
 public:
-	bool InitializeCurrentEnvironment(AVdjmRecordBridgeActor* ownerBridge);
+	//bool InitializeCurrentEnvironment(AVdjmRecordBridgeActor* ownerBridge);
 	
-	bool DbcIsValidCurrentInfo() const;
-	bool DbcValidCurrentInfoPipelines() const
-	{
-		return DbcIsValidCurrentInfo() && mCurrentPipelineInstance.IsValid()&& mCurrentPipelineInstance->DbcIsValid();
-	}
+	// bool DbcIsValidCurrentInfo() const;
+	// bool DbcValidCurrentInfoPipelines() const
+	// {
+	// 	return DbcIsValidCurrentInfo() && mCurrentPipelineInstance.IsValid()&& mCurrentPipelineInstance->DbcIsValid();
+	// }
 	
 	float GetMaxDurationSecond() const
 	{
