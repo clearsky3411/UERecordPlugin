@@ -1057,6 +1057,66 @@ bool VdjmRecordUtils::Validations::DbcValidateOutputFilePath(const FString& inFi
 	return true;
 }
 
+bool VdjmRecordUtils::Validations::DbcValidateAudioConfig(const FVdjmEncoderInitRequestAudio& inAudioConfig,
+	const TCHAR* debugOwner)
+{
+	if (!inAudioConfig.bEnableInternalAudioCapture)
+	{
+		return true;
+	}
+
+	if (inAudioConfig.AudioMimeType.TrimStartAndEnd().IsEmpty())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("%s - Audio mime type is empty."), debugOwner);
+		return false;
+	}
+
+	constexpr int32 MinSampleRate = 8000;
+	constexpr int32 MaxSampleRate = 192000;
+	if (inAudioConfig.SampleRate < MinSampleRate || inAudioConfig.SampleRate > MaxSampleRate)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("%s - Audio sample rate out of range. SampleRate=%d Range=[%d,%d]"),
+			debugOwner,
+			inAudioConfig.SampleRate,
+			MinSampleRate,
+			MaxSampleRate);
+		return false;
+	}
+
+	if (inAudioConfig.ChannelCount <= 0 || inAudioConfig.ChannelCount > 2)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("%s - Audio channel count out of range. ChannelCount=%d (supported 1~2)"),
+			debugOwner,
+			inAudioConfig.ChannelCount);
+		return false;
+	}
+
+	int32 SafeBitrate = 0;
+	if (!VdjmRecordUtils::Validations::DbcValidateBitrate(inAudioConfig.Bitrate, SafeBitrate, debugOwner))
+	{
+		return false;
+	}
+
+	if (inAudioConfig.AacProfile <= 0)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("%s - Invalid AAC profile. AacProfile=%d"),
+			debugOwner,
+			inAudioConfig.AacProfile);
+		return false;
+	}
+
+	if (inAudioConfig.SourceSubMixName.IsNone())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("%s - Source submix name is empty."), debugOwner);
+		return false;
+	}
+
+	return true;
+}
+
 UVdjmRecordEnvDataAsset* AVdjmRecordBridgeActor::TryGetRecordEnvConfigure()
 {
 	/*
@@ -1931,6 +1991,10 @@ bool AVdjmRecordBridgeActor::DbcRecordStartableFull() const
 		else if (!InitPreset->EvaluateValidation())
 		{
 			Fail(TEXT("DbcRecordStartableFull - ResolvedInitPreset->EvaluateValidation == false"));
+		}
+		else if (!VdjmRecordUtils::Validations::DbcValidateAudioConfig(InitPreset->AudioConfig, TEXT("DbcRecordStartableFull")))
+		{
+			Fail(TEXT("DbcRecordStartableFull - AudioConfig validation failed"));
 		}
 
 		if (mEnvResolver->TryGetResolvedPipelineClass() == nullptr)

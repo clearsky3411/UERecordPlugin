@@ -149,6 +149,8 @@ enum class EVdjmRecordEnvPlatform : uint8
 	EDefault     UMETA(DisplayName = "Default / Fallback")
 };
 
+struct FVdjmEncoderInitRequestAudio;
+
 namespace VdjmRecordUtils
 {
 	namespace Platforms
@@ -182,6 +184,10 @@ namespace VdjmRecordUtils
 		bool DbcValidateOutputFilePath(
 			const FString& inFilePath,
 			FString& outSafeFilePath,
+			const TCHAR* debugOwner);
+
+		bool DbcValidateAudioConfig(
+			const FVdjmEncoderInitRequestAudio& inAudioConfig,
 			const TCHAR* debugOwner);
 	}
 	namespace FeaturePresets
