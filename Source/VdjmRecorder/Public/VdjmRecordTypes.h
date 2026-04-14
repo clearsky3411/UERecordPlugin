@@ -190,6 +190,7 @@ namespace VdjmRecordUtils
 			const FVdjmEncoderInitRequestAudio& inAudioConfig,
 			const TCHAR* debugOwner);
 	}
+	
 	namespace FeaturePresets
 	{
 		inline FIntPoint GetPresetFeatureResolution_Window(uint32 tier)
@@ -395,116 +396,7 @@ namespace VdjmRecordUtils
 		}
 	}
 	
-	namespace Resolvers
-	{
-		inline int32 ResolveVideoBitrateBps(
-			const FIntPoint& InResolution,
-			const int32 InFrameRate,
-			const EVdjmRecordQualityTiers InTier,
-			const EVdjmRecordContentComplexity InComplexity)
-		{
-			const double BaseBpp = VideoBitrate::GetBaseVideoBpp(InTier);
-			const double ComplexityMul = VideoBitrate::GetComplexityMultiplier(InComplexity);
-
-			const double RawBitrate =
-				static_cast<double>(InResolution.X) *
-				static_cast<double>(InResolution.Y) *
-				static_cast<double>(InFrameRate) *
-				BaseBpp *
-				ComplexityMul;
-
-			const int32 SafeBitrate = FMath::Clamp(
-				FMath::RoundToInt(RawBitrate),
-				500000,
-				50000000);
-
-			return SafeBitrate;
-		}
-		
-		inline FIntPoint ResolveVideoResolution(
-			const FIntPoint& InViewportSize,
-			const FIntPoint& InPresetResolution,
-			const bool bFitToDisplay,
-			const FIntPoint& InPlatformMaxResolution)
-		{
-			FIntPoint Desired = bFitToDisplay ? InViewportSize : InPresetResolution;
-			FIntPoint Fit =  VideoResolution::FitResolutionWithin(Desired, InPlatformMaxResolution);
-
-			// 짝수 보정은 ValidateResolution 쪽에서 처리
-			FIntPoint Safe = FIntPoint::ZeroValue;
-			if (!Validations::DbcValidateResolution(
-				Fit,
-				Safe,
-				TEXT("ResolveVideoResolution")))
-			{
-				return FIntPoint(1280, 720);
-			}
-
-			return Safe;
-		}
-		
-		inline FString BuildResolvedOutputPath(
-		EVdjmRecordEnvPlatform InPlatform,
-		const FString& InRequestedPath,
-		const FString& InCustomFileName,
-		const FString& InSessionId,
-		const bool bOverwriteExists,
-		const TCHAR* DebugOwner)
-		{
-			const FString BaseDir = FilePaths::GetPlatformRecordBaseDir(InPlatform);
-
-			FString CandidatePath = InRequestedPath;
-			CandidatePath.TrimStartAndEndInline();
-
-			if (CandidatePath.IsEmpty())
-			{
-				const FString BaseName = FilePaths::MakeSafeBaseName(InCustomFileName, InSessionId);
-				CandidatePath = FPaths::Combine(
-					BaseDir,
-					FString::Printf(TEXT("%s_%lld.mp4"), *BaseName, FDateTime::Now().GetTicks()));
-			}
-			else
-			{
-				if (FPaths::IsRelative(CandidatePath))
-				{
-					CandidatePath = FPaths::Combine(BaseDir, CandidatePath);
-				}
-
-				const FString Dir = FPaths::GetPath(CandidatePath);
-				const FString BaseName = FPaths::GetBaseFilename(CandidatePath, false);
-				CandidatePath = FPaths::Combine(Dir, BaseName + TEXT(".mp4"));
-			}
-
-			FString SafePath;
-			if (!Validations::DbcValidateOutputFilePath(CandidatePath, SafePath, DebugOwner))
-			{
-				return FString();
-			}
-
-			if (!bOverwriteExists && IFileManager::Get().FileExists(*SafePath))
-			{
-				const FString Dir = FPaths::GetPath(SafePath);
-				const FString BaseName = FPaths::GetBaseFilename(SafePath, false);
-
-				const FString UniquePath = FPaths::Combine(
-					Dir,
-					FString::Printf(TEXT("%s_%lld.mp4"), *BaseName, FDateTime::Now().GetTicks()));
-
-				FString UniqueSafePath;
-				if (!Validations::DbcValidateOutputFilePath(
-					UniquePath,
-					UniqueSafePath,
-					DebugOwner))
-				{
-					return FString();
-				}
-
-				SafePath = MoveTemp(UniqueSafePath);
-			}
-
-			return SafePath;
-		}
-	}
+	
 }
 
 
@@ -1026,6 +918,151 @@ struct VDJMRECORDER_API FVdjmEncoderInitRequest
 	static TOptional<FVdjmEncoderInitRequest> CreateDefaultForCurrentPlatform();
 };
 
+namespace VdjmRecordUtils
+{
+	namespace Resolvers
+	{
+		inline int32 ResolveVideoBitrateBps(
+			const FIntPoint& InResolution,
+			const int32 InFrameRate,
+			const EVdjmRecordQualityTiers InTier,
+			const EVdjmRecordContentComplexity InComplexity)
+		{
+			const double BaseBpp = VideoBitrate::GetBaseVideoBpp(InTier);
+			const double ComplexityMul = VideoBitrate::GetComplexityMultiplier(InComplexity);
+
+			const double RawBitrate =
+				static_cast<double>(InResolution.X) *
+				static_cast<double>(InResolution.Y) *
+				static_cast<double>(InFrameRate) *
+				BaseBpp *
+				ComplexityMul;
+
+			const int32 SafeBitrate = FMath::Clamp(
+				FMath::RoundToInt(RawBitrate),
+				500000,
+				50000000);
+
+			return SafeBitrate;
+		}
+		
+		inline FIntPoint ResolveVideoResolution(
+			const FIntPoint& InViewportSize,
+			const FIntPoint& InPresetResolution,
+			const bool bFitToDisplay,
+			const FIntPoint& InPlatformMaxResolution)
+		{
+			FIntPoint Desired = bFitToDisplay ? InViewportSize : InPresetResolution;
+			FIntPoint Fit =  VideoResolution::FitResolutionWithin(Desired, InPlatformMaxResolution);
+
+			// 짝수 보정은 ValidateResolution 쪽에서 처리
+			FIntPoint Safe = FIntPoint::ZeroValue;
+			if (!Validations::DbcValidateResolution(
+				Fit,
+				Safe,
+				TEXT("ResolveVideoResolution")))
+			{
+				return FIntPoint(1280, 720);
+			}
+
+			return Safe;
+		}
+		inline int32 ResolveVideoFrameRate(
+			const int32 InRequestedFps,
+			const FVdjmRecordGlobalRules& InRules,
+			const int32 InDisplayRefreshHz = 60)
+		{
+			int32 Fps = InRequestedFps > 0 ? InRequestedFps : InRules.MaxFrameRate;
+			Fps = FMath::Clamp(Fps, InRules.MinFrameRate, InRules.MaxFrameRate);
+
+			if (InDisplayRefreshHz > 0)
+			{
+				Fps = FMath::Min(Fps, InDisplayRefreshHz);
+			}
+			return Fps;
+		}
+		inline FString ResolveOutputPath(
+		EVdjmRecordEnvPlatform InPlatform,
+		const FString& InRequestedPath,
+		const FString& InCustomFileName,
+		const FString& InSessionId,
+		const bool bOverwriteExists,
+		const TCHAR* DebugOwner)
+		{
+			const FString BaseDir = FilePaths::GetPlatformRecordBaseDir(InPlatform);
+
+			FString CandidatePath = InRequestedPath;
+			CandidatePath.TrimStartAndEndInline();
+
+			if (CandidatePath.IsEmpty())
+			{
+				const FString BaseName = FilePaths::MakeSafeBaseName(InCustomFileName, InSessionId);
+				CandidatePath = FPaths::Combine(
+					BaseDir,
+					FString::Printf(TEXT("%s_%lld.mp4"), *BaseName, FDateTime::Now().GetTicks()));
+			}
+			else
+			{
+				if (FPaths::IsRelative(CandidatePath))
+				{
+					CandidatePath = FPaths::Combine(BaseDir, CandidatePath);
+				}
+
+				const FString Dir = FPaths::GetPath(CandidatePath);
+				const FString BaseName = FPaths::GetBaseFilename(CandidatePath, false);
+				CandidatePath = FPaths::Combine(Dir, BaseName + TEXT(".mp4"));
+			}
+
+			FString SafePath;
+			if (!Validations::DbcValidateOutputFilePath(CandidatePath, SafePath, DebugOwner))
+			{
+				return FString();
+			}
+
+			if (!bOverwriteExists && IFileManager::Get().FileExists(*SafePath))
+			{
+				const FString Dir = FPaths::GetPath(SafePath);
+				const FString BaseName = FPaths::GetBaseFilename(SafePath, false);
+
+				const FString UniquePath = FPaths::Combine(
+					Dir,
+					FString::Printf(TEXT("%s_%lld.mp4"), *BaseName, FDateTime::Now().GetTicks()));
+
+				FString UniqueSafePath;
+				if (!Validations::DbcValidateOutputFilePath(
+					UniquePath,
+					UniqueSafePath,
+					DebugOwner))
+				{
+					return FString();
+				}
+
+				SafePath = MoveTemp(UniqueSafePath);
+			}
+			return SafePath;
+		}
+		inline int32 ResolveAudioBitrateBps(
+			const int32 InSampleRate,
+			const int32 InChannelCount,
+			const bool bMusicHeavy)
+		{
+			int32 PerChannelBase = bMusicHeavy ? 80000 : 64000;
+
+			// 44.1k 이하에서는 조금 낮춰도 됨
+			if (InSampleRate <= 44100)
+			{
+				PerChannelBase = FMath::RoundToInt(static_cast<float>(PerChannelBase) * 0.9f);
+			}
+
+			int32 Raw = PerChannelBase * FMath::Max(1, InChannelCount);
+
+			const int32 MinBps = (InChannelCount <= 1) ? 48000 : 96000;
+			const int32 MaxBps = (InChannelCount <= 1) ? 96000 : 192000;
+
+			return FMath::Clamp(Raw, MinBps, MaxBps);
+		}
+	}
+}
 
 /**
  * 

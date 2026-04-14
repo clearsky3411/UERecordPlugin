@@ -790,7 +790,7 @@ bool UVdjmRecordEnvResolver::ResolvedFinalFilePath(const FString& customFileName
 		return false;
 	}
 
-	const FString SafeOutputPath = VdjmRecordUtils::Resolvers::BuildResolvedOutputPath(
+	const FString SafeOutputPath = VdjmRecordUtils::Resolvers::ResolveOutputPath(
 		LinkedOwnerBridge->GetTargetPlatform(),
 		MutableRequest->OutputConfig.OutputFilePath,
 		customFileName,
