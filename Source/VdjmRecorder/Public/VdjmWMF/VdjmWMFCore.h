@@ -23,7 +23,8 @@ class VDJMRECORDER_API UVdjmRecordWMFResource : public UVdjmRecordResource
 public:
 	void InitializeTexturePool(FIntPoint textureResolution,EPixelFormat finalPixelFormat, const int32 poolSize);
 	
-	virtual void InitializeResource(AVdjmRecordBridgeActor* ownerBridge) override;
+	virtual void InitializeResource_deprecated(AVdjmRecordBridgeActor* ownerBridge) override;
+	virtual bool InitializeResourceExtended(UVdjmRecordEnvResolver* resolver) override;
 	virtual void ReleaseResources() override;
 	virtual void ResetResource() override;
 	
@@ -36,6 +37,7 @@ public:
 	{
 		return true;
 	}
+
 
 private:
 	TArray<FTextureRHIRef> mTexturePoolRHI;

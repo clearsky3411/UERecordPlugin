@@ -21,7 +21,7 @@ class VDJMRECORDER_API UVdjmRecordAndroidResource : public UVdjmRecordResource
 		 * TODO(260410-cofigs) 
 		 */
 public:
-	virtual void InitializeResource(AVdjmRecordBridgeActor* ownerBridge) override;
+	
 	virtual void ReleaseResources() override;
 	virtual void ResetResource() override;
 	virtual FTextureRHIRef GetCurrPooledTextureRHI() override;

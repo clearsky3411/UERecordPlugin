@@ -140,24 +140,17 @@ struct VDJMRECORDER_API FVdjmRecordUnitParamContext
 	UWorld* WorldContext = nullptr;
 	FRDGBuilder* GraphBuilder = nullptr;
 	TWeakObjectPtr<AVdjmRecordBridgeActor> RecordBridge;
-	TWeakObjectPtr<UVdjmRecordEnvCurrentInfo> RecordCurrentEnv;
+	
 	TWeakObjectPtr<UVdjmRecordResource> RecordResource;
+	TWeakObjectPtr<UVdjmRecordEnvResolver> RecordEnvResolver;
 	
 	double CurrentRecordTimeSec = 0.0;
 	
-	void DbcSetupContext(UWorld* world, AVdjmRecordBridgeActor* bridge, UVdjmRecordEnvCurrentInfo* currentEnv, UVdjmRecordResource* resource, FRDGBuilder* graphBuilder,double currentRecordTimeSec)
-	{
-		WorldContext = world;
-		RecordBridge = bridge;
-		RecordCurrentEnv = currentEnv;
-		RecordResource = resource;
-		GraphBuilder = graphBuilder;
-		CurrentRecordTimeSec = currentRecordTimeSec;
-	}
-	
+	void DbcSetupContextExtended(UWorld* world,UVdjmRecordEnvResolver* resolver , FRDGBuilder* graphBuilder,double currentRecordTimeSec);
+
 	bool DbcIsValidRecordContext() const
 	{
-		return RecordCurrentEnv.IsValid() && RecordResource.IsValid() && GraphBuilder != nullptr;
+		return RecordEnvResolver.IsValid() && RecordResource.IsValid() && GraphBuilder != nullptr;
 	} 
 	
 	bool DbcIsValidUnit() const
@@ -171,7 +164,7 @@ struct VDJMRECORDER_API FVdjmRecordUnitParamContext
 	{
 		WorldContext = nullptr;
 		RecordBridge = nullptr;
-		RecordCurrentEnv = nullptr;
+		RecordEnvResolver = nullptr;
 		RecordResource = nullptr;
 		GraphBuilder = nullptr;
 		return *this;
@@ -439,7 +432,6 @@ class VDJMRECORDER_API UVdjmRecordResource : public UObject
 public:
 	virtual void BeginDestroy() override;
 	
-	virtual void InitializeResource(AVdjmRecordBridgeActor* ownerBridge);
 	virtual bool InitializeResourceExtended(UVdjmRecordEnvResolver* resolver);
 	virtual void ResetResource();
 	virtual void ReleaseResources();
@@ -451,14 +443,14 @@ public:
 	{
 		return (LinkedOwnerBridge.IsValid());
 	}
-	bool DbcIsDefaultReady() const
+	bool DbcIsInitializedResource() const
 	{
-		return 	DbcIsValidResourceInit() && LinkedCurrentInfo_deprecate.IsValid();
+		return 	LinkedOwnerBridge.IsValid() && LinkedResolver.IsValid();
 	}
 	
 	virtual bool DbcIsValidResource() const
 	{
-		return DbcIsDefaultReady();
+		return DbcIsInitializedResource();
 	}
 	virtual bool IsLazyPostInitializeCheck() const
 	{
@@ -484,7 +476,7 @@ public:
 	}
 	void OnStatusChangeReadyToRunning()
 	{
-		if (not DbcIsDefaultReady())
+		if (not DbcIsInitializedResource())
 		{
 			UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordResource::DbcIsDefaultReady - Resource is not valid. Call Initialize() first."));
 			return;
@@ -517,9 +509,9 @@ public:
 	FString		FinalFilePath;	//	이거는 여기에서 해줄게 아님. platform 마다 달라야함.
 	EPixelFormat FinalPixelFormat = PF_A8R8G8B8;
 	
-	TWeakObjectPtr<UVdjmRecordEnvCurrentInfo> LinkedCurrentInfo_deprecate;
-	TWeakObjectPtr<AVdjmRecordBridgeActor> LinkedOwnerBridge;
-	TWeakObjectPtr<UVdjmRecordEnvResolver> LinkedResolver;
+	TWeakObjectPtr<UVdjmRecordEnvCurrentInfo_deprecated> LinkedCurrentInfo_deprecate;
+	TWeakObjectPtr<AVdjmRecordBridgeActor> LinkedOwnerBridge;// InitializeResourceExtended에서 설정됨. 그 전까지는 nullptr 이므로 주의.
+	TWeakObjectPtr<UVdjmRecordEnvResolver> LinkedResolver;	//	이거는 InitializeResourceExtended( in ChainInit_CreateRecordResource )에서 설정됨. 그 전까지는 nullptr 이므로 주의.
 protected:
 	FTextureRHIRef CreateTextureForNV12(FIntPoint resolution,EPixelFormat pixelformat,ETextureCreateFlags createFlags);
 	EVdjmResourceStatus CurrentResourceStatus = EVdjmResourceStatus::ENew;	
@@ -763,7 +755,7 @@ public:
 - Dependency In : UVdjmRecordEnvDataAsset, AVdjmRecordBridgeActor
 */
 UCLASS()
-class VDJMRECORDER_API UVdjmRecordEnvCurrentInfo : public UObject
+class VDJMRECORDER_API UVdjmRecordEnvCurrentInfo_deprecated : public UObject
 {
 	GENERATED_BODY()
 public:
@@ -838,8 +830,9 @@ class VDJMRECORDER_API UVdjmRecordEnvResolver : public UObject
 {
 	GENERATED_BODY()
 public:
-	
-	UVdjmRecordResource* CreateResolvedRecordResource(AVdjmRecordBridgeActor* ownerBridge,const FVdjmRecordEnvPlatformPreset* presetData) ;
+	//	여기 단계에서 linkedOwnerBridge 부터 GlobalRules 를 검증 및 소유. 
+	bool InitResolverEnvironment(AVdjmRecordBridgeActor* ownerBridge);
+	UVdjmRecordResource* CreateResolvedRecordResource(const FVdjmRecordEnvPlatformPreset* presetData) ;
 	
 	bool InitComplete(AVdjmRecordBridgeActor* ownerBridge,UVdjmRecordResource* resource, UVdjmRecordUnitPipeline* pipeline);
 	
@@ -854,6 +847,8 @@ public:
 	}
 	
 	const FVdjmRecordEnvPlatformPreset& GetResolvedEnvPreset() const { return mResolvedPreset; }
+	const FVdjmRecordGlobalRules& GetResolvedGlobalRules() const { return mGlobalRules; }
+	void SetResolvedGlobalRules(const FVdjmRecordGlobalRules& globalRules) { mGlobalRules = globalRules; }
 	
 	TSubclassOf<UVdjmRecordResource> TryGetResolvedRecordResourceClass() const
 	{
@@ -927,15 +922,14 @@ public:
 	{
 		return mResolvedQualityTier == EVdjmRecordQualityTiers::ECustom;
 	}
-	bool IsValidPreset() const
+	bool IsValidPreset() const	//	Pipeline 을 생성하기 전에 이걸로 검증을 해라.mResolvedPreset.DbcIsValid() 가 중요
 	{
 		return LinkedOwnerBridge.IsValid() && IsValidResolved() && mResolvedPreset.DbcIsValid();
 	}
-	bool IsValidInitEnvResolver() const
+	bool DbcIsValidInitEnvResolver() const	//	ChainInit_CreateRecordPipeline 이게 끝난 시점에만 사용 가능.
 	{
 		return IsValidPreset() && LinkedRecordResource.IsValid() && LinkedPipeline.IsValid();
 	}
-	
 	
 	TWeakObjectPtr<AVdjmRecordBridgeActor> LinkedOwnerBridge = nullptr;
 	TWeakObjectPtr<UVdjmRecordResource> LinkedRecordResource = nullptr;
@@ -945,15 +939,8 @@ private:
 	bool ResolvedFinalFilePath(const FString& customFileName);
 	
 	
-	FIntPoint GetPresetFeatureResolution(uint32 tier = 0) const;
-	FIntPoint GetPresetFeatureResolution_Window(uint32 tier = 0) const;
-	FIntPoint GetPresetFeatureResolution_Android(uint32 tier = 0) const;
-	FIntPoint GetPresetFeatureResolution_Ios(uint32 tier = 0) const;
-	FIntPoint GetPresetFeatureResolution_Mac(uint32 tier = 0) const;
-	FIntPoint GetPresetFeatureResolution_Linux(uint32 tier = 0) const;
-	
-
-	FVdjmRecordEnvPlatformPreset mResolvedPreset;
+	FVdjmRecordGlobalRules mGlobalRules;
+	FVdjmRecordEnvPlatformPreset mResolvedPreset;// ChainInit_CreateRecordResource 시점에서 resolve 된 것이 들어감.
 	EVdjmRecordQualityTiers mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
 	
 };
@@ -964,6 +951,9 @@ private:
 	↓		class  UVdjmRecordFileSaver : public UObject		↓
 	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVdjmRecordInitEvent,AVdjmRecordBridgeActor*, bridgeActor);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVdjmRecordInitErrorEvent,AVdjmRecordBridgeActor*, bridgeActor,EVdjmRecordBridgeInitStep,prevStep,int32,retryStep);
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVdjmRecordEvent,UVdjmRecordResource*, recordData);
 DECLARE_MULTICAST_DELEGATE_OneParam(FVdjmRecordInnerEvent,UVdjmRecordResource*);
 
@@ -1065,10 +1055,7 @@ public:
 	{
 		return mRecordConfigureDataAsset != nullptr;
 	}
-	bool DbcValidCurrentEnvInfo_deprecated() const
-	{
-		return DbcValidConfigureDataAsset() && mCurrentEnvInfo_deprecated != nullptr && mCurrentEnvInfo_deprecated->DbcIsValidCurrentInfo();
-	}
+
 	bool DbcValidRecordPreset() const
 	{
 		return IsValid(mEnvResolver) && mEnvResolver->IsValidPreset();
@@ -1083,7 +1070,7 @@ public:
 	}
 	bool DbcRecordingPossible()  const
 	{
-		return DbcValidRecordPipeline() && DbcValidCurrentEnvInfo_deprecated();
+		return DbcValidRecordPipeline() && DbcValidRecordPreset();
 	}
 	
 	bool DbcRecordStartable() const
@@ -1098,7 +1085,8 @@ public:
     {
         return mGlobalRules;
     }
-	
+	bool IsCompleteChainInit() const;
+
 	void StopRecordingInternal();
 	UFUNCTION(BlueprintCallable)
 	void OnResourceReadyForPostInit(UVdjmRecordResource* resource);
@@ -1112,10 +1100,7 @@ public:
 	{
 		return mRecordConfigureDataAsset;
 	}
-	UVdjmRecordEnvCurrentInfo* GetCurrentEnvInfo()
-	{
-        return mCurrentEnvInfo_deprecated;
-    }
+	
 	FVdjmRecordEnvPlatformInfo* GetCurrentPlatformInfo() const
 	{
 		if (DbcValidConfigureDataAsset())
@@ -1126,7 +1111,7 @@ public:
 	}
 	FVdjmRecordGlobalRules GetCurrentGlobalRules() const
 	{
-		return mCurrentEnvInfo_deprecated ? mCurrentEnvInfo_deprecated->GetCurrentGlobalRules() : FVdjmRecordGlobalRules();
+		return mEnvResolver ? mEnvResolver->GetResolvedGlobalRules() : FVdjmRecordGlobalRules();
 	}
 	UVdjmRecordResource* GetRecordResource()
 	{
@@ -1176,6 +1161,15 @@ public:
 	
 	FVdjmRecordStartEvent OnRecordStartRetValEvent;
 	
+	UPROPERTY(BlueprintAssignable,EditAnywhere)
+	FVdjmRecordInitEvent OnInitStartEvent;
+	UPROPERTY(BlueprintAssignable,EditAnywhere)
+	FVdjmRecordInitEvent OnInitCompleteEvent;
+	UPROPERTY(BlueprintAssignable,EditAnywhere)
+	FVdjmRecordInitEvent OnInitErrorEndEvent;
+	UPROPERTY(BlueprintAssignable,EditAnywhere)
+	FVdjmRecordInitErrorEvent OnInitErrorEvent;
+	
 	FSceneViewport* mTargetViewport;
 	TWeakObjectPtr<APlayerController> mTargetPlayerController;
 
@@ -1191,8 +1185,8 @@ protected:
 	
 	bool CheckChainCount(const FString& errorMsg);
 	void OnTryChainInitNext(EVdjmRecordBridgeInitStep nextStep);
-	void ChainInit_InitializeWorldParts();
-	void ChainInit_InitializeCurrentEnvironment();
+	void ChainInit_InitializeWorldParts();	//	mRecordConfigureDataAsset 을 검증. mEnvResolver 생성 및 초기화
+	void ChainInit_InitializeCurrentEnvironment();	//	mRecordConfigureDataAsset 를 통해서 FVdjmRecordEnvPlatformPreset 와 FVdjmEncoderInitRequest 검증, mEnvResolver->CreateResolvedRecordResource(envPreset) 로 mRecordResource 생성 시도
 	void ChainInit_CreateRecordResource();
 	void ChainInit_PostResourceInitResolve();
 	void ChainInit_CreateRecordPipeline();
@@ -1233,7 +1227,7 @@ protected:
 	TObjectPtr<UVdjmRecordEnvDataAsset> mRecordConfigureDataAsset;
 	
 	UPROPERTY()
-	TObjectPtr<UVdjmRecordEnvCurrentInfo> mCurrentEnvInfo_deprecated;	//	이거 이제 제거해야함.
+	TObjectPtr<UVdjmRecordEnvCurrentInfo_deprecated> mCurrentEnvInfo_deprecated;	//	이거 이제 제거해야함.
 
 	UPROPERTY()
 	TObjectPtr<USceneComponent> mRootScene;

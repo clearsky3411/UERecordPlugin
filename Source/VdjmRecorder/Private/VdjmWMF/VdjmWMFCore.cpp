@@ -42,11 +42,11 @@ void UVdjmRecordWMFResource::InitializeTexturePool(FIntPoint textureResolution, 
 	}
 }
 
-void UVdjmRecordWMFResource::InitializeResource(AVdjmRecordBridgeActor* ownerBridge)
+bool UVdjmRecordWMFResource::InitializeResourceExtended(UVdjmRecordEnvResolver* resolver)
 {
-	Super::InitializeResource(ownerBridge);
-
-	FVdjmEncoderStatus::DbcRenderThreadTask(
+	if (Super::InitializeResourceExtended(resolver))
+	{
+		FVdjmEncoderStatus::DbcRenderThreadTask(
 		[
 			textureResolution = TextureResolution,
 			finalPixelFormat = FinalPixelFormat,
@@ -60,8 +60,11 @@ void UVdjmRecordWMFResource::InitializeResource(AVdjmRecordBridgeActor* ownerBri
 			}
 		});
 	
-	UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordResource::Initialize - Initialized with Resolution(%d,%d), FrameRate(%d), Bitrate(%d)"),
-		TextureResolution.X,TextureResolution.Y,FinalFrameRate,FinalBitrate);
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordResource::Initialize - Initialized with Resolution(%d,%d), FrameRate(%d), Bitrate(%d)"),
+			TextureResolution.X,TextureResolution.Y,FinalFrameRate,FinalBitrate);
+		return true;
+	}
+	return false;
 }
 
 void UVdjmRecordWMFResource::ReleaseResources()
@@ -110,7 +113,7 @@ FTextureRHIRef UVdjmRecordWMFResource::GetNextPooledTextureRHI()
 
 bool UVdjmRecordWMFResource::DbcIsValidResource() const
 {
-	return DbcIsDefaultReady() && mTexturePoolRHI.Num() > 0 && mTexturePoolRHI[0] != nullptr;
+	return DbcIsInitializedResource() && mTexturePoolRHI.Num() > 0 && mTexturePoolRHI[0] != nullptr;
 }
 
 void UVdjmRecordWMFResource::BeginDestroy()

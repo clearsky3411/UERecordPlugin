@@ -9,7 +9,7 @@
 class FVdjmVideoEncoderBase;
 class UVdjmRecordUnit;
 class UVdjmRecordResource;
-class UVdjmRecordEnvCurrentInfo;
+class UVdjmRecordEnvCurrentInfo_deprecated;
 
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
@@ -146,6 +146,15 @@ namespace VdjmRecordUtils
 			const FString& InFilePath,
 			FString& OutSafeFilePath,
 			const TCHAR* DebugOwner);
+	}
+	namespace FeaturePresets
+	{
+		static FIntPoint GetPresetFeatureResolution(uint32 tier);
+		static FIntPoint GetPresetFeatureResolution_Window(uint32 Tier);
+		static FIntPoint GetPresetFeatureResolution_Android(uint32 Tier);
+		static FIntPoint GetPresetFeatureResolution_Ios(uint32 Tier);
+		static FIntPoint GetPresetFeatureResolution_Mac(uint32 Tier);
+		static FIntPoint GetPresetFeatureResolution_Linux(uint32 Tier);
 	}
 	
 	inline EVdjmRecordEnvPlatform GetTargetPlatform()
@@ -638,7 +647,6 @@ struct VDJMRECORDER_API FVdjmEncoderInitRequestVideo
 {
 	GENERATED_BODY()
 	
-	
 	UPROPERTY(EditAnywhere, Category="VideoConfig")
 	bool bResolutionFitToDisplay = true;
 	UPROPERTY(EditAnywhere, Category="VideoConfig")
@@ -653,6 +661,9 @@ struct VDJMRECORDER_API FVdjmEncoderInitRequestVideo
 	int32 KeyframeInterval = 2;
 	UPROPERTY(EditAnywhere, Category="VideoConfig")
 	FString MimeType = TEXT("video/mp4");
+	
+	UPROPERTY(EditAnywhere, Category="VideoConfig")
+	TEnumAsByte<EPixelFormat> PixelFormat = PF_B8G8R8A8; // Unreal Engine에서 일반적으로 사용되는 픽셀 포맷. 플랫폼과 인코더에 따라 지원 여부가 다를 수 있습니다.
 	
 	DECLARE_VDJM_ENCODER_BOILERPLATE(FVdjmEncoderInitRequestVideo);
 	
