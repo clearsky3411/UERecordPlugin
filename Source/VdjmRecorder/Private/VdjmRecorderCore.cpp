@@ -670,7 +670,7 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 				: FIntPoint(CandidateRequest.VideoConfig.Width, CandidateRequest.VideoConfig.Height);
 
 		const FIntPoint FittedResolution =
-			 VdjmRecordUtils::FitResolutionWithin(RawRequestedResolution, TierMaxResolution);
+			 VdjmRecordUtils::VideoResolution::FitResolutionWithin(RawRequestedResolution, TierMaxResolution);
 
 		FIntPoint SafeResolution;
 		if (!VdjmRecordUtils::Validations::DbcValidateResolution(
@@ -790,7 +790,7 @@ bool UVdjmRecordEnvResolver::ResolvedFinalFilePath(const FString& customFileName
 		return false;
 	}
 
-	const FString SafeOutputPath = VdjmRecordUtils::BuildResolvedOutputPath(
+	const FString SafeOutputPath = VdjmRecordUtils::Resolvers::BuildResolvedOutputPath(
 		LinkedOwnerBridge->GetTargetPlatform(),
 		MutableRequest->OutputConfig.OutputFilePath,
 		customFileName,
@@ -897,49 +897,49 @@ FTextureRHIRef UVdjmRecordResource::CreateTextureForNV12(FIntPoint resolution, E
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 */
 
-bool VdjmRecordUtils::Validations::DbcValidateResolution(const FIntPoint& InResolution, FIntPoint& OutSafeResolution,
-	const TCHAR* DebugOwner)
+bool VdjmRecordUtils::Validations::DbcValidateResolution(const FIntPoint& inResolution, FIntPoint& outSafeResolution,
+	const TCHAR* debugOwner)
 {
-	OutSafeResolution = FIntPoint::ZeroValue;
+	outSafeResolution = FIntPoint::ZeroValue;
 
-	if (InResolution.X <= 0 || InResolution.Y <= 0)
+	if (inResolution.X <= 0 || inResolution.Y <= 0)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 		       TEXT("%s - Invalid resolution. X=%d Y=%d"),
-		       DebugOwner,
-		       InResolution.X,
-		       InResolution.Y);
+		       debugOwner,
+		       inResolution.X,
+		       inResolution.Y);
 		return false;
 	}
 
 	// 영상 인코더/서피스 계열에서 짝수 해상도를 요구하는 경우가 많으므로 방어적으로 보정
-	const int32 SafeX = FMath::Max(2, InResolution.X & ~1);
-	const int32 SafeY = FMath::Max(2, InResolution.Y & ~1);
+	const int32 SafeX = FMath::Max(2, inResolution.X & ~1);
+	const int32 SafeY = FMath::Max(2, inResolution.Y & ~1);
 
 	if (SafeX <= 0 || SafeY <= 0)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 		       TEXT("%s - Safe resolution collapsed to invalid value. X=%d Y=%d"),
-		       DebugOwner,
+		       debugOwner,
 		       SafeX,
 		       SafeY);
 		return false;
 	}
 
-	OutSafeResolution = FIntPoint(SafeX, SafeY);
+	outSafeResolution = FIntPoint(SafeX, SafeY);
 	return true;
 }
 
-bool VdjmRecordUtils::Validations::DbcValidateBitrate(const int32 InBitrate, int32& OutSafeBitrate, const TCHAR* DebugOwner)
+bool VdjmRecordUtils::Validations::DbcValidateBitrate(const int32 inBitrate, int32& outSafeBitrate, const TCHAR* debugOwner)
 {
-	OutSafeBitrate = 0;
+	outSafeBitrate = 0;
 
-	if (InBitrate <= 0)
+	if (inBitrate <= 0)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 		       TEXT("%s - Invalid bitrate. Bitrate=%d"),
-		       DebugOwner,
-		       InBitrate);
+		       debugOwner,
+		       inBitrate);
 		return false;
 	}
 
@@ -947,34 +947,34 @@ bool VdjmRecordUtils::Validations::DbcValidateBitrate(const int32 InBitrate, int
 	constexpr int32 MinBitrate = 100000;      // 100 Kbps
 	constexpr int32 MaxBitrate = 100000000;   // 100 Mbps
 
-	if (InBitrate < MinBitrate || InBitrate > MaxBitrate)
+	if (inBitrate < MinBitrate || inBitrate > MaxBitrate)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 		       TEXT("%s - Bitrate out of safe range. Bitrate=%d Range=[%d,%d]"),
-		       DebugOwner,
-		       InBitrate,
+		       debugOwner,
+		       inBitrate,
 		       MinBitrate,
 		       MaxBitrate);
 		return false;
 	}
 
-	OutSafeBitrate = InBitrate;
+	outSafeBitrate = inBitrate;
 	return true;
 }
 
-bool VdjmRecordUtils::Validations::DbcValidateOutputFilePath(const FString& InFilePath, FString& OutSafeFilePath,
-	const TCHAR* DebugOwner)
+bool VdjmRecordUtils::Validations::DbcValidateOutputFilePath(const FString& inFilePath, FString& outSafeFilePath,
+	const TCHAR* debugOwner)
 {
-	OutSafeFilePath.Reset();
+	outSafeFilePath.Reset();
 
-	FString SafePath = InFilePath;
+	FString SafePath = inFilePath;
 	SafePath.TrimStartAndEndInline();
 
 	if (SafePath.IsEmpty())
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 		       TEXT("%s - Output file path is empty."),
-		       DebugOwner);
+		       debugOwner);
 		return false;
 	}
 
@@ -991,7 +991,7 @@ bool VdjmRecordUtils::Validations::DbcValidateOutputFilePath(const FString& InFi
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 		       TEXT("%s - Output file path is still relative after normalization. Path=%s"),
-		       DebugOwner,
+		       debugOwner,
 		       *SafePath);
 		return false;
 	}
@@ -1001,7 +1001,7 @@ bool VdjmRecordUtils::Validations::DbcValidateOutputFilePath(const FString& InFi
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 		       TEXT("%s - Output file path has no parent directory. Path=%s"),
-		       DebugOwner,
+		       debugOwner,
 		       *SafePath);
 		return false;
 	}
@@ -1013,7 +1013,7 @@ bool VdjmRecordUtils::Validations::DbcValidateOutputFilePath(const FString& InFi
 		{
 			UE_LOG(LogVdjmRecorderCore, Error,
 			       TEXT("%s - Failed to create output directory. Directory=%s"),
-			       DebugOwner,
+			       debugOwner,
 			       *DirectoryPath);
 			return false;
 		}
@@ -1024,7 +1024,7 @@ bool VdjmRecordUtils::Validations::DbcValidateOutputFilePath(const FString& InFi
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 		       TEXT("%s - Output file name is empty. Path=%s"),
-		       DebugOwner,
+		       debugOwner,
 		       *SafePath);
 		return false;
 	}
@@ -1034,7 +1034,7 @@ bool VdjmRecordUtils::Validations::DbcValidateOutputFilePath(const FString& InFi
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
 		       TEXT("%s - Invalid output extension. Expected=.mp4 Path=%s"),
-		       DebugOwner,
+		       debugOwner,
 		       *SafePath);
 		return false;
 	}
@@ -1046,14 +1046,14 @@ bool VdjmRecordUtils::Validations::DbcValidateOutputFilePath(const FString& InFi
 		{
 			UE_LOG(LogVdjmRecorderCore, Error,
 			       TEXT("%s - Output file name contains invalid character '%c'. File=%s"),
-			       DebugOwner,
+			       debugOwner,
 			       Ch,
 			       *CleanFilename);
 			return false;
 		}
 	}
 
-	OutSafeFilePath = SafePath;
+	outSafeFilePath = SafePath;
 	return true;
 }
 
@@ -1458,7 +1458,7 @@ void AVdjmRecordBridgeActor::OnBackBufferReady_RenderThread(SWindow& SlateWindow
 
 EVdjmRecordEnvPlatform AVdjmRecordBridgeActor::GetTargetPlatform()
 {
-	return VdjmRecordUtils::GetTargetPlatform();
+	return VdjmRecordUtils::Platforms::GetTargetPlatform();
 }
 
 bool AVdjmRecordBridgeActor::EvaluateInitRequest(const FVdjmEncoderInitRequest* initPreset)

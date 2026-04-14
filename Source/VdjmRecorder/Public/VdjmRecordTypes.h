@@ -36,7 +36,28 @@ using VdjmResult = int32;
 //	VdjmResult가 0 이상이면 성공, 0 미만이면 실패로 간주하는 규칙을 따릅니다. 이는 HRESULT와 유사한 방식입니다.
 #define VDJM_FAILED(Result)    ((VdjmResult)(Result) < 0)
 
-
+UENUM(Blueprintable)
+enum class EVdjmRecordQualityTiers : uint8
+{
+	EUndefined UMETA(DisplayName="Undefined",Hidden),
+	EDefault UMETA(DisplayName="Default"),
+	EUltra UMETA(DisplayName="Ultra"),
+	EHigh UMETA(DisplayName="High"),
+	EMediumHigh UMETA(DisplayName="MediumHigh"),
+	EMedium UMETA(DisplayName="Medium"),
+	EMdeiumLow UMETA(DisplayName="MediumLow"),
+	ELow UMETA(DisplayName="Low"),
+	ELowest UMETA(DisplayName="Lowest"),
+	ECustom UMETA(DisplayName="Custom"),
+	EResolvedTier UMETA(DisplayName="ResolvedTier",Hidden),
+	EMax UMETA(Hidden)
+};
+enum class EVdjmRecordContentComplexity : uint8
+{
+	EUIStatic,
+	EGameplay,
+	EHighMotion
+};
 //	Common result codes
 namespace VdjmResults
 {
@@ -130,157 +151,353 @@ enum class EVdjmRecordEnvPlatform : uint8
 
 namespace VdjmRecordUtils
 {
+	namespace Platforms
+	{
+		inline EVdjmRecordEnvPlatform GetTargetPlatform()
+		{
+#if PLATFORM_WINDOWS
+			return EVdjmRecordEnvPlatform::EWindows;
+#elif PLATFORM_ANDROID || defined(__RESHARPER__)
+			return EVdjmRecordEnvPlatform::EAndroid;
+#elif PLATFORM_IOS
+			return EVdjmRecordEnvPlatform::EIos;
+#else
+			return EVdjmRecordEnvPlatform::EUnknown;
+#endif
+		}
+	}
+	
 	namespace Validations
 	{
-		static bool DbcValidateResolution(
-			const FIntPoint& InResolution,
-			FIntPoint& OutSafeResolution,
-			const TCHAR* DebugOwner);
+		bool DbcValidateResolution(
+			const FIntPoint& inResolution,
+			FIntPoint& outSafeResolution,
+			const TCHAR* debugOwner);
 
-		static bool DbcValidateBitrate(
-			const int32 InBitrate,
-			int32& OutSafeBitrate,
-			const TCHAR* DebugOwner);
+		bool DbcValidateBitrate(
+			const int32 inBitrate,
+			int32& outSafeBitrate,
+			const TCHAR* debugOwner);
 
-		static bool DbcValidateOutputFilePath(
-			const FString& InFilePath,
-			FString& OutSafeFilePath,
-			const TCHAR* DebugOwner);
+		bool DbcValidateOutputFilePath(
+			const FString& inFilePath,
+			FString& outSafeFilePath,
+			const TCHAR* debugOwner);
 	}
 	namespace FeaturePresets
 	{
-		static FIntPoint GetPresetFeatureResolution(uint32 tier);
-		static FIntPoint GetPresetFeatureResolution_Window(uint32 Tier);
-		static FIntPoint GetPresetFeatureResolution_Android(uint32 Tier);
-		static FIntPoint GetPresetFeatureResolution_Ios(uint32 Tier);
-		static FIntPoint GetPresetFeatureResolution_Mac(uint32 Tier);
-		static FIntPoint GetPresetFeatureResolution_Linux(uint32 Tier);
+		inline FIntPoint GetPresetFeatureResolution_Window(uint32 tier)
+		{
+			const TArray<FIntPoint> resultResolution =
+			{
+				FIntPoint(7680, 4320),	// 8K, Enthusiast Monitor / TV
+				FIntPoint(3840, 2160),	// UHD (4K), High-End PC Monitor
+				FIntPoint(3440, 1440),	// UWQHD, 21:9 Ultrawide Monitor
+				FIntPoint(2560, 1440),	// QHD (1440p), 2K Gaming Monitor
+				FIntPoint(1920, 1200),	// WUXGA (1200p), 16:10 Standard Monitor
+				FIntPoint(1920, 1080),	// FHD (1080p), Standard PC Monitor
+				FIntPoint(1280, 720),	// HD (720p), Steam Deck (1280x800 for 16:10)
+			};
+			uint32 maxTierNum = resultResolution.Num();
+			if (tier < maxTierNum)
+			{
+				return resultResolution[tier];
+			}
+			else
+			{
+				return resultResolution[tier % maxTierNum];
+			}
+		}
+		inline FIntPoint GetPresetFeatureResolution_Android(uint32 tier)
+		{
+			const TArray<FIntPoint> resultResolution =
+			{
+				FIntPoint(2560, 1600),	// Tablet (Landscape default), Samsung Galaxy Tab S8/S9
+				FIntPoint(1812, 2176),	// Foldable (Inner Screen), Samsung Galaxy Z Fold 5
+				FIntPoint(1440, 3120),	// Premium Flagship, Samsung Galaxy S24 Ultra / Pixel 8 Pro
+				FIntPoint(1080, 2400),	// Standard Flagship 2, Google Pixel 7/8
+				FIntPoint(1080, 2340),	// Standard Flagship, Samsung Galaxy S22/S23 (SM-S901/S911)
+				FIntPoint(720, 1600),	// Budget Tier (HD+), Samsung Galaxy A12 / Older phones
+			};
+			uint32 maxTierNum = resultResolution.Num();
+			if (tier < maxTierNum)
+			{
+				return resultResolution[tier];
+			}
+			else
+			{
+				return resultResolution[tier % maxTierNum];
+			}
+		}
+		inline FIntPoint GetPresetFeatureResolution_Ios(uint32 tier)
+		{
+			const TArray<FIntPoint> resultResolution =
+			{
+				FIntPoint(2048, 2732),	// iPad Pro 12.9-inch / 13-inch
+				FIntPoint(1668, 2388),	// iPad Pro 11-inch
+				FIntPoint(1290, 2796),	// iPhone 14/15/16 Pro Max
+				FIntPoint(1284, 2778),	// iPhone 12/13/14 Pro Max & Plus
+				FIntPoint(1179, 2556),	// iPhone 14 Pro / 15 Pro / 16 Pro
+				FIntPoint(1170, 2532),	// iPhone 12 / 13 / 14 (Standard size)
+				FIntPoint(750, 1334),	// iPhone SE (3rd Gen) / Older iPhones (8, 7)
+			};
+			uint32 maxTierNum = resultResolution.Num();
+			if (tier < maxTierNum)
+			{
+				return resultResolution[tier];
+			}
+			else
+			{
+				return resultResolution[tier % maxTierNum];
+			}
+		}
+		inline FIntPoint GetPresetFeatureResolution_Mac(uint32 tier)
+		{
+			const TArray<FIntPoint> resultResolution =
+			{
+				FIntPoint(6016, 3384),	// Pro Display XDR (6K)
+				FIntPoint(5120, 2880),	// Apple Studio Display / 27" iMac (5K Retina)
+				FIntPoint(3456, 2234),	// MacBook Pro 16" (M1/M2/M3)
+				FIntPoint(3024, 1964),	// MacBook Pro 14" (M1/M2/M3)
+				FIntPoint(2560, 1664),	// MacBook Air 13" (M2/M3) - Liquid Retina (Notch included)
+				FIntPoint(2560, 1600),	// MacBook Air 13" (M1) / Older MacBook Pro
+			};
+			uint32 maxTierNum = resultResolution.Num();
+			if (tier < maxTierNum)
+			{
+				return resultResolution[tier];
+			}
+			else
+			{
+				return resultResolution[tier % maxTierNum];
+			}
+		}
+		inline FIntPoint GetPresetFeatureResolution_Linux(uint32 tier)
+		{
+			return GetPresetFeatureResolution_Window(tier);
+		}
+		inline FIntPoint GetPresetFeatureResolution(uint32 tier)
+		{
+			switch (VdjmRecordUtils::Platforms::GetTargetPlatform())
+			{
+			case EVdjmRecordEnvPlatform::EWindows:
+				return GetPresetFeatureResolution_Window(tier);
+				break;
+			case EVdjmRecordEnvPlatform::EAndroid:
+				return GetPresetFeatureResolution_Android(tier);
+				break;
+			case EVdjmRecordEnvPlatform::EIOS:
+				return GetPresetFeatureResolution_Ios(tier);
+				break;
+			case EVdjmRecordEnvPlatform::EMac:
+				return GetPresetFeatureResolution_Mac(tier);
+				break;
+			case EVdjmRecordEnvPlatform::ELinux:
+				return GetPresetFeatureResolution_Linux(tier);
+				break;
+			case EVdjmRecordEnvPlatform::EDefault:
+				return GetPresetFeatureResolution_Window(tier);
+				break;
+			default: return FIntPoint();
+			}
+		}
 	}
 	
-	inline EVdjmRecordEnvPlatform GetTargetPlatform()
+	namespace VideoBitrate
 	{
-#if PLATFORM_WINDOWS
-		return EVdjmRecordEnvPlatform::EWindows;
-#elif PLATFORM_ANDROID || defined(__RESHARPER__)
-		return EVdjmRecordEnvPlatform::EAndroid;
-#elif PLATFORM_IOS
-		return EVdjmRecordEnvPlatform::EIos;
-#else
-		return EVdjmRecordEnvPlatform::EUnknown;
-#endif
-	}
-	inline FString GetPlatformRecordBaseDir(EVdjmRecordEnvPlatform InPlatform)
-	{
-		switch (InPlatform)
+		inline double GetBaseVideoBpp(EVdjmRecordQualityTiers Tier)
 		{
-		case EVdjmRecordEnvPlatform::EAndroid:
-			return FPaths::ConvertRelativePathToFull(FPaths::ProjectPersistentDownloadDir());
-
-		case EVdjmRecordEnvPlatform::EWindows:
-		case EVdjmRecordEnvPlatform::EIOS:
-		case EVdjmRecordEnvPlatform::EMac:
-		case EVdjmRecordEnvPlatform::ELinux:
-		case EVdjmRecordEnvPlatform::EDefault:
-		default:
-			return FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());
+			switch (Tier)
+			{
+			case EVdjmRecordQualityTiers::ELowest:     return 0.045;
+			case EVdjmRecordQualityTiers::ELow:        return 0.055;
+			case EVdjmRecordQualityTiers::EMdeiumLow:  return 0.065;
+			case EVdjmRecordQualityTiers::EMedium:     return 0.075;
+			case EVdjmRecordQualityTiers::EMediumHigh: return 0.090;
+			case EVdjmRecordQualityTiers::EHigh:       return 0.105;
+			case EVdjmRecordQualityTiers::EUltra:      return 0.120;
+			case EVdjmRecordQualityTiers::EDefault:
+			default:                                   return 0.080;
+			}
+		}
+		inline double GetComplexityMultiplier(EVdjmRecordContentComplexity InComplexity)
+		{
+			switch (InComplexity)
+			{
+			case EVdjmRecordContentComplexity::EUIStatic:   return 0.85;
+			case EVdjmRecordContentComplexity::EHighMotion: return 1.20;
+			case EVdjmRecordContentComplexity::EGameplay:
+			default:                                        return 1.00;
+			}
 		}
 	}
-
-	inline FString MakeSafeBaseName(const FString& InCustomFileName, const FString& InSessionId)
+	namespace VideoResolution
 	{
-		FString BaseName = !InCustomFileName.TrimStartAndEnd().IsEmpty()
-			? InCustomFileName
-			: (!InSessionId.TrimStartAndEnd().IsEmpty() ? InSessionId : TEXT("VdjmRecord"));
-
-		BaseName = FPaths::MakeValidFileName(BaseName);
-		if (BaseName.IsEmpty())
+		inline FIntPoint FitResolutionWithin(const FIntPoint& Desired, const FIntPoint& MaxSize)
 		{
-			BaseName = TEXT("VdjmRecord");
-		}
-		return BaseName;
-	}
+			if (Desired.X <= 0 || Desired.Y <= 0)
+			{
+				return MaxSize;
+			}
+			if (MaxSize.X <= 0 || MaxSize.Y <= 0)
+			{
+				return Desired;
+			}
 
-	inline FIntPoint FitResolutionWithin(const FIntPoint& Desired, const FIntPoint& MaxSize)
+			const double ScaleX = static_cast<double>(MaxSize.X) / static_cast<double>(Desired.X);
+			const double ScaleY = static_cast<double>(MaxSize.Y) / static_cast<double>(Desired.Y);
+			const double Scale = FMath::Min(1.0, FMath::Min(ScaleX, ScaleY));
+
+			return FIntPoint(
+				FMath::Max(2, FMath::FloorToInt(static_cast<double>(Desired.X) * Scale)),
+				FMath::Max(2, FMath::FloorToInt(static_cast<double>(Desired.Y) * Scale))
+			);
+		}
+	}
+	
+	namespace FilePaths
 	{
-		if (Desired.X <= 0 || Desired.Y <= 0)
+		inline FString GetPlatformRecordBaseDir(EVdjmRecordEnvPlatform InPlatform)
 		{
-			return MaxSize;
-		}
-		if (MaxSize.X <= 0 || MaxSize.Y <= 0)
-		{
-			return Desired;
+			switch (InPlatform)
+			{
+			case EVdjmRecordEnvPlatform::EAndroid:
+				return FPaths::ConvertRelativePathToFull(FPaths::ProjectPersistentDownloadDir());
+
+			case EVdjmRecordEnvPlatform::EWindows:
+			case EVdjmRecordEnvPlatform::EIOS:
+			case EVdjmRecordEnvPlatform::EMac:
+			case EVdjmRecordEnvPlatform::ELinux:
+			case EVdjmRecordEnvPlatform::EDefault:
+			default:
+				return FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir());
+			}
 		}
 
-		const double ScaleX = static_cast<double>(MaxSize.X) / static_cast<double>(Desired.X);
-		const double ScaleY = static_cast<double>(MaxSize.Y) / static_cast<double>(Desired.Y);
-		const double Scale = FMath::Min(1.0, FMath::Min(ScaleX, ScaleY));
+		inline FString MakeSafeBaseName(const FString& InCustomFileName, const FString& InSessionId)
+		{
+			FString BaseName = !InCustomFileName.TrimStartAndEnd().IsEmpty()
+				? InCustomFileName
+				: (!InSessionId.TrimStartAndEnd().IsEmpty() ? InSessionId : TEXT("VdjmRecord"));
 
-		return FIntPoint(
-			FMath::Max(2, FMath::FloorToInt(static_cast<double>(Desired.X) * Scale)),
-			FMath::Max(2, FMath::FloorToInt(static_cast<double>(Desired.Y) * Scale))
-		);
+			BaseName = FPaths::MakeValidFileName(BaseName);
+			if (BaseName.IsEmpty())
+			{
+				BaseName = TEXT("VdjmRecord");
+			}
+			return BaseName;
+		}
 	}
+	
+	namespace Resolvers
+	{
+		inline int32 ResolveVideoBitrateBps(
+			const FIntPoint& InResolution,
+			const int32 InFrameRate,
+			const EVdjmRecordQualityTiers InTier,
+			const EVdjmRecordContentComplexity InComplexity)
+		{
+			const double BaseBpp = VideoBitrate::GetBaseVideoBpp(InTier);
+			const double ComplexityMul = VideoBitrate::GetComplexityMultiplier(InComplexity);
 
-	inline FString BuildResolvedOutputPath(
+			const double RawBitrate =
+				static_cast<double>(InResolution.X) *
+				static_cast<double>(InResolution.Y) *
+				static_cast<double>(InFrameRate) *
+				BaseBpp *
+				ComplexityMul;
+
+			const int32 SafeBitrate = FMath::Clamp(
+				FMath::RoundToInt(RawBitrate),
+				500000,
+				50000000);
+
+			return SafeBitrate;
+		}
+		
+		inline FIntPoint ResolveVideoResolution(
+			const FIntPoint& InViewportSize,
+			const FIntPoint& InPresetResolution,
+			const bool bFitToDisplay,
+			const FIntPoint& InPlatformMaxResolution)
+		{
+			FIntPoint Desired = bFitToDisplay ? InViewportSize : InPresetResolution;
+			FIntPoint Fit =  VideoResolution::FitResolutionWithin(Desired, InPlatformMaxResolution);
+
+			// 짝수 보정은 ValidateResolution 쪽에서 처리
+			FIntPoint Safe = FIntPoint::ZeroValue;
+			if (!Validations::DbcValidateResolution(
+				Fit,
+				Safe,
+				TEXT("ResolveVideoResolution")))
+			{
+				return FIntPoint(1280, 720);
+			}
+
+			return Safe;
+		}
+		
+		inline FString BuildResolvedOutputPath(
 		EVdjmRecordEnvPlatform InPlatform,
 		const FString& InRequestedPath,
 		const FString& InCustomFileName,
 		const FString& InSessionId,
 		const bool bOverwriteExists,
 		const TCHAR* DebugOwner)
-	{
-		const FString BaseDir = GetPlatformRecordBaseDir(InPlatform);
-
-		FString CandidatePath = InRequestedPath;
-		CandidatePath.TrimStartAndEndInline();
-
-		if (CandidatePath.IsEmpty())
 		{
-			const FString BaseName = MakeSafeBaseName(InCustomFileName, InSessionId);
-			CandidatePath = FPaths::Combine(
-				BaseDir,
-				FString::Printf(TEXT("%s_%lld.mp4"), *BaseName, FDateTime::Now().GetTicks()));
-		}
-		else
-		{
-			if (FPaths::IsRelative(CandidatePath))
+			const FString BaseDir = FilePaths::GetPlatformRecordBaseDir(InPlatform);
+
+			FString CandidatePath = InRequestedPath;
+			CandidatePath.TrimStartAndEndInline();
+
+			if (CandidatePath.IsEmpty())
 			{
-				CandidatePath = FPaths::Combine(BaseDir, CandidatePath);
+				const FString BaseName = FilePaths::MakeSafeBaseName(InCustomFileName, InSessionId);
+				CandidatePath = FPaths::Combine(
+					BaseDir,
+					FString::Printf(TEXT("%s_%lld.mp4"), *BaseName, FDateTime::Now().GetTicks()));
+			}
+			else
+			{
+				if (FPaths::IsRelative(CandidatePath))
+				{
+					CandidatePath = FPaths::Combine(BaseDir, CandidatePath);
+				}
+
+				const FString Dir = FPaths::GetPath(CandidatePath);
+				const FString BaseName = FPaths::GetBaseFilename(CandidatePath, false);
+				CandidatePath = FPaths::Combine(Dir, BaseName + TEXT(".mp4"));
 			}
 
-			const FString Dir = FPaths::GetPath(CandidatePath);
-			const FString BaseName = FPaths::GetBaseFilename(CandidatePath, false);
-			CandidatePath = FPaths::Combine(Dir, BaseName + TEXT(".mp4"));
-		}
-
-		FString SafePath;
-		if (!Validations::DbcValidateOutputFilePath(CandidatePath, SafePath, DebugOwner))
-		{
-			return FString();
-		}
-
-		if (!bOverwriteExists && IFileManager::Get().FileExists(*SafePath))
-		{
-			const FString Dir = FPaths::GetPath(SafePath);
-			const FString BaseName = FPaths::GetBaseFilename(SafePath, false);
-
-			const FString UniquePath = FPaths::Combine(
-				Dir,
-				FString::Printf(TEXT("%s_%lld.mp4"), *BaseName, FDateTime::Now().GetTicks()));
-
-			FString UniqueSafePath;
-			if (!Validations::DbcValidateOutputFilePath(
-				UniquePath,
-				UniqueSafePath,
-				DebugOwner))
+			FString SafePath;
+			if (!Validations::DbcValidateOutputFilePath(CandidatePath, SafePath, DebugOwner))
 			{
 				return FString();
 			}
 
-			SafePath = MoveTemp(UniqueSafePath);
-		}
+			if (!bOverwriteExists && IFileManager::Get().FileExists(*SafePath))
+			{
+				const FString Dir = FPaths::GetPath(SafePath);
+				const FString BaseName = FPaths::GetBaseFilename(SafePath, false);
 
-		return SafePath;
+				const FString UniquePath = FPaths::Combine(
+					Dir,
+					FString::Printf(TEXT("%s_%lld.mp4"), *BaseName, FDateTime::Now().GetTicks()));
+
+				FString UniqueSafePath;
+				if (!Validations::DbcValidateOutputFilePath(
+					UniquePath,
+					UniqueSafePath,
+					DebugOwner))
+				{
+					return FString();
+				}
+
+				SafePath = MoveTemp(UniqueSafePath);
+			}
+
+			return SafePath;
+		}
 	}
 }
 
@@ -487,22 +704,6 @@ struct VDJMRECORDER_API FVdjmRecordGlobalRules
 							UENUM s							
 	Tier
 */
-UENUM(Blueprintable)
-enum class EVdjmRecordQualityTiers : uint8
-{
-	EUndefined UMETA(DisplayName="Undefined",Hidden),
-	EDefault UMETA(DisplayName="Default"),
-	EUltra UMETA(DisplayName="Ultra"),
-	EHigh UMETA(DisplayName="High"),
-	EMediumHigh UMETA(DisplayName="MediumHigh"),
-	EMedium UMETA(DisplayName="Medium"),
-	EMdeiumLow UMETA(DisplayName="MediumLow"),
-	ELow UMETA(DisplayName="Low"),
-	ELowest UMETA(DisplayName="Lowest"),
-	ECustom UMETA(DisplayName="Custom"),
-	EResolvedTier UMETA(DisplayName="ResolvedTier",Hidden),
-	EMax UMETA(Hidden)
-};
 
 
 UENUM(Blueprintable)
