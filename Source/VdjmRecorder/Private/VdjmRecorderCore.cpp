@@ -658,6 +658,9 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 		FVdjmEncoderInitRequest candidateRequest = *sourceRequest;
 		if (!candidateRequest.EvaluateValidation())
 		{
+			UE_LOG(LogVdjmRecorderCore, Warning,
+				TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform - Tier %s has invalid EncoderInitRequest."),
+				*StaticEnum<EVdjmRecordQualityTiers>()->GetValueAsString(candiTier));
 			return false;
 		}
 
@@ -857,7 +860,7 @@ void UVdjmRecordResource::BeginDestroy()
 	ReleaseResources();
 }
 
-bool UVdjmRecordResource::InitializeResourceExtended(UVdjmRecordEnvResolver* resolver)
+bool UVdjmRecordResource::InitializeResource(UVdjmRecordEnvResolver* resolver)
 {
 	if (resolver == nullptr)
 	{
@@ -920,7 +923,7 @@ void UVdjmRecordResource::ResetResource()
 void UVdjmRecordResource::ReleaseResources()
 {
 	LinkedOwnerBridge = nullptr;
-	LinkedCurrentInfo_deprecate = nullptr;
+	LinkedResolver = nullptr;
 	UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordResource::ReleaseResources - Resources released."));
 }
 
@@ -1292,13 +1295,9 @@ void AVdjmRecordBridgeActor::PrintLogErrors()
 					{
 						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       not mRecordResource->OwnerBridgeActor.IsValid() "));
 					}
-					if (not mRecordResource->LinkedCurrentInfo_deprecate.IsValid())
+					if (not mRecordResource->LinkedResolver.IsValid())
 					{
-						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       not mRecordResource->LinkedCurrentInfo.IsValid() "));
-					}
-					else
-					{
-						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       mTexturePoolRHI.IsEmpty() "));
+						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       not mRecordResource->LinkedResolver.IsValid() "));
 					}
 				}
 			}
@@ -1919,7 +1918,7 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
 		return;
 	}
 	
-	if (not mRecordResource->InitializeResourceExtended(mEnvResolver))
+	if (not mRecordResource->InitializeResource(mEnvResolver))
     {
     	UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to initialize record resource with resolver."));
     	mRecordResource->ReleaseResources();

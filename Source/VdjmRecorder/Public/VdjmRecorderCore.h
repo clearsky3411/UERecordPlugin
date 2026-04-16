@@ -510,7 +510,6 @@ public:
 	FString		FinalFilePath;	//	이거는 여기에서 해줄게 아님. platform 마다 달라야함.
 	EPixelFormat FinalPixelFormat = PF_A8R8G8B8;
 	
-	TWeakObjectPtr<UVdjmRecordEnvCurrentInfo_deprecated> LinkedCurrentInfo_deprecate;
 	TWeakObjectPtr<AVdjmRecordBridgeActor> LinkedOwnerBridge;// InitializeResourceExtended에서 설정됨. 그 전까지는 nullptr 이므로 주의.
 	TWeakObjectPtr<UVdjmRecordEnvResolver> LinkedResolver;	//	이거는 InitializeResourceExtended( in ChainInit_CreateRecordResource )에서 설정됨. 그 전까지는 nullptr 이므로 주의.
 protected:
@@ -652,11 +651,6 @@ struct FVdjmRecordEnvPlatformPreset
 		if (qualityTier == EVdjmRecordQualityTiers::EUndefined)
 		{
 			qualityTier = DefaultQualityTier;
-			if (qualityTier == EVdjmRecordQualityTiers::EUndefined)
-			{
-				UE_LOG(LogVdjmRecorderCore, Warning, TEXT("FVdjmRecordEnvPlatforPreset::GetEncoderInitRequest - DefaultQualityTier is not set. Falling back to EDefault."));
-				qualityTier = EVdjmRecordQualityTiers::EDefault;
-			}
 		}
 		if (const FVdjmEncoderInitRequest* foundRequest = EncoderInitRequestMap.Find(qualityTier))
 		{
@@ -666,7 +660,10 @@ struct FVdjmRecordEnvPlatformPreset
 		{
 			return defaultRequest;
 		}
-		return nullptr;
+		else
+		{
+			return nullptr;
+		}
 	}
 };
 
@@ -746,86 +743,7 @@ public:
 		return DbcGlobalRulesValid() && DbcPlatformInfoValid();
 	}
 };
-/*
-§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
-@brief class UVdjmRecordEnvCurrentInfo
-@detail
-- 현재 녹화 환경에 대한 정보를 담고 있는 클래스. AVdjmRecordBridgeActor 가 소유하고 관리함.
-- 녹화 환경이란, 현재 플랫폼, 해상도, 프레임레이트, 픽셀 포맷, 비트레이트, 파일 저장 경로 등 녹화에 필요한 모든 정보를 포함함.
-- AVdjmRecordBridgeActor 는 녹화 시작 시점에 UVdjmRecordEnvDataAsset 에서 현재 환경에 맞는 정보를 가져와서 UVdjmRecordEnvCurrentInfo 에 저장함. 그리고 녹화 유닛들이 녹화 진행 중에 현재 환경 정보를 참조할 수 있도록 함.
-- Dependency In : UVdjmRecordEnvDataAsset, AVdjmRecordBridgeActor
-*/
-UCLASS()
-class VDJMRECORDER_API UVdjmRecordEnvCurrentInfo_deprecated : public UObject
-{
-	GENERATED_BODY()
-public:
-	//bool InitializeCurrentEnvironment(AVdjmRecordBridgeActor* ownerBridge);
-	
-	// bool DbcIsValidCurrentInfo() const;
-	// bool DbcValidCurrentInfoPipelines() const
-	// {
-	// 	return DbcIsValidCurrentInfo() && mCurrentPipelineInstance.IsValid()&& mCurrentPipelineInstance->DbcIsValid();
-	// }
-	
-	float GetMaxDurationSecond() const
-	{
-		return mCurrentGlobalRules.MaxRecordDurationSeconds;
-	}
-	FVdjmRecordGlobalRules GetCurrentGlobalRules() const { return mCurrentGlobalRules; }
-	EVdjmRecordEnvPlatform GetCurrentPlatform() const { return mCurrentPlatform; }
-	FIntPoint GetCurrentResolution() const { return mCurrentResolution; }
-    int32 GetCurrentFrameRate() const { return mCurrentFrameRate; }
-	EPixelFormat GetCurrentPixelFormat() const { return mCurrentPixelFormat; }
-    int32 GetCurrentBitrate() const { return mCurrentBitrate; }
-    FString GetCurrentFilePrefix() const { return mCurrentFilePrefix; }
-    FString GetCurrentFilePath() const { return mCurrentFilePath; }
 
-	void SetRecordUnitPipeline(UVdjmRecordUnitPipeline* pipelineInstance) { mCurrentPipelineInstance = pipelineInstance; }
-	UVdjmRecordUnitPipeline* GetRecordUnitPipeline() const { return mCurrentPipelineInstance.Get(); }
-
-	FIntVector GetRecordCachedGroupCount() const
-	{
-		return bUseWindowResolution ?
-			mCurrentGlobalRules.Numthreads : 
-			FIntVector(
-				FMath::DivideAndRoundUp(mCurrentResolution.X,mCurrentGlobalRules.Numthreads.X),
-				FMath::DivideAndRoundUp(mCurrentResolution.Y,mCurrentGlobalRules.Numthreads.Y),
-				mCurrentGlobalRules.Numthreads.Z);
-	}
-	FString MakeFinalFilePath(const FString& customFileName);
-
-private:
-	UPROPERTY()
-	EVdjmRecordEnvPlatform mCurrentPlatform = EVdjmRecordEnvPlatform::EDefault;
-	UPROPERTY()
-	bool bUseWindowResolution = true;
-	UPROPERTY()
-	FVdjmRecordGlobalRules mCurrentGlobalRules;
-	UPROPERTY()
-	FIntPoint mCurrentResolution;
-	UPROPERTY()
-	int32 mCurrentFrameRate = 30;
-	UPROPERTY()
-	TEnumAsByte<EPixelFormat> mCurrentPixelFormat = EPixelFormat::PF_A8R8G8B8;
-	UPROPERTY()
-	TMap<EVdjmRecordQualityTiers,float> mAllBitrateMap;
-	UPROPERTY()
-	int32 mCurrentBitrate;	//	Default 로 선택을 해놔라.
-	UPROPERTY()
-	FString mCurrentFilePrefix;
-	UPROPERTY()
-	FString mCurrentFilePath;
-	UPROPERTY()
-	FString mFileName;
-	
-	UPROPERTY()
-	TObjectPtr<UVdjmRecordFileSaver> mCurrentCustomFileSaverInstance;	//	nullptr 이면 그냥 디폴트로 저장함. 무조건 filePath 는 플렛폼결로 지정된 곳에 저장.
-	UPROPERTY()
-	TWeakObjectPtr<UVdjmRecordUnitPipeline> mCurrentPipelineInstance;
-	
-	TWeakObjectPtr<UVdjmRecordEnvDataAsset> mLinkedDataAsset;
-};
 UCLASS()
 class VDJMRECORDER_API UVdjmRecordEnvResolver : public UObject
 {
@@ -1233,8 +1151,6 @@ protected:
 	UPROPERTY()
 	TObjectPtr<UVdjmRecordEnvDataAsset> mRecordConfigureDataAsset;
 	
-	UPROPERTY()
-	TObjectPtr<UVdjmRecordEnvCurrentInfo_deprecated> mCurrentEnvInfo_deprecated;	//	이거 이제 제거해야함.
 
 	UPROPERTY()
 	TObjectPtr<USceneComponent> mRootScene;
