@@ -655,9 +655,12 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 			return false;
 		}
 
-		FVdjmEncoderInitRequest CandidateRequest = *SourceRequest;
-		if (!CandidateRequest.EvaluateValidation())
+		FVdjmEncoderInitRequest candiRequest = *SourceRequest;
+		if (!candiRequest.EvaluateValidation())
 		{
+			UE_LOG(LogVdjmRecorderCore, Warning,
+				TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform - Tier %s has invalid EncoderInitRequest."),
+				*StaticEnum<EVdjmRecordQualityTiers>()->GetValueAsString(CandidateTier));
 			return false;
 		}
 
@@ -665,9 +668,9 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 			VdjmRecordUtils::FeaturePresets::GetPresetFeatureResolution(FMath::Max(0, CandidateTierIndex));
 
 		const FIntPoint RawRequestedResolution =
-			CandidateRequest.VideoConfig.bResolutionFitToDisplay
+			candiRequest.VideoConfig.bResolutionFitToDisplay
 				? ViewportSize
-				: FIntPoint(CandidateRequest.VideoConfig.Width, CandidateRequest.VideoConfig.Height);
+				: FIntPoint(candiRequest.VideoConfig.Width, candiRequest.VideoConfig.Height);
 
 		const FIntPoint FittedResolution =
 			 VdjmRecordUtils::VideoResolution::FitResolutionWithin(RawRequestedResolution, TierMaxResolution);
@@ -683,21 +686,21 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 
 		int32 SafeBitrate = 0;
 		if (!VdjmRecordUtils::Validations::DbcValidateBitrate(
-			CandidateRequest.VideoConfig.Bitrate,
+			candiRequest.VideoConfig.Bitrate,
 			SafeBitrate,
 			TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform")))
 		{
 			return false;
 		}
 
-		CandidateRequest.VideoConfig.Width = SafeResolution.X;
-		CandidateRequest.VideoConfig.Height = SafeResolution.Y;
-		CandidateRequest.VideoConfig.Bitrate = SafeBitrate;
-		CandidateRequest.VideoConfig.FrameRate =
-			FMath::Min(FMath::Max(1, CandidateRequest.VideoConfig.FrameRate), MaxFrameRate);
+		candiRequest.VideoConfig.Width = SafeResolution.X;
+		candiRequest.VideoConfig.Height = SafeResolution.Y;
+		candiRequest.VideoConfig.Bitrate = SafeBitrate;
+		candiRequest.VideoConfig.FrameRate =
+			FMath::Min(FMath::Max(1, candiRequest.VideoConfig.FrameRate), MaxFrameRate);
 
 		FVdjmRecordEnvPlatformPreset CandidatePreset = *presetData;
-		CandidatePreset.EncoderInitRequestMap.FindOrAdd(CandidateTier) = CandidateRequest;
+		CandidatePreset.EncoderInitRequestMap.FindOrAdd(CandidateTier) = candiRequest;
 
 		//	이 시점에서 CandidatePreset은 후보 Tier에 맞게 보정된 해상도와 비트레이트를 가지고 있음.
 		mResolvedPreset = MoveTemp(CandidatePreset);
@@ -863,7 +866,7 @@ void UVdjmRecordResource::ResetResource()
 void UVdjmRecordResource::ReleaseResources()
 {
 	LinkedOwnerBridge = nullptr;
-	LinkedCurrentInfo_deprecate = nullptr;
+	LinkedResolver = nullptr;
 	UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordResource::ReleaseResources - Resources released."));
 }
 
@@ -1235,13 +1238,9 @@ void AVdjmRecordBridgeActor::PrintLogErrors()
 					{
 						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       not mRecordResource->OwnerBridgeActor.IsValid() "));
 					}
-					if (not mRecordResource->LinkedCurrentInfo_deprecate.IsValid())
+					if (not mRecordResource->LinkedResolver.IsValid())
 					{
-						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       not mRecordResource->LinkedCurrentInfo.IsValid() "));
-					}
-					else
-					{
-						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       mTexturePoolRHI.IsEmpty() "));
+						UE_LOG(LogTemp, Warning, TEXT("StartRecording - 5			       not mRecordResource->LinkedResolver.IsValid() "));
 					}
 				}
 			}
