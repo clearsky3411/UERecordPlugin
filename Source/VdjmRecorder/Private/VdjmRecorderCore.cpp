@@ -659,8 +659,8 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 		if (!candidateRequest.EvaluateValidation())
 		{
 			UE_LOG(LogVdjmRecorderCore, Warning,
-				TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform - Tier %s has invalid EncoderInitRequest."),
-				*StaticEnum<EVdjmRecordQualityTiers>()->GetValueAsString(candiTier));
+				TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform - Tier %s has invalid EncoderInitRequest, skipping."),
+				*StaticEnum<EVdjmRecordQualityTiers>()->GetValueAsString(candidateTier));
 			return false;
 		}
 
