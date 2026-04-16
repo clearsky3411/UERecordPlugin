@@ -432,7 +432,7 @@ class VDJMRECORDER_API UVdjmRecordResource : public UObject
 public:
 	virtual void BeginDestroy() override;
 	
-	virtual bool InitializeResourceExtended(UVdjmRecordEnvResolver* resolver);
+	virtual bool InitializeResource(UVdjmRecordEnvResolver* resolver);
 	virtual void ResetResource();
 	virtual void ReleaseResources();
 	

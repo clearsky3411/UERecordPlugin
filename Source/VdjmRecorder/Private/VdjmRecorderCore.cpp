@@ -822,7 +822,7 @@ void UVdjmRecordResource::BeginDestroy()
 	ReleaseResources();
 }
 
-bool UVdjmRecordResource::InitializeResourceExtended(UVdjmRecordEnvResolver* resolver)
+bool UVdjmRecordResource::InitializeResource(UVdjmRecordEnvResolver* resolver)
 {
 	if (resolver == nullptr)
 	{
@@ -1806,7 +1806,7 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
 		return;
 	}
 	
-	if (not mRecordResource->InitializeResourceExtended(mEnvResolver))
+	if (not mRecordResource->InitializeResource(mEnvResolver))
     {
     	UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to initialize record resource with resolver."));
     	mRecordResource->ReleaseResources();
