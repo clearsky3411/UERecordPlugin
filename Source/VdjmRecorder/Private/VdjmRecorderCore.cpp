@@ -528,35 +528,47 @@ bool UVdjmRecordEnvResolver::InitResolverEnvironment(AVdjmRecordBridgeActor* own
 
 UVdjmRecordResource* UVdjmRecordEnvResolver::CreateResolvedRecordResource(const FVdjmRecordEnvPlatformPreset* presetData) 
 {
-	const FVdjmRecordEnvPlatformPreset* evaluatePreset = presetData;
 	if (not LinkedOwnerBridge.IsValid())
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - ownerBridge is null."));
 		return nullptr;
 	}
 	
-	if (evaluatePreset == nullptr)
+	if (presetData == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - presetData is null."));
 		return nullptr;
 	}
 	
 	//	FVdjmRecordEnvPlatformPreset 검증 및 해석 후 UVdjmRecordResource 생성,
-	if (not ResolveEnvPlatform(evaluatePreset))
+	if (not ResolveEnvPlatform(presetData))
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to resolve environment platform."));
 		return nullptr;
 	}
 	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Successfully resolved environment platform. Resolved Quality Tier: %s"), *StaticEnum<EVdjmRecordQualityTiers>()->GetValueAsString(mResolvedQualityTier));
+	
 	if (UVdjmRecordResource* newResource = NewObject<UVdjmRecordResource>(this,presetData->RecordResourceClass))
 	{
+		newResource->LinkedOwnerBridge = LinkedOwnerBridge.Get();
+		newResource->LinkedResolver = this;
+		if (not newResource->InitializeResource(this))
+		{
+			newResource->ReleaseResources();
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to initialize record resource."));
+			newResource = nullptr;
+			return nullptr;
+		}
 		return newResource;
+		
 	}
 	else
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to create record resource instance."));
 		return nullptr;
 	}
+	
 }
 
 bool UVdjmRecordEnvResolver::InitComplete(AVdjmRecordBridgeActor* ownerBridge, UVdjmRecordResource* resource,
@@ -774,6 +786,7 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 	{
 		if (tryResolveTier(EVdjmRecordQualityTiers::EDefault, 0))
 		{
+			mHasResolved = true;
 			return true;
 		}
 	}
@@ -783,6 +796,7 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 	{
 		if (tryResolveTier(tierOrder[tierIndex], tierIndex))
 		{
+			mHasResolved = true;
 			return true;
 		}
 	}
@@ -792,6 +806,7 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 	{
 		if (tryResolveTier(EVdjmRecordQualityTiers::EDefault, 0))
 		{
+			mHasResolved = true;
 			return true;
 		}
 	}
@@ -862,21 +877,36 @@ void UVdjmRecordResource::BeginDestroy()
 
 bool UVdjmRecordResource::InitializeResource(UVdjmRecordEnvResolver* resolver)
 {
-	if (resolver == nullptr)
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordResource::InitializeResourceExtended - resolver is null."));
-		return false;
-	}
-	
-	LinkedOwnerBridge = resolver->LinkedOwnerBridge;
+	UVdjmRecordEnvResolver* inResolver = resolver;
 	if (not LinkedOwnerBridge.IsValid())
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordResource::InitializeResourceExtended - resolver's LinkedOwnerBridge is invalid."));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordResource::InitializeResource - resolver's LinkedOwnerBridge is invalid."));
 		return false;
 	}
-	LinkedResolver = resolver;
 	
-	const FVdjmEncoderInitRequest* resolvedIniRequest = resolver->TryGetResolvedEncoderInitRequest();
+	if (inResolver == nullptr)
+	{
+		if (LinkedResolver.IsValid())
+		{
+			inResolver = LinkedResolver.Get();
+			UE_LOG(LogVdjmRecorderCore, Warning, TEXT("UVdjmRecord Resource::InitializeResourceExtended - Using existing LinkedResolver."));
+		}
+		else
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordResource::InitializeResourceExtended - resolver is null."));
+			return false;
+		}
+	}
+	
+	if (not inResolver->HasResolved())
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("UVdjmRecordResource::InitializeResource - Existing LinkedResolver has not resolved yet. This may lead to incomplete or default configuration being used."));
+		LinkedResolver = nullptr; // Clear the invalid resolver reference
+		return false;
+	}
+	LinkedResolver = inResolver;
+	
+	const FVdjmEncoderInitRequest* resolvedIniRequest = LinkedResolver->TryGetResolvedEncoderInitRequest();
 	if (resolvedIniRequest == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
@@ -894,6 +924,7 @@ bool UVdjmRecordResource::InitializeResource(UVdjmRecordEnvResolver* resolver)
 	FinalFilePath = resolvedIniRequest->OutputConfig.OutputFilePath;
 	
 	OnResourceReadyForPostInit.Broadcast(this);	
+	OnResourceReadyForFilePath.Broadcast(this, FinalFilePath);
 	return true;
 }
 
@@ -1918,7 +1949,7 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
 		return;
 	}
 	
-	if (not mRecordResource->InitializeResource(mEnvResolver))
+	if (not )
     {
     	UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to initialize record resource with resolver."));
     	mRecordResource->ReleaseResources();

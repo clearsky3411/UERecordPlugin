@@ -408,6 +408,7 @@ public:
 */
 
 DECLARE_MULTICAST_DELEGATE_OneParam(FVdjmRecordCallBackEvent,UVdjmRecordResource*);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FVdjmRecordResourceReadyForFilePath,UVdjmRecordResource*,const FString& );
 DECLARE_MULTICAST_DELEGATE_TwoParams(FVdjmRecordChangeStatusEvent,UVdjmRecordResource* /*self*/,EVdjmResourceStatus/*Prev*/);
 
 /*
@@ -501,6 +502,7 @@ public:
 	//FVdjmRecordEvent OnResourceTexturePoolInitialized;
 	FVdjmRecordChangeStatusEvent OnChangeResourceStatusFunc;
 	FVdjmRecordCallBackEvent OnResourceReadyForPostInit;
+	FVdjmRecordResourceReadyForFilePath OnResourceReadyForFilePath;
 	
 	FIntVector	CachedGroupCount;
 	FIntPoint	OriginResolution;
@@ -757,6 +759,7 @@ public:
 	
 	void Clear() 
 	{
+		mHasResolved = false;
 		mResolvedPreset.Clear();
 		mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
 	}
@@ -850,6 +853,10 @@ public:
 	{
 		return IsValidPreset() && LinkedRecordResource.IsValid() && LinkedPipeline.IsValid();
 	}
+	bool HasResolved() const
+	{
+		return mHasResolved;
+	}
 	
 	TWeakObjectPtr<AVdjmRecordBridgeActor> LinkedOwnerBridge = nullptr;
 	TWeakObjectPtr<UVdjmRecordResource> LinkedRecordResource = nullptr;
@@ -863,6 +870,7 @@ private:
 	FVdjmRecordEnvPlatformPreset mResolvedPreset;// ChainInit_CreateRecordResource 시점에서 resolve 된 것이 들어감.
 	EVdjmRecordQualityTiers mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
 	
+	bool mHasResolved = false;
 };
 
 
