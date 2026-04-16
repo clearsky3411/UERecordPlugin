@@ -42,9 +42,9 @@ void UVdjmRecordWMFResource::InitializeTexturePool(FIntPoint textureResolution, 
 	}
 }
 
-bool UVdjmRecordWMFResource::InitializeResourceExtended(UVdjmRecordEnvResolver* resolver)
+bool UVdjmRecordWMFResource::InitializeResource(UVdjmRecordEnvResolver* resolver)
 {
-	if (Super::InitializeResourceExtended(resolver))
+	if (Super::InitializeResource(resolver))
 	{
 		FVdjmEncoderStatus::DbcRenderThreadTask(
 		[
@@ -500,13 +500,13 @@ void UVdjmRecordWMFEncoderReadBackUnit::OnCpuDataReady(void* rawData, int32 widt
 	class UVdjmRecordUnitPipeline 
  */
 
-void UVdjmRecordWMFUnitDefaultPipeline::InitializeRecordPipeline(UVdjmRecordResource* recordResource)
+bool UVdjmRecordWMFUnitDefaultPipeline::InitializeRecordPipeline(UVdjmRecordResource* recordResource)
 {
 	Super::InitializeRecordPipeline(recordResource);
 	if (recordResource == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore,Warning,TEXT("UVdjmRecordUnitDefaultPipeline::InitializeRecordPipeline resource fuck"));
-		return;
+		return false;
 	}
 	UE_LOG(LogVdjmRecorderCore,Log,TEXT("UVdjmRecordUnitDefaultPipeline::InitializeRecordPipeline - Initializing pipeline for record resource."));
 	LinkedBridgeActor = recordResource->LinkedOwnerBridge;
@@ -516,9 +516,15 @@ void UVdjmRecordWMFUnitDefaultPipeline::InitializeRecordPipeline(UVdjmRecordReso
 			LinkedBridgeActor->GetRecordEnvConfigureDataAsset()
 				->GetPlatformInfo( AVdjmRecordBridgeActor::GetTargetPlatform());
 		UE_LOG(LogVdjmRecorderCore,Log,TEXT("UVdjmRecordUnitDefaultPipeline::InitializeRecordPipeline - Creating pipeline units."));
+		
 		if (const TSubclassOf<UVdjmRecordUnit>* foundEComputeShader = platformInfo->GetPipelineState(EVdjmRecordPipelineStages::EComputeShader))
 		{
 			CreateUnit(*foundEComputeShader);
+		}
+		else
+		{
+			UE_LOG(LogVdjmRecorderCore, Warning, TEXT("UVdjmRecordUnitDefaultPipeline::InitializeRecordPipeline - No ComputeShader unit found for current platform. Pipeline initialization may be incomplete."));
+			return false;
 		}
 
 		if (const TSubclassOf<UVdjmRecordUnit>* foundEEncode = platformInfo->GetPipelineState(
@@ -531,14 +537,20 @@ void UVdjmRecordWMFUnitDefaultPipeline::InitializeRecordPipeline(UVdjmRecordReso
 		{
 			CreateUnit(*foundEEncodeAndWrite);
 		}
-			
+		
 		if (const TSubclassOf<UVdjmRecordUnit>* foundEWriteToDisk = platformInfo->GetPipelineState(
 		EVdjmRecordPipelineStages::EWriteToDisk))
 		{
 			CreateUnit(*foundEWriteToDisk);
 		}
-		UE_LOG(LogVdjmRecorderCore,Log,TEXT("UVdjmRecordUnitDefaultPipeline::InitializeRecordPipeline - Initializing pipeline units."));
 		
+		UE_LOG(LogVdjmRecorderCore,Log,TEXT("UVdjmRecordUnitDefaultPipeline::InitializeRecordPipeline - Initializing pipeline units."));
+		return true;
+	}
+	else
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("UVdjmRecordUnitDefaultPipeline::InitializeRecordPipeline - LinkedBridgeActor is not valid or does not have a valid record resource. Pipeline initialization failed."));
+		return false;
 	}
 }
 

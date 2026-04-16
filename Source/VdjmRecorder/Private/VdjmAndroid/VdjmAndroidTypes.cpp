@@ -4,7 +4,7 @@
 #include "VdjmAndroid/VdjmAndroidTypes.h"
 
 
-bool FVdjmAndroidEncoderConfigure::IsValidateEncoderArguments() const
+bool FVdjmAndroidEncoderSnapshot::IsValidateEncoderArguments() const
 {
 		// 1. 출력 경로
 	if (VideoConfig.OutputFilePath.IsEmpty())
