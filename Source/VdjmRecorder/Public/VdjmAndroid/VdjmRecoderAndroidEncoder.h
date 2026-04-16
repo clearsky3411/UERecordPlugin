@@ -103,6 +103,7 @@ public:
 	const FVdjmAndroidEncoderSnapshot& getConfig() const { return mConfig; }
 	
 	protected:
+		bool VideoInit();
 		bool AudioInit();
 		bool AudioStart();
 

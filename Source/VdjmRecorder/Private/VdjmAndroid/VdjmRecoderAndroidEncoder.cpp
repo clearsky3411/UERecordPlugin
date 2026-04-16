@@ -86,70 +86,7 @@ bool FVdjmAndroidRecordSession::Start()
 	TEXT("FVdjmAndroidRecordSession::Start - mConfig before validate: %s"),
 	*mConfig.ToString());
 	
-	mOutputFd = open(TCHAR_TO_UTF8(*mConfig.VideoConfig.OutputFilePath), O_RDWR | O_CREAT | O_TRUNC, 0644);
-	if (mOutputFd < 0)
-	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::Start - Failed to open output file: %s"), *mConfig.VideoConfig.OutputFilePath);
-		return false;
-	}
-	mCodec = AMediaCodec_createEncoderByType(VdjmMimeAvc);
-	if (mCodec == nullptr)
-	{
-		UE_LOG(LogTemp, Error, TEXT("StartBackend - AMediaCodec_createEncoderByType failed"));
-		Terminate();
-		return false;
-	}
-	AMediaFormat* format = AMediaFormat_new();
-	if (format == nullptr)
-	{
-		UE_LOG(LogTemp, Error, TEXT("StartBackend - AMediaFormat_new failed"));
-		Terminate();
-		return false;
-	}
-	
-	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, TCHAR_TO_UTF8(*mConfig.VideoConfig.MimeType));
-	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_WIDTH, mConfig.VideoConfig.VideoWidth);
-	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_HEIGHT, mConfig.VideoConfig.VideoHeight);
-	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_BIT_RATE, mConfig.VideoConfig.VideoBitrate);
-	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_FRAME_RATE, mConfig.VideoConfig.VideoFPS);
-
-	// 0은 일부 기기/드라이버에서 과도한 IDR 요청으로 이어질 수 있어
-	// 실제 코덱 설정 시에는 최소 1초로 보정해 안정성을 우선한다.
-	const int32 safeIFrameIntervalSec = FMath::Max(1, mConfig.VideoConfig.VideoIntervalSec);
-	if (safeIFrameIntervalSec != mConfig.VideoConfig.VideoIntervalSec)
-	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("FVdjmAndroidRecordSession::Start - VideoIntervalSec=%d, overriding to %d for codec stability."),
-			mConfig.VideoConfig.VideoIntervalSec, safeIFrameIntervalSec);
-	}
-	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, safeIFrameIntervalSec);
-	
-	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_COLOR_FORMAT, VdjmColorFormatSurface);
-	
-	media_status_t status = AMediaCodec_configure(
-			mCodec,
-			format,
-			nullptr,
-			nullptr,
-			AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
-	
-	AMediaFormat_delete(format);
-	
-	if (status != AMEDIA_OK)
-	{
-		UE_LOG(LogTemp, Error, TEXT("StartBackend - AMediaCodec_configure failed. status=%d"), status);
-		Terminate();
-		return false;
-	}
-	
-	status = AMediaCodec_createInputSurface(mCodec, &mInputWindow);
-	if (status != AMEDIA_OK || !mInputWindow)
-	{
-		Terminate();
-		return false;
-	}
-	mMuxer = AMediaMuxer_new(mOutputFd, AMEDIAMUXER_OUTPUT_FORMAT_MPEG_4);
-	if (!mMuxer)
+	if (!VideoInit())
 	{
 		Terminate();
 		return false;
@@ -161,8 +98,13 @@ bool FVdjmAndroidRecordSession::Start()
 		return false;
 	}
 
-	status = AMediaCodec_start(mCodec);
+	const media_status_t status = AMediaCodec_start(mCodec);
 	if (status != AMEDIA_OK)
+	{
+		Terminate();
+		return false;
+	}
+	if (!AudioStart())
 	{
 		Terminate();
 		return false;
@@ -207,6 +149,78 @@ bool FVdjmAndroidRecordSession::Start()
 		return false;
 	}
 	mRunning = true;
+	return true;
+}
+
+bool FVdjmAndroidRecordSession::VideoInit()
+{
+	mOutputFd = open(TCHAR_TO_UTF8(*mConfig.VideoConfig.OutputFilePath), O_RDWR | O_CREAT | O_TRUNC, 0644);
+	if (mOutputFd < 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::VideoInit - Failed to open output file: %s"), *mConfig.VideoConfig.OutputFilePath);
+		return false;
+	}
+
+	mCodec = AMediaCodec_createEncoderByType(VdjmMimeAvc);
+	if (mCodec == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::VideoInit - AMediaCodec_createEncoderByType failed"));
+		return false;
+	}
+
+	AMediaFormat* format = AMediaFormat_new();
+	if (format == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::VideoInit - AMediaFormat_new failed"));
+		return false;
+	}
+
+	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, TCHAR_TO_UTF8(*mConfig.VideoConfig.MimeType));
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_WIDTH, mConfig.VideoConfig.VideoWidth);
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_HEIGHT, mConfig.VideoConfig.VideoHeight);
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_BIT_RATE, mConfig.VideoConfig.VideoBitrate);
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_FRAME_RATE, mConfig.VideoConfig.VideoFPS);
+
+	// 0은 일부 기기/드라이버에서 과도한 IDR 요청으로 이어질 수 있어
+	// 실제 코덱 설정 시에는 최소 1초로 보정해 안정성을 우선한다.
+	const int32 safeIFrameIntervalSec = FMath::Max(1, mConfig.VideoConfig.VideoIntervalSec);
+	if (safeIFrameIntervalSec != mConfig.VideoConfig.VideoIntervalSec)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("FVdjmAndroidRecordSession::VideoInit - VideoIntervalSec=%d, overriding to %d for codec stability."),
+			mConfig.VideoConfig.VideoIntervalSec, safeIFrameIntervalSec);
+	}
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, safeIFrameIntervalSec);
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_COLOR_FORMAT, VdjmColorFormatSurface);
+
+	const media_status_t status = AMediaCodec_configure(
+		mCodec,
+		format,
+		nullptr,
+		nullptr,
+		AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
+	AMediaFormat_delete(format);
+
+	if (status != AMEDIA_OK)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::VideoInit - AMediaCodec_configure failed. status=%d"), status);
+		return false;
+	}
+
+	const media_status_t surfaceStatus = AMediaCodec_createInputSurface(mCodec, &mInputWindow);
+	if (surfaceStatus != AMEDIA_OK || !mInputWindow)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::VideoInit - AMediaCodec_createInputSurface failed. status=%d"), surfaceStatus);
+		return false;
+	}
+
+	mMuxer = AMediaMuxer_new(mOutputFd, AMEDIAMUXER_OUTPUT_FORMAT_MPEG_4);
+	if (!mMuxer)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::VideoInit - AMediaMuxer_new failed."));
+		return false;
+	}
+
 	return true;
 }
 
