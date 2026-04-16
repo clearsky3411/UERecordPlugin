@@ -145,10 +145,26 @@ class UVdjmRecordUnitPipeline : public UObject
 	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 */
 
-void UVdjmRecordUnitPipeline::InitializeRecordPipeline(UVdjmRecordResource* recordResource)
+bool UVdjmRecordUnitPipeline::InitializeRecordPipeline(UVdjmRecordResource* recordResource)
 {
+	if (recordResource == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore,Warning,TEXT("UVdjmRecordUnitPipeline::InitializeRecordPipeline - recordResource is null."));
+		return false;
+	}
 	LinkedRecordResource = recordResource;
 	LinkedBridgeActor = recordResource->LinkedOwnerBridge;
+	if (LinkedBridgeActor.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore,Log,TEXT("UVdjmRecordUnitPipeline::InitializeRecordPipeline - Successfully linked Bridge Actor : %s"),*LinkedBridgeActor->GetName());
+	}
+	else
+	{
+		UE_LOG(LogVdjmRecorderCore,Warning,TEXT("UVdjmRecordUnitPipeline::InitializeRecordPipeline - Failed to link Bridge Actor."));
+		LinkedRecordResource = nullptr;
+		return false;
+	}
+	return true;
 }
 
 bool UVdjmRecordUnitPipeline::DbcUnitCheck() const
@@ -197,7 +213,7 @@ void UVdjmRecordUnitPipeline::ReleaseRecordPipeline()
 	}
 }
 
-bool UVdjmRecordUnitPipeline::DbcIsValid() const
+bool UVdjmRecordUnitPipeline::DbcIsValidPipelineInit() const
 {
 	if (DbcUnitCheck()&& LinkedRecordResource.IsValid()	&& LinkedBridgeActor.IsValid())
 	{
@@ -587,7 +603,7 @@ bool UVdjmRecordEnvResolver::InitComplete(AVdjmRecordBridgeActor* ownerBridge, U
 			resource ? *resource->GetName() : TEXT("null"),
 			pipeline ? *pipeline->GetName() : TEXT("null"));
 	}
-	return DbcIsValidInitEnvResolver();
+	return DbcIsValidEnvResolverInit();
 }
 
 bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPreset* presetData)
@@ -624,7 +640,7 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 		EVdjmRecordQualityTiers::ELowest
 	};
 
-	auto findTierIndex = [](EVdjmRecordQualityTiers tier) -> int32
+	auto findTierIndex = [tierOrder](EVdjmRecordQualityTiers tier) -> int32
 	{
 		for (int32 i = 0; i < UE_ARRAY_COUNT(tierOrder); ++i)
 		{
@@ -746,7 +762,7 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 		mResolvedPreset = MoveTemp(candidatePreset);
 		mResolvedQualityTier = candidateTier;
 
-		if (!ResolvedFinalFilePath(customFileName))
+		if (not ResolvedFinalFilePath(customFileName))
 		{
 			mResolvedPreset.Clear();
 			mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
@@ -925,25 +941,6 @@ bool UVdjmRecordResource::InitializeResource(UVdjmRecordEnvResolver* resolver)
 	
 	OnResourceReadyForPostInit.Broadcast(this);	
 	OnResourceReadyForFilePath.Broadcast(this, FinalFilePath);
-	return true;
-}
-
-bool UVdjmRecordResource::UpdateFinalFilePathFromResolver()
-{
-	if (!LinkedResolver.IsValid())
-	{
-		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("UVdjmRecordResource::UpdateFinalFilePathFromResolver - LinkedResolver is invalid."));
-		return false;
-	}
-
-	const FVdjmEncoderInitRequestOutput* outputConfig = LinkedResolver->TryGetResolvedOutputConfig();
-	if (outputConfig == nullptr || !outputConfig->EvaluateValidation())
-	{
-		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("UVdjmRecordResource::UpdateFinalFilePathFromResolver - Output config is invalid."));
-		return false;
-	}
-
-	FinalFilePath = outputConfig->OutputFilePath;
 	return true;
 }
 
@@ -1340,7 +1337,7 @@ void AVdjmRecordBridgeActor::PrintLogErrors()
 	{
 		UE_LOG(LogTemp, Warning, TEXT("StartRecording - mRecordPipeline == nullptr"));
 	}
-	else if (not mRecordPipeline->DbcIsValid())
+	else if (not mRecordPipeline->DbcIsValidPipelineInit())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("StartRecording - mRecordPipeline->DbcIsValid == false"));
 	}
@@ -1374,7 +1371,7 @@ void AVdjmRecordBridgeActor::PrintLogErrors()
 			{
 				UE_LOG(LogTemp, Warning, TEXT("StartRecording - 3           mRecordPipeline == nullptr"));
 			} 
-			if (mRecordPipeline != nullptr && not mRecordPipeline->DbcIsValid())
+			if (mRecordPipeline != nullptr && not mRecordPipeline->DbcIsValidPipelineInit())
 			{
 				UE_LOG(LogTemp, Warning, TEXT("StartRecording - 3            mRecordPipeline->DbcIsValid()"));
 			}
@@ -1477,8 +1474,8 @@ void AVdjmRecordBridgeActor::StartRecording()
 		const double minFrameRate = mEnvResolver->GetResolvedGlobalRules().MinFrameRate;
 		const double maxDurationSecond = mEnvResolver->GetResolvedGlobalRules().MaxRecordDurationSeconds;
 		const FVdjmEncoderInitRequestAudio* audioConfig = mEnvResolver->TryGetResolvedAudioConfig();
-		const FVdjmEncoderInitRequestOutput* outputConfig = mEnvResolver->TryGetResolvedOutputConfig();
-		if (videoConfig == nullptr || audioConfig == nullptr || outputConfig == nullptr)
+
+		if (videoConfig == nullptr || audioConfig == nullptr )
 		{
 			UE_LOG(LogVdjmRecorderCore, Error, TEXT("StartRecording - Resolved configs are invalid."));
 			bIsRecording = false;
@@ -1558,9 +1555,9 @@ void AVdjmRecordBridgeActor::OnStopSlateBackBufferReadyToPresentEvent()
 bool AVdjmRecordBridgeActor::IsCompleteChainInit() const
 {
 	bool result = (mRecordConfigureDataAsset != nullptr && mRecordConfigureDataAsset->DbcPlatformPresetValid());
-	result &= (mEnvResolver != nullptr && mEnvResolver->DbcIsValidInitEnvResolver());
+	result &= (mEnvResolver != nullptr && mEnvResolver->DbcIsValidEnvResolverInit());
 	result &= (mRecordResource != nullptr && mRecordResource->DbcIsValidResourceInit());
-	result &= (mRecordPipeline != nullptr && mRecordPipeline->DbcIsValid());
+	result &= (mRecordPipeline != nullptr && mRecordPipeline->DbcIsValidPipelineInit());
 	return result;
 }
 
@@ -1987,7 +1984,7 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
 		return;
 	}
 	
-	if (not )
+	if (not mRecordResource->DbcIsInitializedResource())
     {
     	UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to initialize record resource with resolver."));
     	mRecordResource->ReleaseResources();
@@ -2201,7 +2198,7 @@ bool AVdjmRecordBridgeActor::DbcRecordStartableFull() const
 	{
 		Fail(TEXT("DbcRecordStartableFull - mRecordPipeline == nullptr"));
 	}
-	else if (!mRecordPipeline->DbcIsValid())
+	else if (!mRecordPipeline->DbcIsValidPipelineInit())
 	{
 		Fail(TEXT("DbcRecordStartableFull - mRecordPipeline->DbcIsValid == false"));
 	}

@@ -513,7 +513,15 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoderExtended(const TWeakObjectPtr<UVd
 		 *   a) mConfig.IsValidateEncoderArguments() 실패 시 상세 필드 로그
 		 *   b) StartEncoder() 이후 mConfig immutability 보장(외부 resource 재참조 금지)
 		 */
-		(void)androidRecordRes;
+				
+		if (not androidRecordRes->DbcIsInitializedResource())
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderImpl::InitializeEncoderExtended - Android record resource is not initialized."));
+			return false;
+		}
+		
+		
+		
 	}
 	else
 	{

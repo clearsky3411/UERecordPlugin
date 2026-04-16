@@ -270,13 +270,13 @@ class VDJMRECORDER_API UVdjmRecordUnitPipeline : public UObject
 public:
 	UVdjmRecordUnit* CreateUnit(TSubclassOf<UVdjmRecordUnit> unitCls);
 	
-	virtual void InitializeRecordPipeline(UVdjmRecordResource* recordResource);
+	virtual bool InitializeRecordPipeline(UVdjmRecordResource* recordResource);
 
 	virtual void ExecuteRecordPipeline(const FVdjmRecordUnitParamContext& context,FVdjmRecordUnitParamPayload& payload)PURE_VIRTUAL(UVdjmRecordUnitPipeline::ExecuteRecordPipeline, return; )
 	virtual void StopRecordPipelineExecution() { /* Optional override for pipelines that support stopping mid-execution */ }
 	virtual void ReleaseRecordPipeline();
 	
-	virtual bool DbcIsValid() const;
+	virtual bool DbcIsValidPipelineInit() const;
 	virtual bool ExecutePossible() const {return false;}
 
 	bool DbcUnitCheck() const;
@@ -618,8 +618,8 @@ struct FVdjmRecordEnvPlatformPreset
 		}
 		return result;
 	}
-	
-	const TSubclassOf<UVdjmRecordUnit>* GetPipelineState(const EVdjmRecordPipelineStages& stage)
+
+	const TSubclassOf<UVdjmRecordUnit>* GetPipelineState(const EVdjmRecordPipelineStages& stage) const
 	{
 		return PipelineUnitClassMap.Find(stage);
 	}
@@ -849,7 +849,7 @@ public:
 	{
 		return LinkedOwnerBridge.IsValid() && IsValidResolved() && mResolvedPreset.DbcIsValid();
 	}
-	bool DbcIsValidInitEnvResolver() const	//	ChainInit_CreateRecordPipeline 이게 끝난 시점에만 사용 가능.
+	bool DbcIsValidEnvResolverInit() const	//	ChainInit_CreateRecordPipeline 이게 끝난 시점에만 사용 가능.
 	{
 		return IsValidPreset() && LinkedRecordResource.IsValid() && LinkedPipeline.IsValid();
 	}
@@ -999,7 +999,7 @@ public:
 	}
 	bool DbcValidRecordPipeline() const
 	{
-		return DbcValidRecordResource()&& mRecordPipeline != nullptr && mRecordPipeline->DbcIsValid();
+		return DbcValidRecordResource()&& mRecordPipeline != nullptr && mRecordPipeline->DbcIsValidPipelineInit();
 	}
 	bool DbcRecordingPossible()  const
 	{

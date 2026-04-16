@@ -161,7 +161,7 @@ bool FVdjmAndroidEncoderBackendOpenGL::Running(FRHICommandList& RHICmdList, cons
 		return false;
 	}
 
-	glViewport(0, 0, mConfig.VideoWidth, mConfig.VideoHeight);
+	glViewport(0, 0, mConfig.VideoConfig.VideoWidth, mConfig.VideoHeight);
 	glDisable(GL_BLEND);
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_CULL_FACE);

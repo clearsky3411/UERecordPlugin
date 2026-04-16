@@ -153,7 +153,7 @@ class VDJMRECORDER_API UVdjmRecordWMFUnitDefaultPipeline : public UVdjmRecordUni
 	GENERATED_BODY()
 
 public:
-	virtual void InitializeRecordPipeline(UVdjmRecordResource* recordResource) override;
+	virtual bool InitializeRecordPipeline(UVdjmRecordResource* recordResource) override;
 	virtual void ExecuteRecordPipeline(const FVdjmRecordUnitParamContext& context,
 		FVdjmRecordUnitParamPayload& payload) override;
 	virtual void StopRecordPipelineExecution() override;

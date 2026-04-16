@@ -9,6 +9,8 @@
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
 
+#include "VdjmRecorderCore.h"
+
 #ifndef EGL_OPENGL_ES3_BIT_KHR
 #define EGL_OPENGL_ES3_BIT_KHR 0x00000040
 #endif
@@ -28,6 +30,7 @@ private:
 	static GLuint CompileShader(GLenum shaderType, const char* shaderSource);
 	
 	FVdjmAndroidEncoderConfigure mConfig;
+	FVdjmRecordEnvPlatformPreset mPlatformPreset;
 	
 	EGLDisplay mDisplay = EGL_NO_DISPLAY;
 	EGLContext mContext = EGL_NO_CONTEXT;

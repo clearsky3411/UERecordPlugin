@@ -164,9 +164,10 @@ struct FVdjmAndroidEncoderConfigureAudio
 
 struct FVdjmAndroidEncoderConfigure
 {
-	
 	FVdjmAndroidEncoderConfigureVideo VideoConfig;
 	FVdjmAndroidEncoderConfigureAudio AudioConfig;
+	
+	
 	
 	FVdjmAndroidEncoderConfigure() = default;
 	FVdjmAndroidEncoderConfigure(FVdjmAndroidEncoderConfigureVideo videoConfig, FVdjmAndroidEncoderConfigureAudio audioConfig)
