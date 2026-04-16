@@ -947,6 +947,34 @@ bool UVdjmRecordResource::UpdateFinalFilePathFromResolver()
 	return true;
 }
 
+bool UVdjmRecordResource::UpdateFinalFilePathFromResolver()
+{
+	if (!LinkedResolver.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("UVdjmRecordResource::UpdateFinalFilePathFromResolver - LinkedResolver is invalid."));
+		return false;
+	}
+
+	const FVdjmEncoderInitRequestOutput* outputConfig = LinkedResolver->TryGetResolvedOutputConfig();
+	if (outputConfig == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("UVdjmRecordResource::UpdateFinalFilePathFromResolver - Output config is null."));
+		return false;
+	}
+
+	FString safeOutputFilePath;
+	if (!VdjmRecordUtils::Validations::DbcValidateOutputFilePath(
+		outputConfig->OutputFilePath,
+		safeOutputFilePath,
+		TEXT("UVdjmRecordResource::UpdateFinalFilePathFromResolver")))
+	{
+		return false;
+	}
+
+	FinalFilePath = safeOutputFilePath;
+	return true;
+}
+
 void UVdjmRecordResource::ResetResource()
 {
 }
@@ -1120,12 +1148,22 @@ bool VdjmRecordUtils::Validations::DbcValidateOutputFilePath(const FString& inFi
 		return false;
 	}
 
-	const FString Extension = FPaths::GetExtension(SafePath, true).ToLower();
-	if (Extension != TEXT(".mp4"))
+	const FString extension = FPaths::GetExtension(SafePath, false).ToLower();
+	bool bIsAllowedOutputExtension = false;
+#if PLATFORM_ANDROID
+	bIsAllowedOutputExtension = extension == TEXT("mp4");
+#elif PLATFORM_WINDOWS || PLATFORM_MAC || PLATFORM_IOS
+	bIsAllowedOutputExtension = extension == TEXT("mp4") || extension == TEXT("mov");
+#else
+	bIsAllowedOutputExtension = extension == TEXT("mp4");
+#endif
+
+	if (!bIsAllowedOutputExtension)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error,
-		       TEXT("%s - Invalid output extension. Expected=.mp4 Path=%s"),
+		       TEXT("%s - Invalid output extension. Extension=%s Path=%s"),
 		       debugOwner,
+		       *extension,
 		       *SafePath);
 		return false;
 	}
