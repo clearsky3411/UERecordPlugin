@@ -597,12 +597,12 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 		return false;
 	}
 
-	const EVdjmRecordQualityTiers RequestedTier =
+	const EVdjmRecordQualityTiers requestedTier =
 		(LinkedOwnerBridge->SelectedBitrateType != EVdjmRecordQualityTiers::EUndefined)
 			? LinkedOwnerBridge->SelectedBitrateType
 			: presetData->DefaultQualityTier;
 
-	constexpr EVdjmRecordQualityTiers TierOrder[] = {
+	constexpr EVdjmRecordQualityTiers tierOrder[] = {
 		EVdjmRecordQualityTiers::EUltra,
 		EVdjmRecordQualityTiers::EHigh,
 		EVdjmRecordQualityTiers::EMediumHigh,
@@ -612,11 +612,11 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 		EVdjmRecordQualityTiers::ELowest
 	};
 
-	auto FindTierIndexLamda = [TierOrder](EVdjmRecordQualityTiers tier) -> int32
+	auto findTierIndex = [](EVdjmRecordQualityTiers tier) -> int32
 	{
-		for (int32 i = 0; i < UE_ARRAY_COUNT(TierOrder); ++i)
+		for (int32 i = 0; i < UE_ARRAY_COUNT(tierOrder); ++i)
 		{
-			if (TierOrder[i] == tier)
+			if (tierOrder[i] == tier)
 			{
 				return i;
 			}
@@ -624,39 +624,39 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 		return INDEX_NONE;
 	};
 
-	int32 beginTierInt = FindTierIndexLamda(RequestedTier);
-	if (beginTierInt == INDEX_NONE)
+	int32 beginTier = findTierIndex(requestedTier);
+	if (beginTier == INDEX_NONE)
 	{
-		beginTierInt = FindTierIndexLamda(presetData->DefaultQualityTier);
+		beginTier = findTierIndex(presetData->DefaultQualityTier);
 	}
-	if (beginTierInt == INDEX_NONE)
+	if (beginTier == INDEX_NONE)
 	{
-		beginTierInt = 0;
-	}
-
-	FIntPoint tryResolveViewPortResolution = FIntPoint::ZeroValue;
-	if (!LinkedOwnerBridge->TryResolveViewportSize(tryResolveViewPortResolution) ||
-		tryResolveViewPortResolution.X <= 0 || tryResolveViewPortResolution.Y <= 0)
-	{
-		tryResolveViewPortResolution = VdjmRecordUtils::FeaturePresets::GetPresetFeatureResolution(beginTierInt);
+		beginTier = 0;
 	}
 
-	const UVdjmRecordEnvDataAsset* ConfigAsset = LinkedOwnerBridge->GetRecordEnvConfigureDataAsset();
-	const int32 maxFrameRate =
-		ConfigAsset ? FMath::Max(1, ConfigAsset->GlobalRules.MaxFrameRate) : 30;
+	FIntPoint viewportSize = FIntPoint::ZeroValue;
+	if (!LinkedOwnerBridge->TryResolveViewportSize(viewportSize) ||
+		viewportSize.X <= 0 || viewportSize.Y <= 0)
+	{
+		viewportSize = VdjmRecordUtils::FeaturePresets::GetPresetFeatureResolution(beginTier);
+	}
+
+	const UVdjmRecordEnvDataAsset* configAsset = LinkedOwnerBridge->GetRecordEnvConfigureDataAsset();
+	const FVdjmRecordGlobalRules activeRules = configAsset ? configAsset->GlobalRules : FVdjmRecordGlobalRules();
+	const int32 safeDisplayRefreshHz = FMath::Max(1, activeRules.MaxFrameRate);
 
 	const FString customFileName = LinkedOwnerBridge->GetCurrentFileName();
 
-	auto TryResolveTier = [&](EVdjmRecordQualityTiers candiTier, int32 candiTierIndex) -> bool
+	auto tryResolveTier = [&](EVdjmRecordQualityTiers candidateTier, int32 candidateTierIndex) -> bool
 	{
-		const FVdjmEncoderInitRequest* srcRequest = presetData->GetEncoderInitRequest(candiTier);
-		if (srcRequest == nullptr)
+		const FVdjmEncoderInitRequest* sourceRequest = presetData->GetEncoderInitRequest(candidateTier);
+		if (sourceRequest == nullptr)
 		{
 			return false;
 		}
 
-		FVdjmEncoderInitRequest candiRequest = *srcRequest;
-		if (!candiRequest.EvaluateValidation())
+		FVdjmEncoderInitRequest candidateRequest = *sourceRequest;
+		if (!candidateRequest.EvaluateValidation())
 		{
 			UE_LOG(LogVdjmRecorderCore, Warning,
 				TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform - Tier %s has invalid EncoderInitRequest."),
@@ -665,46 +665,74 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 		}
 
 		const FIntPoint tierMaxResolution =
-			VdjmRecordUtils::FeaturePresets::GetPresetFeatureResolution(FMath::Min(0, candiTierIndex));
+			VdjmRecordUtils::FeaturePresets::GetPresetFeatureResolution(FMath::Max(0, candidateTierIndex));
+		const FIntPoint presetResolution(candidateRequest.VideoConfig.Width, candidateRequest.VideoConfig.Height);
+		const FIntPoint safeResolution = VdjmRecordUtils::Resolvers::ResolveVideoResolution(
+			viewportSize,
+			presetResolution,
+			candidateRequest.VideoConfig.bResolutionFitToDisplay,
+			tierMaxResolution);
 
-		const FIntPoint rawRequestResolution =
-			candiRequest.VideoConfig.bResolutionFitToDisplay
-				? tryResolveViewPortResolution
-				: FIntPoint(candiRequest.VideoConfig.Width, candiRequest.VideoConfig.Height);
+		const int32 safeFrameRate = VdjmRecordUtils::Resolvers::ResolveVideoFrameRate(
+			candidateRequest.VideoConfig.FrameRate,
+			activeRules,
+			safeDisplayRefreshHz);
 
-		const FIntPoint fittedResolution =
-			 VdjmRecordUtils::VideoResolution::FitResolutionWithin(rawRequestResolution, tierMaxResolution);
-
-		FIntPoint safeResolution;
-		if (!VdjmRecordUtils::Validations::DbcValidateResolution(
-			fittedResolution,
+		const int32 resolvedBitrateByTheory = VdjmRecordUtils::Resolvers::ResolveVideoBitrateBps(
 			safeResolution,
-			TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform")))
-		{
-			return false;
-		}
+			safeFrameRate,
+			candidateTier,
+			EVdjmRecordContentComplexity::EGameplay);
 
 		int32 safeBitrate = 0;
 		if (!VdjmRecordUtils::Validations::DbcValidateBitrate(
-			candiRequest.VideoConfig.Bitrate,
+			resolvedBitrateByTheory,
 			safeBitrate,
 			TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform")))
 		{
 			return false;
 		}
 
-		candiRequest.VideoConfig.Width = safeResolution.X;
-		candiRequest.VideoConfig.Height = safeResolution.Y;
-		candiRequest.VideoConfig.Bitrate = safeBitrate;
-		candiRequest.VideoConfig.FrameRate =
-			FMath::Min(FMath::Max(1, candiRequest.VideoConfig.FrameRate), maxFrameRate);
+		candidateRequest.VideoConfig.Width = safeResolution.X;
+		candidateRequest.VideoConfig.Height = safeResolution.Y;
+		candidateRequest.VideoConfig.FrameRate = safeFrameRate;
+		candidateRequest.VideoConfig.Bitrate = safeBitrate;
 
-		FVdjmRecordEnvPlatformPreset candiPreset = *presetData;
-		candiPreset.EncoderInitRequestMap.FindOrAdd(candiTier) = candiRequest;
+		candidateRequest.AudioConfig.ChannelCount = FMath::Clamp(candidateRequest.AudioConfig.ChannelCount, 1, 2);
+		const int32 requestedSampleRate = candidateRequest.AudioConfig.SampleRate;
+		if (requestedSampleRate <= 0)
+		{
+			candidateRequest.AudioConfig.SampleRate = 44100;
+		}
+		else if (requestedSampleRate > 48000)
+		{
+			candidateRequest.AudioConfig.SampleRate = 48000;
+		}
+		else if (requestedSampleRate >= 44100)
+		{
+			candidateRequest.AudioConfig.SampleRate = 44100;
+		}
+		else if (requestedSampleRate >= 32000)
+		{
+			candidateRequest.AudioConfig.SampleRate = 32000;
+		}
+		else
+		{
+			candidateRequest.AudioConfig.SampleRate = 44100;
+		}
+
+		const bool bMusicHeavy = candidateRequest.AudioConfig.ChannelCount >= 2;
+		candidateRequest.AudioConfig.Bitrate = VdjmRecordUtils::Resolvers::ResolveAudioBitrateBps(
+			candidateRequest.AudioConfig.SampleRate,
+			candidateRequest.AudioConfig.ChannelCount,
+			bMusicHeavy);
+
+		FVdjmRecordEnvPlatformPreset candidatePreset = *presetData;
+		candidatePreset.EncoderInitRequestMap.FindOrAdd(candidateTier) = candidateRequest;
 
 		//	이 시점에서 CandidatePreset은 후보 Tier에 맞게 보정된 해상도와 비트레이트를 가지고 있음.
-		mResolvedPreset = MoveTemp(candiPreset);
-		mResolvedQualityTier = candiTier;
+		mResolvedPreset = MoveTemp(candidatePreset);
+		mResolvedQualityTier = candidateTier;
 
 		if (!ResolvedFinalFilePath(customFileName))
 		{
@@ -713,19 +741,19 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 			return false;
 		}
 
-		const FVdjmEncoderInitRequest* finalRequest = TryGetResolvedEncoderInitRequest();
-		if (finalRequest == nullptr || !finalRequest->EvaluateValidation())
+		const FVdjmEncoderInitRequest* finalResolvedRequest = TryGetResolvedEncoderInitRequest();
+		if (finalResolvedRequest == nullptr || !finalResolvedRequest->EvaluateValidation())
 		{
 			mResolvedPreset.Clear();
 			mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
 			return false;
 		}
 
-		if (!LinkedOwnerBridge->EvaluateInitRequest(finalRequest))
+		if (!LinkedOwnerBridge->EvaluateInitRequest(finalResolvedRequest))
 		{
 			UE_LOG(LogVdjmRecorderCore, Warning,
 				TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform - Tier %s rejected by hardware probe."),
-				*StaticEnum<EVdjmRecordQualityTiers>()->GetValueAsString(candiTier));
+				*StaticEnum<EVdjmRecordQualityTiers>()->GetValueAsString(candidateTier));
 
 			mResolvedPreset.Clear();
 			mResolvedQualityTier = EVdjmRecordQualityTiers::EUndefined;
@@ -737,23 +765,23 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 
 	// 1) Requested/default 가 EDefault 면 그걸 먼저 시도
 	const bool bTryDefaultFirst =
-		RequestedTier == EVdjmRecordQualityTiers::EDefault ||
-		(RequestedTier == EVdjmRecordQualityTiers::EUndefined &&
+		requestedTier == EVdjmRecordQualityTiers::EDefault ||
+		(requestedTier == EVdjmRecordQualityTiers::EUndefined &&
 		 presetData->DefaultQualityTier == EVdjmRecordQualityTiers::EDefault);
 
 	if (bTryDefaultFirst &&
 		presetData->EncoderInitRequestMap.Contains(EVdjmRecordQualityTiers::EDefault))
 	{
-		if (TryResolveTier(EVdjmRecordQualityTiers::EDefault, 0))
+		if (tryResolveTier(EVdjmRecordQualityTiers::EDefault, 0))
 		{
 			return true;
 		}
 	}
 
 	// 2) ordered tier down
-	for (int32 TierIndex = beginTierInt; TierIndex < UE_ARRAY_COUNT(TierOrder); ++TierIndex)
+	for (int32 tierIndex = beginTier; tierIndex < UE_ARRAY_COUNT(tierOrder); ++tierIndex)
 	{
-		if (TryResolveTier(TierOrder[TierIndex], TierIndex))
+		if (tryResolveTier(tierOrder[tierIndex], tierIndex))
 		{
 			return true;
 		}
@@ -762,7 +790,7 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 	// 3) 마지막 fallback 으로 EDefault
 	if (presetData->EncoderInitRequestMap.Contains(EVdjmRecordQualityTiers::EDefault))
 	{
-		if (TryResolveTier(EVdjmRecordQualityTiers::EDefault, 0))
+		if (tryResolveTier(EVdjmRecordQualityTiers::EDefault, 0))
 		{
 			return true;
 		}
@@ -797,7 +825,7 @@ bool UVdjmRecordEnvResolver::ResolvedFinalFilePath(const FString& customFileName
 		LinkedOwnerBridge->GetTargetPlatform(),
 		mutableRequest->OutputConfig.OutputFilePath,
 		customFileName,
-		mutableRequest->OutputConfig.SessionId, 
+		mutableRequest->OutputConfig.SessionId,
 		mutableRequest->OutputConfig.bOverwriteExists,
 		TEXT("UVdjmRecordEnvResolver::ResolvedFinalFilePath"));
 
@@ -808,6 +836,16 @@ bool UVdjmRecordEnvResolver::ResolvedFinalFilePath(const FString& customFileName
 
 	mutableRequest->OutputConfig.OutputFilePath = safeOutputPath;
 	return mutableRequest->OutputConfig.EvaluateValidation();
+}
+
+bool UVdjmRecordEnvResolver::RefreshResolvedOutputPath()
+{
+	if (!LinkedOwnerBridge.IsValid() || !IsValidPreset())
+	{
+		return false;
+	}
+
+	return ResolvedFinalFilePath(LinkedOwnerBridge->GetCurrentFileName());
 }
 
 /*
@@ -856,6 +894,25 @@ bool UVdjmRecordResource::InitializeResource(UVdjmRecordEnvResolver* resolver)
 	FinalFilePath = resolvedIniRequest->OutputConfig.OutputFilePath;
 	
 	OnResourceReadyForPostInit.Broadcast(this);	
+	return true;
+}
+
+bool UVdjmRecordResource::UpdateFinalFilePathFromResolver()
+{
+	if (!LinkedResolver.IsValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("UVdjmRecordResource::UpdateFinalFilePathFromResolver - LinkedResolver is invalid."));
+		return false;
+	}
+
+	const FVdjmEncoderInitRequestOutput* outputConfig = LinkedResolver->TryGetResolvedOutputConfig();
+	if (outputConfig == nullptr || !outputConfig->EvaluateValidation())
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("UVdjmRecordResource::UpdateFinalFilePathFromResolver - Output config is invalid."));
+		return false;
+	}
+
+	FinalFilePath = outputConfig->OutputFilePath;
 	return true;
 }
 
@@ -1334,25 +1391,41 @@ void AVdjmRecordBridgeActor::StartRecording()
 {
 	if(DbcRecordStartable())
 	{
-		bIsRecording = true;
+		if (!mEnvResolver->RefreshResolvedOutputPath())
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("StartRecording - Failed to refresh resolved output path."));
+			bIsRecording = false;
+			return;
+		}
+		if (mRecordResource != nullptr && !mRecordResource->UpdateFinalFilePathFromResolver())
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("StartRecording - Failed to update resource final file path from resolver."));
+			bIsRecording = false;
+			return;
+		}
 		
-		const FVdjmEncoderInitRequestVideo* videoCinfig = mEnvResolver->TryGetResolvedVideoConfig();
-		const double MaxFrameRate = mEnvResolver->GetResolvedGlobalRules().MaxFrameRate;
-		const double MinFrameRate = mEnvResolver->GetResolvedGlobalRules().MinFrameRate;
-		const double MaxDurationSecond = mEnvResolver->GetResolvedGlobalRules().MaxRecordDurationSeconds;
+		const FVdjmEncoderInitRequestVideo* videoConfig = mEnvResolver->TryGetResolvedVideoConfig();
+		const double minFrameRate = mEnvResolver->GetResolvedGlobalRules().MinFrameRate;
+		const double maxDurationSecond = mEnvResolver->GetResolvedGlobalRules().MaxRecordDurationSeconds;
 		const FVdjmEncoderInitRequestAudio* audioConfig = mEnvResolver->TryGetResolvedAudioConfig();
 		const FVdjmEncoderInitRequestOutput* outputConfig = mEnvResolver->TryGetResolvedOutputConfig();
-		
-		//	Dbc 임. DbcRecordStartable 에 videoCinfig, audioConfig, outputConfig 의 유효성은 이미 체크되어있음.
+		if (videoConfig == nullptr || audioConfig == nullptr || outputConfig == nullptr)
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("StartRecording - Resolved configs are invalid."));
+			bIsRecording = false;
+			return;
+		}
+
+		//	Dbc 임. DbcRecordStartable 에 videoConfig, audioConfig, outputConfig 의 유효성은 이미 체크되어있음.
 		if (FSlateApplication::IsInitialized())
 		{
-			double Now = FPlatformTime::Seconds();
+			double now = FPlatformTime::Seconds();
 			
-			double videoFrameRate = videoCinfig->FrameRate;
+			double videoFrameRate = videoConfig->FrameRate;
 			
-			mFrameInterval = 1.0 / FMath::Max(videoFrameRate,MinFrameRate);
-			mRecordEndTime = Now + MaxDurationSecond;
-            mNextFrameTime = Now; // 첫 프레임은 즉시 기록
+			mFrameInterval = 1.0 / FMath::Max(videoFrameRate,minFrameRate);
+			mRecordEndTime = now + maxDurationSecond;
+            mNextFrameTime = now; // 첫 프레임은 즉시 기록
 			bIsRecording = true;
 			mRecordedFrameCount = 0;
 	
@@ -1376,6 +1449,7 @@ void AVdjmRecordBridgeActor::StartRecording()
 		else
 		{
 			UE_LOG(LogTemp, Warning, TEXT("Cannot start recording: Slate application not initialized"));
+			bIsRecording = false;
 			return;
 		}
 	}
@@ -1526,31 +1600,69 @@ bool AVdjmRecordBridgeActor::EvaluateInitRequest(const FVdjmEncoderInitRequest* 
 	{
 		return false;
 	}
-	return initPreset->EvaluateValidation();
+	if (!initPreset->EvaluateValidation())
+	{
+		return false;
+	}
+
+	const FVdjmEncoderInitRequestVideo& videoConfig = initPreset->VideoConfig;
+	const FVdjmEncoderInitRequestAudio& audioConfig = initPreset->AudioConfig;
+
+	FIntPoint safeResolution;
+	if (!VdjmRecordUtils::Validations::DbcValidateResolution(
+		FIntPoint(videoConfig.Width, videoConfig.Height),
+		safeResolution,
+		TEXT("AVdjmRecordBridgeActor::EvaluateInitRequest")))
+	{
+		return false;
+	}
+
+	FIntPoint viewportSize;
+	if (TryResolveViewportSize(viewportSize) && viewportSize.X > 0 && viewportSize.Y > 0)
+	{
+		const int64 requestedPixels = static_cast<int64>(safeResolution.X) * static_cast<int64>(safeResolution.Y);
+		const int64 viewportPixels = static_cast<int64>(viewportSize.X) * static_cast<int64>(viewportSize.Y);
+		if (requestedPixels > (viewportPixels * 4))
+		{
+			UE_LOG(LogVdjmRecorderCore, Warning,
+				TEXT("AVdjmRecordBridgeActor::EvaluateInitRequest - Request is too large for current viewport. Req=%dx%d View=%dx%d"),
+				safeResolution.X, safeResolution.Y, viewportSize.X, viewportSize.Y);
+			return false;
+		}
+	}
+
+	if (!VdjmRecordUtils::Validations::DbcValidateAudioConfig(
+		audioConfig,
+		TEXT("AVdjmRecordBridgeActor::EvaluateInitRequest")))
+	{
+		return false;
+	}
+
+	return true;
 }
 
-bool AVdjmRecordBridgeActor::TryResolveViewportSize(FIntPoint& OutSize) const
+bool AVdjmRecordBridgeActor::TryResolveViewportSize(FIntPoint& outSize) const
 {
-	OutSize = FIntPoint::ZeroValue;
+	outSize = FIntPoint::ZeroValue;
 	if (mTargetViewport)
 	{
-		const FIntPoint Size = mTargetViewport->GetSizeXY();
-		if (Size.X > 0 && Size.Y > 0)
+		const FIntPoint size = mTargetViewport->GetSizeXY();
+		if (size.X > 0 && size.Y > 0)
 		{
-			OutSize = Size;
+			outSize = size;
 			return true;
 		}
 	}
-	if (const UWorld* World = GetWorld())
+	if (const UWorld* world = GetWorld())
 	{
-		if (UGameViewportClient* ViewportClient = World->GetGameViewport())
+		if (UGameViewportClient* viewportClient = world->GetGameViewport())
 		{
-			if (FViewport* Viewport = ViewportClient->Viewport)
+			if (FViewport* viewport = viewportClient->Viewport)
 			{
-				const FIntPoint Size = Viewport->GetSizeXY();
-				if (Size.X > 0 && Size.Y > 0)
+				const FIntPoint size = viewport->GetSizeXY();
+				if (size.X > 0 && size.Y > 0)
 				{
-					OutSize = Size;
+					outSize = size;
 					return true;
 				}
 			}
@@ -1558,10 +1670,10 @@ bool AVdjmRecordBridgeActor::TryResolveViewportSize(FIntPoint& OutSize) const
 	}
 	if (GEngine && GEngine->GameViewport && GEngine->GameViewport->Viewport)
 	{
-		const FIntPoint Size = GEngine->GameViewport->Viewport->GetSizeXY();
-		if (Size.X > 0 && Size.Y > 0)
+		const FIntPoint size = GEngine->GameViewport->Viewport->GetSizeXY();
+		if (size.X > 0 && size.Y > 0)
 		{
-			OutSize = Size;
+			outSize = size;
 			return true;
 		}
 	}

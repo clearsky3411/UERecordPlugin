@@ -432,7 +432,8 @@ class VDJMRECORDER_API UVdjmRecordResource : public UObject
 public:
 	virtual void BeginDestroy() override;
 	
-	virtual bool InitializeResource(UVdjmRecordEnvResolver* resolver);
+	virtual bool InitializeResourceExtended(UVdjmRecordEnvResolver* resolver);
+	bool UpdateFinalFilePathFromResolver();
 	virtual void ResetResource();
 	virtual void ReleaseResources();
 	
@@ -812,16 +813,17 @@ public:
 		} 
 		return nullptr;
 	}
-	const FVdjmEncoderInitRequestPlatformExtension* TryGetResolvedPlatformExtensionConfig() const
-	{
-		if (const FVdjmEncoderInitRequest* initRequest = TryGetResolvedEncoderInitRequest())
+		const FVdjmEncoderInitRequestPlatformExtension* TryGetResolvedPlatformExtensionConfig() const
+		{
+			if (const FVdjmEncoderInitRequest* initRequest = TryGetResolvedEncoderInitRequest())
 		{
 			return &initRequest->PlatformExtensionConfig;
 		} 
-		return nullptr;
-	}
-	TSubclassOf<UVdjmRecordUnit> TryGetResolvedPipelineUnitClass(EVdjmRecordPipelineStages stage) const
-	{
+			return nullptr;
+		}
+		bool RefreshResolvedOutputPath();
+		TSubclassOf<UVdjmRecordUnit> TryGetResolvedPipelineUnitClass(EVdjmRecordPipelineStages stage) const
+		{
 		if (IsValidPreset())
 		{
 			return *mResolvedPreset.PipelineUnitClassMap.Find(stage);
@@ -948,7 +950,12 @@ public:
 	UFUNCTION(BlueprintCallable)
 	FString GetCurrentFileName() const
 	{
-		return FString();
+		return mCurrentCustomFileName;
+	}
+	UFUNCTION(BlueprintCallable)
+	void SetCurrentFileName(const FString& newFileName)
+	{
+		mCurrentCustomFileName = newFileName;
 	}
 	
 	UFUNCTION(BlueprintCallable)
@@ -1094,7 +1101,7 @@ public:
 	UPROPERTY(EditAnywhere)
 	EVdjmRecordQualityTiers SelectedBitrateType = EVdjmRecordQualityTiers::EDefault;
 
-	bool TryResolveViewportSize(FIntPoint& OutSize) const;
+	bool TryResolveViewportSize(FIntPoint& outSize) const;
 	static const TCHAR* GetInitStepName(EVdjmRecordBridgeInitStep step);
 
 	
@@ -1158,6 +1165,8 @@ protected:
 	
 	//	TODO(20260410 env control) - 
 	EVdjmRecordQualityTiers mCurrentQualityTier = EVdjmRecordQualityTiers::EDefault;	//	추후에 옵션을 바꿀 수 있는 인터페이스에 노출될 놈임.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Record|Output", meta=(AllowPrivateAccess="true"))
+	FString mCurrentCustomFileName;
 	UPROPERTY()
 	TObjectPtr<UVdjmRecordEnvResolver> mEnvResolver;
 };
