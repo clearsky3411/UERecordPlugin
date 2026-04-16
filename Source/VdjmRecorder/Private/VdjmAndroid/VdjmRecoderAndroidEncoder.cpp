@@ -109,6 +109,11 @@ bool FVdjmAndroidRecordSession::Start()
 		Terminate();
 		return false;
 	}
+	if (!AudioStart())
+	{
+		Terminate();
+		return false;
+	}
 	
 	if (not mGraphicBackend.IsValid())
 	{
