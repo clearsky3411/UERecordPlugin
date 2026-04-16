@@ -14,7 +14,7 @@ enum class EVdjmAndroidGraphicBackend : uint8
 	EVulkan
 };
 
-struct FVdjmAndroidEncoderConfigureVideo
+struct FVdjmAndroidEncoderVideoSnapshot
 {
 	int32 VideoWidth = 0;
 	int32 VideoHeight = 0;
@@ -25,17 +25,17 @@ struct FVdjmAndroidEncoderConfigureVideo
 	FString OutputFilePath = TEXT("");
 	EVdjmAndroidGraphicBackend GraphicBackend = EVdjmAndroidGraphicBackend::EUnknown;
 	
-	FVdjmAndroidEncoderConfigureVideo() = default;
-	FVdjmAndroidEncoderConfigureVideo(int32 width, int32 height, int32 bitrate, int32 fps, const FString& outputFilePath)
+	FVdjmAndroidEncoderVideoSnapshot() = default;
+	FVdjmAndroidEncoderVideoSnapshot(int32 width, int32 height, int32 bitrate, int32 fps, const FString& outputFilePath)
 		: VideoWidth(width), VideoHeight(height), VideoBitrate(bitrate), VideoFPS(fps), OutputFilePath(outputFilePath), GraphicBackend(EVdjmAndroidGraphicBackend::EUnknown), MimeType("video/avc"), VideoIntervalSec(1)
 	{}
-	FVdjmAndroidEncoderConfigureVideo(const FVdjmAndroidEncoderConfigureVideo& other)
+	FVdjmAndroidEncoderVideoSnapshot(const FVdjmAndroidEncoderVideoSnapshot& other)
 		: VideoWidth(other.VideoWidth), VideoHeight(other.VideoHeight), VideoBitrate(other.VideoBitrate), VideoFPS(other.VideoFPS), OutputFilePath(other.OutputFilePath), MimeType(other.MimeType), GraphicBackend(other.GraphicBackend), VideoIntervalSec(other.VideoIntervalSec)
 	{}
-	FVdjmAndroidEncoderConfigureVideo(FVdjmAndroidEncoderConfigureVideo&& other) noexcept
+	FVdjmAndroidEncoderVideoSnapshot(FVdjmAndroidEncoderVideoSnapshot&& other) noexcept
 		: VideoWidth(other.VideoWidth), VideoHeight(other.VideoHeight), VideoBitrate(other.VideoBitrate), VideoFPS(other.VideoFPS), OutputFilePath(other.OutputFilePath), MimeType(other.MimeType), GraphicBackend(other.GraphicBackend), VideoIntervalSec(other.VideoIntervalSec)
 	{}
-	FVdjmAndroidEncoderConfigureVideo& operator=(const FVdjmAndroidEncoderConfigureVideo& other)
+	FVdjmAndroidEncoderVideoSnapshot& operator=(const FVdjmAndroidEncoderVideoSnapshot& other)
 	{		this->VideoWidth = other.VideoWidth;
 		this->VideoHeight = other.VideoHeight;
 		this->VideoBitrate = other.VideoBitrate;
@@ -46,7 +46,7 @@ struct FVdjmAndroidEncoderConfigureVideo
 		this->VideoIntervalSec = other.VideoIntervalSec;
 		return *this;
 	}
-	FVdjmAndroidEncoderConfigureVideo& operator=(FVdjmAndroidEncoderConfigureVideo&& other) noexcept
+	FVdjmAndroidEncoderVideoSnapshot& operator=(FVdjmAndroidEncoderVideoSnapshot&& other) noexcept
 	{		this->VideoWidth = other.VideoWidth;
 		this->VideoHeight = other.VideoHeight;
 		this->VideoBitrate = other.VideoBitrate;
@@ -84,7 +84,7 @@ struct FVdjmAndroidEncoderConfigureVideo
 			static_cast<int32>(GraphicBackend));
 	}
 };
-struct FVdjmAndroidEncoderConfigureAudio
+struct FVdjmAndroidEncoderAudioSnapshot
 {
 	bool bEnableAudio = false;
 	int32 AudioSampleRate = 48000;	//	Hz
@@ -98,14 +98,14 @@ struct FVdjmAndroidEncoderConfigureAudio
 	int32 AudioDriftToleranceMs = 20;
 	int32 AudioFrameDurationMs = 20;	// AAC 인코딩 chunk 기준
 	
-	FVdjmAndroidEncoderConfigureAudio() = default;
-	FVdjmAndroidEncoderConfigureAudio(const FVdjmAndroidEncoderConfigureAudio& other)
+	FVdjmAndroidEncoderAudioSnapshot() = default;
+	FVdjmAndroidEncoderAudioSnapshot(const FVdjmAndroidEncoderAudioSnapshot& other)
 		: bEnableAudio(other.bEnableAudio), AudioSampleRate(other.AudioSampleRate), AudioChannelCount(other.AudioChannelCount), AudioBitrate(other.AudioBitrate), AudioAacProfile(other.AudioAacProfile), AudioMimeType(other.AudioMimeType), AudioSourceId(other.AudioSourceId), bAudioRequired(other.bAudioRequired), AudioDriftToleranceMs(other.AudioDriftToleranceMs), AudioFrameDurationMs(other.AudioFrameDurationMs)
 	{}
-	FVdjmAndroidEncoderConfigureAudio(FVdjmAndroidEncoderConfigureAudio&& other) noexcept
+	FVdjmAndroidEncoderAudioSnapshot(FVdjmAndroidEncoderAudioSnapshot&& other) noexcept
 		: bEnableAudio(other.bEnableAudio), AudioSampleRate(other.AudioSampleRate), AudioChannelCount(other.AudioChannelCount), AudioBitrate(other.AudioBitrate), AudioAacProfile(other.AudioAacProfile), AudioMimeType(other.AudioMimeType), AudioSourceId(other.AudioSourceId), bAudioRequired(other.bAudioRequired), AudioDriftToleranceMs(other.AudioDriftToleranceMs), AudioFrameDurationMs(other.AudioFrameDurationMs)
 	{}
-	FVdjmAndroidEncoderConfigureAudio& operator=(const FVdjmAndroidEncoderConfigureAudio& other)
+	FVdjmAndroidEncoderAudioSnapshot& operator=(const FVdjmAndroidEncoderAudioSnapshot& other)
 	{		this->bEnableAudio = other.bEnableAudio;
 		this->AudioSampleRate = other.AudioSampleRate;
 		this->AudioChannelCount = other.AudioChannelCount;
@@ -118,7 +118,7 @@ struct FVdjmAndroidEncoderConfigureAudio
 		this->AudioFrameDurationMs = other.AudioFrameDurationMs;
 		return *this;
 	}
-	FVdjmAndroidEncoderConfigureAudio& operator=(FVdjmAndroidEncoderConfigureAudio&& other) noexcept
+	FVdjmAndroidEncoderAudioSnapshot& operator=(FVdjmAndroidEncoderAudioSnapshot&& other) noexcept
 	{		this->bEnableAudio = other.bEnableAudio;
 		this->AudioSampleRate = other.AudioSampleRate;
 		this->AudioChannelCount = other.AudioChannelCount;
@@ -162,30 +162,30 @@ struct FVdjmAndroidEncoderConfigureAudio
 };
 
 
-struct FVdjmAndroidEncoderConfigure
+struct FVdjmAndroidEncoderSnapshot
 {
-	FVdjmAndroidEncoderConfigureVideo VideoConfig;
-	FVdjmAndroidEncoderConfigureAudio AudioConfig;
+	FVdjmAndroidEncoderVideoSnapshot VideoConfig;
+	FVdjmAndroidEncoderAudioSnapshot AudioConfig;
 	
 	
 	
-	FVdjmAndroidEncoderConfigure() = default;
-	FVdjmAndroidEncoderConfigure(FVdjmAndroidEncoderConfigureVideo videoConfig, FVdjmAndroidEncoderConfigureAudio audioConfig)
+	FVdjmAndroidEncoderSnapshot() = default;
+	FVdjmAndroidEncoderSnapshot(FVdjmAndroidEncoderVideoSnapshot videoConfig, FVdjmAndroidEncoderAudioSnapshot audioConfig)
 		: VideoConfig(videoConfig), AudioConfig(audioConfig)
 	{}
-	FVdjmAndroidEncoderConfigure(const FVdjmAndroidEncoderConfigure& other)
+	FVdjmAndroidEncoderSnapshot(const FVdjmAndroidEncoderSnapshot& other)
 		: VideoConfig(other.VideoConfig), AudioConfig(other.AudioConfig)
 	{}
-	FVdjmAndroidEncoderConfigure(FVdjmAndroidEncoderConfigure&& other) noexcept
+	FVdjmAndroidEncoderSnapshot(FVdjmAndroidEncoderSnapshot&& other) noexcept
 		: VideoConfig(other.VideoConfig), AudioConfig(other.AudioConfig)
 	{}
-	FVdjmAndroidEncoderConfigure& operator=(const FVdjmAndroidEncoderConfigure& other)
+	FVdjmAndroidEncoderSnapshot& operator=(const FVdjmAndroidEncoderSnapshot& other)
 	{
 		this->VideoConfig = other.VideoConfig;
 		this->AudioConfig = other.AudioConfig;
 		return *this;
 	}
-	FVdjmAndroidEncoderConfigure& operator=(FVdjmAndroidEncoderConfigure&& other) noexcept
+	FVdjmAndroidEncoderSnapshot& operator=(FVdjmAndroidEncoderSnapshot&& other) noexcept
 	{
 		this->VideoConfig = other.VideoConfig;
 		this->AudioConfig = other.AudioConfig;

@@ -18,7 +18,7 @@
 class FVdjmAndroidEncoderBackendOpenGL : public FVdjmAndroidEncoderBackend
 {
 public:
-	virtual bool Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow) override;
+	virtual bool Init(const FVdjmAndroidEncoderSnapshot& config, ANativeWindow* inputWindow) override;
 	virtual bool Start() override;
 	virtual void Stop() override;
 	virtual void Terminate() override;
@@ -29,7 +29,7 @@ private:
 	void DestroyFullScreenPipeline();
 	static GLuint CompileShader(GLenum shaderType, const char* shaderSource);
 	
-	FVdjmAndroidEncoderConfigure mConfig;
+	FVdjmAndroidEncoderSnapshot mConfig;
 	FVdjmRecordEnvPlatformPreset mPlatformPreset;
 	
 	EGLDisplay mDisplay = EGL_NO_DISPLAY;

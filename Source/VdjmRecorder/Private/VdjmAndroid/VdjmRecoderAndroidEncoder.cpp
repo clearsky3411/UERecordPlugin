@@ -57,7 +57,7 @@ FVdjmAndroidRecordSession::~FVdjmAndroidRecordSession()
 {
 }
 
-bool FVdjmAndroidRecordSession::Initialize(const FVdjmAndroidEncoderConfigure& configure )
+bool FVdjmAndroidRecordSession::Initialize(const FVdjmAndroidEncoderSnapshot& configure )
 {
 	UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidRecordSession::Initialize - in Config %s"),*configure.ToString());
 	
@@ -115,14 +115,14 @@ bool FVdjmAndroidRecordSession::Start()
 
 	// 0은 일부 기기/드라이버에서 과도한 IDR 요청으로 이어질 수 있어
 	// 실제 코덱 설정 시에는 최소 1초로 보정해 안정성을 우선한다.
-	const int32 SafeIFrameIntervalSec = FMath::Max(1, mConfig.VideoIntervalSec);
-	if (SafeIFrameIntervalSec != mConfig.VideoIntervalSec)
+	const int32 safeIFrameIntervalSec = FMath::Max(1, mConfig.VideoConfig.VideoIntervalSec);
+	if (safeIFrameIntervalSec != mConfig.VideoConfig.VideoIntervalSec)
 	{
 		UE_LOG(LogTemp, Warning,
 			TEXT("FVdjmAndroidRecordSession::Start - VideoIntervalSec=%d, overriding to %d for codec stability."),
-			mConfig.VideoConfig.VideoIntervalSec, SafeIFrameIntervalSec);
+			mConfig.VideoConfig.VideoIntervalSec, safeIFrameIntervalSec);
 	}
-	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, SafeIFrameIntervalSec);
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, safeIFrameIntervalSec);
 	
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_COLOR_FORMAT, VdjmColorFormatSurface);
 	
@@ -155,8 +155,19 @@ bool FVdjmAndroidRecordSession::Start()
 		return false;
 	}
 
+	if (!AudioInit())
+	{
+		Terminate();
+		return false;
+	}
+
 	status = AMediaCodec_start(mCodec);
 	if (status != AMEDIA_OK)
+	{
+		Terminate();
+		return false;
+	}
+	if (!AudioStart())
 	{
 		Terminate();
 		return false;
@@ -256,6 +267,60 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 			break;
 		}
 	}
+
+	if (!mAudioCodec || !mAudioCodecStarted)
+	{
+		return;
+	}
+
+	while (true)
+	{
+		AMediaCodecBufferInfo bufferInfo{};
+		const ssize_t outputIndex = AMediaCodec_dequeueOutputBuffer(mAudioCodec, &bufferInfo, 0);
+
+		if (outputIndex == AMEDIACODEC_INFO_TRY_AGAIN_LATER)
+		{
+			break;
+		}
+		else if (outputIndex == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED)
+		{
+			AMediaFormat* newFormat = AMediaCodec_getOutputFormat(mAudioCodec);
+			if (!newFormat)
+			{
+				break;
+			}
+
+			mAudioTrackIndex = AMediaMuxer_addTrack(mMuxer, newFormat);
+			AMediaFormat_delete(newFormat);
+
+			if (mAudioTrackIndex >= 0 && !mMuxerStarted)
+			{
+				AMediaMuxer_start(mMuxer);
+				mMuxerStarted = true;
+			}
+		}
+		else if (outputIndex >= 0)
+		{
+			size_t outSize = 0;
+			uint8_t* outBuffer = AMediaCodec_getOutputBuffer(mAudioCodec, outputIndex, &outSize);
+
+			if (outBuffer && bufferInfo.size > 0 && mMuxerStarted && mAudioTrackIndex >= 0)
+			{
+				AMediaMuxer_writeSampleData(mMuxer, mAudioTrackIndex, outBuffer, &bufferInfo);
+			}
+
+			AMediaCodec_releaseOutputBuffer(mAudioCodec, outputIndex, false);
+
+			if ((bufferInfo.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0)
+			{
+				break;
+			}
+		}
+		else
+		{
+			break;
+		}
+	}
 }
 
 bool FVdjmAndroidRecordSession::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,
@@ -306,6 +371,11 @@ void FVdjmAndroidRecordSession::Stop()
 		AMediaCodec_stop(mCodec);
 		mCodecStarted = false;
 	}
+	if (mAudioCodec && mAudioCodecStarted)
+	{
+		AMediaCodec_stop(mAudioCodec);
+		mAudioCodecStarted = false;
+	}
 
 	if (mMuxer && mMuxerStarted)
 	{
@@ -351,6 +421,11 @@ void FVdjmAndroidRecordSession::Terminate()
 		AMediaCodec_delete(mCodec);
 		mCodec = nullptr;
 	}
+	if (mAudioCodec)
+	{
+		AMediaCodec_delete(mAudioCodec);
+		mAudioCodec = nullptr;
+	}
 
 	if (mMuxer)
 	{
@@ -365,8 +440,10 @@ void FVdjmAndroidRecordSession::Terminate()
 	}
 
 	mTrackIndex = -1;
+	mAudioTrackIndex = -1;
 	mMuxerStarted = false;
 	mCodecStarted = false;
+	mAudioCodecStarted = false;
 	mEosSent = false;
 	mRunning = false;
 	mInitialized = false;
@@ -377,13 +454,15 @@ bool FVdjmAndroidRecordSession::IsValidSession() const
 	// 1. 초기화 안 된 상태인데 네이티브 자원이 남아 있으면 이상함
 	if (not mInitialized)
 	{
-		const bool bHasNativeResources =
-			(mCodec != nullptr) ||
-			(mMuxer != nullptr) ||
+			const bool bHasNativeResources =
+				(mCodec != nullptr) ||
+				(mAudioCodec != nullptr) ||
+				(mMuxer != nullptr) ||
 			(mInputWindow != nullptr) ||
 			(mOutputFd >= 0) ||
-			mCodecStarted ||
-			mMuxerStarted ||
+				mCodecStarted ||
+				mAudioCodecStarted ||
+				mMuxerStarted ||
 			mRunning ||
 			(mTrackIndex != -1) ||
 			mEosSent;
@@ -405,6 +484,7 @@ bool FVdjmAndroidRecordSession::IsValidSession() const
 		if (mInputWindow == nullptr) return false;
 		if (mOutputFd < 0) return false;
 		if (!mCodecStarted) return false;
+		if (mConfig.AudioConfig.bEnableAudio && !mAudioCodecStarted) return false;
 		
 		return true;
 	}
@@ -449,6 +529,72 @@ void FVdjmAndroidRecordSession::Clear()
 	Terminate();
 	mConfig.Clear();
 	mOwnerEncoderImpl = nullptr;
+}
+
+bool FVdjmAndroidRecordSession::AudioInit()
+{
+	if (!mConfig.AudioConfig.bEnableAudio)
+	{
+		return true;
+	}
+
+	mAudioCodec = AMediaCodec_createEncoderByType(TCHAR_TO_UTF8(*mConfig.AudioConfig.AudioMimeType));
+	if (mAudioCodec == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::AudioInit - Failed to create audio codec by type: %s"),
+			*mConfig.AudioConfig.AudioMimeType);
+		return false;
+	}
+
+	AMediaFormat* format = AMediaFormat_new();
+	if (format == nullptr)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::AudioInit - AMediaFormat_new failed."));
+		return false;
+	}
+
+	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, TCHAR_TO_UTF8(*mConfig.AudioConfig.AudioMimeType));
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_SAMPLE_RATE, mConfig.AudioConfig.AudioSampleRate);
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_CHANNEL_COUNT, mConfig.AudioConfig.AudioChannelCount);
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_BIT_RATE, mConfig.AudioConfig.AudioBitrate);
+	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_AAC_PROFILE, mConfig.AudioConfig.AudioAacProfile);
+
+	const media_status_t status = AMediaCodec_configure(
+		mAudioCodec,
+		format,
+		nullptr,
+		nullptr,
+		AMEDIACODEC_CONFIGURE_FLAG_ENCODE);
+	AMediaFormat_delete(format);
+
+	if (status != AMEDIA_OK)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::AudioInit - AMediaCodec_configure failed. status=%d"), status);
+		return false;
+	}
+
+	return true;
+}
+
+bool FVdjmAndroidRecordSession::AudioStart()
+{
+	if (!mConfig.AudioConfig.bEnableAudio)
+	{
+		return true;
+	}
+	if (mAudioCodec == nullptr)
+	{
+		return false;
+	}
+
+	const media_status_t status = AMediaCodec_start(mAudioCodec);
+	if (status != AMEDIA_OK)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::AudioStart - AMediaCodec_start failed. status=%d"), status);
+		return false;
+	}
+	mAudioCodecStarted = true;
+	return true;
 }
 
 /*
@@ -502,33 +648,76 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoderExtended(const TWeakObjectPtr<UVd
 	
 	if (const UVdjmRecordAndroidResource* androidRecordRes = Cast<UVdjmRecordAndroidResource>(recordResource.Get()))
 	{
-		/*
-		 * TODO(260410-cofigs): 위치 검증 OK (EncoderImpl 내부 config snapshot 생성 지점)
-		 * - androidRecordRes -> mConfig(FVdjmAndroidEncoderConfigure) 매핑을 여기서 1회 수행한다.
-		 * - 추가 권장 매핑:
-		 *   1) Video: OutputFilePath, Width/Height, Bitrate, FPS, GraphicBackend
-		 *   2) Audio: bEnableAudio, SampleRate, ChannelCount, Bitrate, DriftToleranceMs, AudioSourceId
-		 *   3) RuntimePolicy: RequireAVSync/AllowedDriftMs/BothTracksReady를 Android Audio 정책으로 투영
-		 * - 검증 포인트:
-		 *   a) mConfig.IsValidateEncoderArguments() 실패 시 상세 필드 로그
-		 *   b) StartEncoder() 이후 mConfig immutability 보장(외부 resource 재참조 금지)
-		 */
-				
 		if (not androidRecordRes->DbcIsInitializedResource())
 		{
 			UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderImpl::InitializeEncoderExtended - Android record resource is not initialized."));
 			return false;
 		}
-		
-		
-		
+
+		FVdjmAndroidEncoderSnapshot snapshot;
+		if (!BuildSnapshotFromResource(*androidRecordRes, snapshot))
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderImpl::InitializeEncoderExtended - Failed to build snapshot from resource."));
+			return false;
+		}
+		mConfig = MoveTemp(snapshot);
+		return mConfig.IsValidateEncoderArguments();
 	}
 	else
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderImpl::InitializeEncoderExtended - Record resource is not of type UVdjmRecordAndroidResource."));
 		return false;
 	}
-	
+
+	return false;
+}
+
+bool FVdjmAndroidEncoderImpl::BuildSnapshotFromResource(const UVdjmRecordAndroidResource& androidRecordResource,
+	FVdjmAndroidEncoderSnapshot& outSnapshot) const
+{
+	outSnapshot.Clear();
+
+	outSnapshot.VideoConfig.OutputFilePath = androidRecordResource.FinalFilePath;
+	outSnapshot.VideoConfig.VideoWidth = androidRecordResource.OriginResolution.X;
+	outSnapshot.VideoConfig.VideoHeight = androidRecordResource.OriginResolution.Y;
+	outSnapshot.VideoConfig.VideoBitrate = androidRecordResource.FinalBitrate;
+	outSnapshot.VideoConfig.VideoFPS = androidRecordResource.FinalFrameRate;
+	outSnapshot.VideoConfig.GraphicBackend = IsVulkanRHI()
+		? EVdjmAndroidGraphicBackend::EVulkan
+		: (IsOpenGlESRHI() ? EVdjmAndroidGraphicBackend::EOpenGL : EVdjmAndroidGraphicBackend::EUnknown);
+	outSnapshot.VideoConfig.MimeType = DefaultMimeType;
+
+	if (androidRecordResource.LinkedResolver.IsValid())
+	{
+		const UVdjmRecordEnvResolver* resolver = androidRecordResource.LinkedResolver.Get();
+		if (const FVdjmEncoderInitRequestVideo* videoConfig = resolver->TryGetResolvedVideoConfig())
+		{
+			outSnapshot.VideoConfig.MimeType = videoConfig->MimeType.IsEmpty() ? DefaultMimeType : videoConfig->MimeType;
+			outSnapshot.VideoConfig.VideoIntervalSec = FMath::Max(1, videoConfig->KeyframeInterval);
+		}
+		if (const FVdjmEncoderInitRequestAudio* audioConfig = resolver->TryGetResolvedAudioConfig())
+		{
+			outSnapshot.AudioConfig.bEnableAudio = audioConfig->bEnableInternalAudioCapture;
+			outSnapshot.AudioConfig.AudioSampleRate = audioConfig->SampleRate;
+			outSnapshot.AudioConfig.AudioChannelCount = audioConfig->ChannelCount;
+			outSnapshot.AudioConfig.AudioBitrate = audioConfig->Bitrate;
+			outSnapshot.AudioConfig.AudioAacProfile = audioConfig->AacProfile;
+			outSnapshot.AudioConfig.AudioMimeType = audioConfig->AudioMimeType;
+			outSnapshot.AudioConfig.AudioSourceId = audioConfig->SourceSubMixName.ToString();
+		}
+		if (const FVdjmEncoderInitRequestRuntimePolicy* runtimePolicy = resolver->TryGetResolvedRuntimePolicyConfig())
+		{
+			outSnapshot.AudioConfig.bAudioRequired = runtimePolicy->bRequireAVSync;
+			outSnapshot.AudioConfig.AudioDriftToleranceMs = runtimePolicy->AllowedDriftMs;
+		}
+	}
+
+	if (outSnapshot.VideoConfig.VideoIntervalSec <= 0)
+	{
+		outSnapshot.VideoConfig.VideoIntervalSec = 1;
+	}
+
+	return outSnapshot.IsValidateEncoderArguments();
 }
 
 VdjmResult FVdjmAndroidEncoderImpl::StartEncoder()
