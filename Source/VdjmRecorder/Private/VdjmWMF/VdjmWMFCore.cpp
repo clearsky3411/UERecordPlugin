@@ -42,9 +42,9 @@ void UVdjmRecordWMFResource::InitializeTexturePool(FIntPoint textureResolution, 
 	}
 }
 
-bool UVdjmRecordWMFResource::InitializeResourceExtended(UVdjmRecordEnvResolver* resolver)
+bool UVdjmRecordWMFResource::InitializeResource(UVdjmRecordEnvResolver* resolver)
 {
-	if (Super::InitializeResourceExtended(resolver))
+	if (Super::InitializeResource(resolver))
 	{
 		FVdjmEncoderStatus::DbcRenderThreadTask(
 		[

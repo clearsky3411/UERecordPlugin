@@ -982,64 +982,64 @@ namespace VdjmRecordUtils
 			return Fps;
 		}
 		inline FString ResolveOutputPath(
-		EVdjmRecordEnvPlatform InPlatform,
-		const FString& InRequestedPath,
-		const FString& InCustomFileName,
-		const FString& InSessionId,
+		EVdjmRecordEnvPlatform inPlatform,
+		const FString& inRequestedPath,
+		const FString& inCustomFileName,
+		const FString& inSessionId,
 		const bool bOverwriteExists,
-		const TCHAR* DebugOwner)
+		const TCHAR* debugOwner)
 		{
-			const FString BaseDir = FilePaths::GetPlatformRecordBaseDir(InPlatform);
+			const FString BaseDir = FilePaths::GetPlatformRecordBaseDir(inPlatform);
 
-			FString CandidatePath = InRequestedPath;
-			CandidatePath.TrimStartAndEndInline();
+			FString candiPath = inRequestedPath;
+			candiPath.TrimStartAndEndInline();
 
-			if (CandidatePath.IsEmpty())
+			if (candiPath.IsEmpty())
 			{
-				const FString BaseName = FilePaths::MakeSafeBaseName(InCustomFileName, InSessionId);
-				CandidatePath = FPaths::Combine(
+				const FString BaseName = FilePaths::MakeSafeBaseName(inCustomFileName, inSessionId);
+				candiPath = FPaths::Combine(
 					BaseDir,
 					FString::Printf(TEXT("%s_%lld.mp4"), *BaseName, FDateTime::Now().GetTicks()));
 			}
 			else
 			{
-				if (FPaths::IsRelative(CandidatePath))
+				if (FPaths::IsRelative(candiPath))
 				{
-					CandidatePath = FPaths::Combine(BaseDir, CandidatePath);
+					candiPath = FPaths::Combine(BaseDir, candiPath);
 				}
 
-				const FString Dir = FPaths::GetPath(CandidatePath);
-				const FString BaseName = FPaths::GetBaseFilename(CandidatePath, false);
-				CandidatePath = FPaths::Combine(Dir, BaseName + TEXT(".mp4"));
+				const FString Dir = FPaths::GetPath(candiPath);
+				const FString BaseName = FPaths::GetBaseFilename(candiPath, false);
+				candiPath = FPaths::Combine(Dir, BaseName + TEXT(".mp4"));
 			}
 
-			FString SafePath;
-			if (!Validations::DbcValidateOutputFilePath(CandidatePath, SafePath, DebugOwner))
+			FString safePath;
+			if (!Validations::DbcValidateOutputFilePath(candiPath, safePath, debugOwner))
 			{
 				return FString();
 			}
 
-			if (!bOverwriteExists && IFileManager::Get().FileExists(*SafePath))
+			if (!bOverwriteExists && IFileManager::Get().FileExists(*safePath))
 			{
-				const FString Dir = FPaths::GetPath(SafePath);
-				const FString BaseName = FPaths::GetBaseFilename(SafePath, false);
+				const FString safeDir = FPaths::GetPath(safePath);
+				const FString baseName = FPaths::GetBaseFilename(safePath, false);
 
 				const FString UniquePath = FPaths::Combine(
-					Dir,
-					FString::Printf(TEXT("%s_%lld.mp4"), *BaseName, FDateTime::Now().GetTicks()));
+					safeDir,
+					FString::Printf(TEXT("%s_%lld.mp4"), *baseName, FDateTime::Now().GetTicks()));
 
-				FString UniqueSafePath;
+				FString uniqueSafePath;
 				if (!Validations::DbcValidateOutputFilePath(
 					UniquePath,
-					UniqueSafePath,
-					DebugOwner))
+					uniqueSafePath,
+					debugOwner))
 				{
 					return FString();
 				}
 
-				SafePath = MoveTemp(UniqueSafePath);
+				safePath = MoveTemp(uniqueSafePath);
 			}
-			return SafePath;
+			return safePath;
 		}
 		inline int32 ResolveAudioBitrateBps(
 			const int32 InSampleRate,
