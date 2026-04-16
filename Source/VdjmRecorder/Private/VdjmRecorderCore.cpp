@@ -642,8 +642,8 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 	}
 
 	const UVdjmRecordEnvDataAsset* ConfigAsset = LinkedOwnerBridge->GetRecordEnvConfigureDataAsset();
-	const int32 MaxFrameRate =
-		ConfigAsset ? FMath::Max(1, ConfigAsset->GlobalRules.MaxFrameRate) : 60;
+	const FVdjmRecordGlobalRules ActiveRules = ConfigAsset ? ConfigAsset->GlobalRules : FVdjmRecordGlobalRules();
+	const int32 SafeDisplayRefreshHz = FMath::Max(1, ActiveRules.MaxFrameRate);
 
 	const FString CustomFileName = LinkedOwnerBridge->GetCurrentFileName();
 
@@ -663,27 +663,27 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 
 		const FIntPoint TierMaxResolution =
 			VdjmRecordUtils::FeaturePresets::GetPresetFeatureResolution(FMath::Max(0, CandidateTierIndex));
+		const FIntPoint PresetResolution(CandidateRequest.VideoConfig.Width, CandidateRequest.VideoConfig.Height);
+		const FIntPoint SafeResolution = VdjmRecordUtils::Resolvers::ResolveVideoResolution(
+			ViewportSize,
+			PresetResolution,
+			CandidateRequest.VideoConfig.bResolutionFitToDisplay,
+			TierMaxResolution);
 
-		const FIntPoint RawRequestedResolution =
-			CandidateRequest.VideoConfig.bResolutionFitToDisplay
-				? ViewportSize
-				: FIntPoint(CandidateRequest.VideoConfig.Width, CandidateRequest.VideoConfig.Height);
+		const int32 SafeFrameRate = VdjmRecordUtils::Resolvers::ResolveVideoFrameRate(
+			CandidateRequest.VideoConfig.FrameRate,
+			ActiveRules,
+			SafeDisplayRefreshHz);
 
-		const FIntPoint FittedResolution =
-			 VdjmRecordUtils::VideoResolution::FitResolutionWithin(RawRequestedResolution, TierMaxResolution);
-
-		FIntPoint SafeResolution;
-		if (!VdjmRecordUtils::Validations::DbcValidateResolution(
-			FittedResolution,
+		const int32 ResolvedBitrateByTheory = VdjmRecordUtils::Resolvers::ResolveVideoBitrateBps(
 			SafeResolution,
-			TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform")))
-		{
-			return false;
-		}
+			SafeFrameRate,
+			CandidateTier,
+			EVdjmRecordContentComplexity::EGameplay);
 
 		int32 SafeBitrate = 0;
 		if (!VdjmRecordUtils::Validations::DbcValidateBitrate(
-			CandidateRequest.VideoConfig.Bitrate,
+			ResolvedBitrateByTheory,
 			SafeBitrate,
 			TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform")))
 		{
@@ -692,9 +692,37 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 
 		CandidateRequest.VideoConfig.Width = SafeResolution.X;
 		CandidateRequest.VideoConfig.Height = SafeResolution.Y;
+		CandidateRequest.VideoConfig.FrameRate = SafeFrameRate;
 		CandidateRequest.VideoConfig.Bitrate = SafeBitrate;
-		CandidateRequest.VideoConfig.FrameRate =
-			FMath::Min(FMath::Max(1, CandidateRequest.VideoConfig.FrameRate), MaxFrameRate);
+
+		CandidateRequest.AudioConfig.ChannelCount = FMath::Clamp(CandidateRequest.AudioConfig.ChannelCount, 1, 2);
+		const int32 RequestedSampleRate = CandidateRequest.AudioConfig.SampleRate;
+		if (RequestedSampleRate <= 0)
+		{
+			CandidateRequest.AudioConfig.SampleRate = 44100;
+		}
+		else if (RequestedSampleRate > 48000)
+		{
+			CandidateRequest.AudioConfig.SampleRate = 48000;
+		}
+		else if (RequestedSampleRate >= 44100)
+		{
+			CandidateRequest.AudioConfig.SampleRate = 44100;
+		}
+		else if (RequestedSampleRate >= 32000)
+		{
+			CandidateRequest.AudioConfig.SampleRate = 32000;
+		}
+		else
+		{
+			CandidateRequest.AudioConfig.SampleRate = 44100;
+		}
+
+		const bool bMusicHeavy = CandidateRequest.AudioConfig.ChannelCount >= 2;
+		CandidateRequest.AudioConfig.Bitrate = VdjmRecordUtils::Resolvers::ResolveAudioBitrateBps(
+			CandidateRequest.AudioConfig.SampleRate,
+			CandidateRequest.AudioConfig.ChannelCount,
+			bMusicHeavy);
 
 		FVdjmRecordEnvPlatformPreset CandidatePreset = *presetData;
 		CandidatePreset.EncoderInitRequestMap.FindOrAdd(CandidateTier) = CandidateRequest;
@@ -1527,7 +1555,45 @@ bool AVdjmRecordBridgeActor::EvaluateInitRequest(const FVdjmEncoderInitRequest* 
 	{
 		return false;
 	}
-	return initPreset->EvaluateValidation();
+	if (!initPreset->EvaluateValidation())
+	{
+		return false;
+	}
+
+	const FVdjmEncoderInitRequestVideo& VideoConfig = initPreset->VideoConfig;
+	const FVdjmEncoderInitRequestAudio& AudioConfig = initPreset->AudioConfig;
+
+	FIntPoint SafeResolution;
+	if (!VdjmRecordUtils::Validations::DbcValidateResolution(
+		FIntPoint(VideoConfig.Width, VideoConfig.Height),
+		SafeResolution,
+		TEXT("AVdjmRecordBridgeActor::EvaluateInitRequest")))
+	{
+		return false;
+	}
+
+	FIntPoint ViewportSize;
+	if (TryResolveViewportSize(ViewportSize) && ViewportSize.X > 0 && ViewportSize.Y > 0)
+	{
+		const int64 RequestedPixels = static_cast<int64>(SafeResolution.X) * static_cast<int64>(SafeResolution.Y);
+		const int64 ViewportPixels = static_cast<int64>(ViewportSize.X) * static_cast<int64>(ViewportSize.Y);
+		if (RequestedPixels > (ViewportPixels * 4))
+		{
+			UE_LOG(LogVdjmRecorderCore, Warning,
+				TEXT("AVdjmRecordBridgeActor::EvaluateInitRequest - Request is too large for current viewport. Req=%dx%d View=%dx%d"),
+				SafeResolution.X, SafeResolution.Y, ViewportSize.X, ViewportSize.Y);
+			return false;
+		}
+	}
+
+	if (!VdjmRecordUtils::Validations::DbcValidateAudioConfig(
+		AudioConfig,
+		TEXT("AVdjmRecordBridgeActor::EvaluateInitRequest")))
+	{
+		return false;
+	}
+
+	return true;
 }
 
 bool AVdjmRecordBridgeActor::TryResolveViewportSize(FIntPoint& OutSize) const

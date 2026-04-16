@@ -1030,7 +1030,12 @@ public:
 	UFUNCTION(BlueprintCallable)
 	FString GetCurrentFileName() const
 	{
-		return FString();
+		return mCurrentCustomFileName;
+	}
+	UFUNCTION(BlueprintCallable)
+	void SetCurrentFileName(const FString& newFileName)
+	{
+		mCurrentCustomFileName = newFileName;
 	}
 	
 	UFUNCTION(BlueprintCallable)
@@ -1242,6 +1247,8 @@ protected:
 	
 	//	TODO(20260410 env control) - 
 	EVdjmRecordQualityTiers mCurrentQualityTier = EVdjmRecordQualityTiers::EDefault;	//	추후에 옵션을 바꿀 수 있는 인터페이스에 노출될 놈임.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Record|Output", meta=(AllowPrivateAccess="true"))
+	FString mCurrentCustomFileName;
 	UPROPERTY()
 	TObjectPtr<UVdjmRecordEnvResolver> mEnvResolver;
 };
