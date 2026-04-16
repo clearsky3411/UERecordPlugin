@@ -1392,15 +1392,17 @@ void AVdjmRecordBridgeActor::StartRecording()
 {
 	if(DbcRecordStartable())
 	{
-		bIsRecording = true;
-
 		if (!mEnvResolver->RefreshResolvedOutputPath())
 		{
-			UE_LOG(LogVdjmRecorderCore, Warning, TEXT("StartRecording - Failed to refresh resolved output path."));
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("StartRecording - Failed to refresh resolved output path."));
+			bIsRecording = false;
+			return;
 		}
 		if (mRecordResource != nullptr && !mRecordResource->UpdateFinalFilePathFromResolver())
 		{
-			UE_LOG(LogVdjmRecorderCore, Warning, TEXT("StartRecording - Failed to update resource final file path from resolver."));
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("StartRecording - Failed to update resource final file path from resolver."));
+			bIsRecording = false;
+			return;
 		}
 		
 		const FVdjmEncoderInitRequestVideo* videoConfig = mEnvResolver->TryGetResolvedVideoConfig();
@@ -1411,6 +1413,7 @@ void AVdjmRecordBridgeActor::StartRecording()
 		if (videoConfig == nullptr || audioConfig == nullptr || outputConfig == nullptr)
 		{
 			UE_LOG(LogVdjmRecorderCore, Error, TEXT("StartRecording - Resolved configs are invalid."));
+			bIsRecording = false;
 			return;
 		}
 
@@ -1447,6 +1450,7 @@ void AVdjmRecordBridgeActor::StartRecording()
 		else
 		{
 			UE_LOG(LogTemp, Warning, TEXT("Cannot start recording: Slate application not initialized"));
+			bIsRecording = false;
 			return;
 		}
 	}
