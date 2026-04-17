@@ -234,7 +234,7 @@ public:
 	bool InitializeSurfaceState(
 		const FVdjmVkRecoderHandles& vkHandles,
 		ANativeWindow* inputWindow,
-		const FVdjmAndroidEncoderConfigure& config);
+		const FVdjmAndroidEncoderSnapshot& config);
 
 	void ReleaseSurfaceState(const FVdjmVkRecoderHandles& vkHandles);
 
@@ -339,7 +339,7 @@ private:
 
 	bool CreateSwapchain(
 		const FVdjmVkRecoderHandles& vkHandles,
-		const FVdjmAndroidEncoderConfigure& config);
+		const FVdjmAndroidEncoderSnapshot& config);
 
 	bool CreatePerFrameResources(const FVdjmVkRecoderHandles& vkHandles);
 
@@ -448,7 +448,7 @@ public:
 	FVdjmAndroidEncoderBackendVulkan();
 	virtual ~FVdjmAndroidEncoderBackendVulkan() override = default;
 	
-	virtual bool Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow) override;
+	virtual bool Init(const FVdjmAndroidEncoderSnapshot& config, ANativeWindow* inputWindow) override;
 	virtual bool Start() override;
 	virtual void Stop() override;
 	virtual void Terminate() override;
@@ -456,7 +456,7 @@ public:
 	virtual bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec) override;
 
 private:
-	FVdjmAndroidEncoderConfigure mConfig;
+	FVdjmAndroidEncoderSnapshot mConfig;
 	bool mInitialized = false;
 	bool mStarted = false;
 	bool mPaused = false;
