@@ -3,7 +3,7 @@
 
 #include "VdjmAndroid/VdjmAndroidEncoderBackendOpenGL.h"
 #if PLATFORM_ANDROID || defined(__RESHARPER__)
-bool FVdjmAndroidEncoderBackendOpenGL::Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow)
+bool FVdjmAndroidEncoderBackendOpenGL::Init(const FVdjmAndroidEncoderSnapshot& config, ANativeWindow* inputWindow)
 {
 	if (config.IsValidateEncoderArguments() && inputWindow != nullptr)
 	{
@@ -161,7 +161,7 @@ bool FVdjmAndroidEncoderBackendOpenGL::Running(FRHICommandList& RHICmdList, cons
 		return false;
 	}
 
-	glViewport(0, 0, mConfig.VideoWidth, mConfig.VideoHeight);
+	glViewport(0, 0, mConfig.VideoConfig.VideoWidth, mConfig.VideoConfig.VideoHeight);
 	glDisable(GL_BLEND);
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_CULL_FACE);

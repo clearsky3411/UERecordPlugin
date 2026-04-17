@@ -23,7 +23,7 @@ class VDJMRECORDER_API UVdjmRecordWMFResource : public UVdjmRecordResource
 public:
 	void InitializeTexturePool(FIntPoint textureResolution,EPixelFormat finalPixelFormat, const int32 poolSize);
 	
-	virtual bool InitializeResourceExtended(UVdjmRecordEnvResolver* resolver) override;
+	virtual bool InitializeResource(UVdjmRecordEnvResolver* resolver) override;
 	virtual void ReleaseResources() override;
 	virtual void ResetResource() override;
 	
@@ -153,7 +153,7 @@ class VDJMRECORDER_API UVdjmRecordWMFUnitDefaultPipeline : public UVdjmRecordUni
 	GENERATED_BODY()
 
 public:
-	virtual void InitializeRecordPipeline(UVdjmRecordResource* recordResource) override;
+	virtual bool InitializeRecordPipeline(UVdjmRecordResource* recordResource) override;
 	virtual void ExecuteRecordPipeline(const FVdjmRecordUnitParamContext& context,
 		FVdjmRecordUnitParamPayload& payload) override;
 	virtual void StopRecordPipelineExecution() override;
