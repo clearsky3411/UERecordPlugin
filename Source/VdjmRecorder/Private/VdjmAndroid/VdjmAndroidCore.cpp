@@ -49,6 +49,19 @@ void UVdjmRecordAndroidResource::BeginDestroy()
 	Super::BeginDestroy();
 }
 
+bool UVdjmRecordAndroidResource::IsLazyPostInitializeCheck() const
+{
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordAndroidResource::IsLazyPostInitializeCheck - Returning true for lazy post-initialization check."));
+	return true;
+}
+
+FString UVdjmRecordAndroidResource::ToString() const
+{
+	FString superString =  Super::ToString();
+	superString += FString::Printf(TEXT("\nUVdjmRecordAndroidResource - This resource is specific to Android recording and may have platform-specific behaviors."));
+	return superString;
+}
+
 void UVdjmRecordAndroidUnit::ReleaseRecordPrevStartDelegate()
 {
 	if (AVdjmRecordBridgeActor* bridge = AVdjmRecordBridgeActor::TryGetRecordBridgeActor())
