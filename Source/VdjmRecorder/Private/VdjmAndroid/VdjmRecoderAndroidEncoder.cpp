@@ -214,6 +214,8 @@ bool FVdjmAndroidRecordSession::Start()
 	mMuxerStarted = false;
 	mTrackIndex = -1;
 	mEosSent = false;
+	mFirstVideoPtsUs = -1;
+	mFirstAudioPtsUs = -1;
 	if (not mGraphicBackend->Start())
 	{
 		Terminate();
@@ -380,7 +382,14 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 
 			if (outBuffer && bufferInfo.size > 0 && mMuxerStarted)
 			{
-				AMediaMuxer_writeSampleData(mMuxer, mTrackIndex, outBuffer, &bufferInfo);
+				if (mFirstVideoPtsUs < 0)
+				{
+					mFirstVideoPtsUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs);
+				}
+
+				AMediaCodecBufferInfo normalizedInfo = bufferInfo;
+				normalizedInfo.presentationTimeUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs - mFirstVideoPtsUs);
+				AMediaMuxer_writeSampleData(mMuxer, mTrackIndex, outBuffer, &normalizedInfo);
 			}
 
 			AMediaCodec_releaseOutputBuffer(mCodec, outputIndex, false);
@@ -439,7 +448,14 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 
 			if (outBuffer && bufferInfo.size > 0 && mMuxerStarted && mAudioTrackIndex >= 0)
 			{
-				AMediaMuxer_writeSampleData(mMuxer, mAudioTrackIndex, outBuffer, &bufferInfo);
+				if (mFirstAudioPtsUs < 0)
+				{
+					mFirstAudioPtsUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs);
+				}
+
+				AMediaCodecBufferInfo normalizedInfo = bufferInfo;
+				normalizedInfo.presentationTimeUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs - mFirstAudioPtsUs);
+				AMediaMuxer_writeSampleData(mMuxer, mAudioTrackIndex, outBuffer, &normalizedInfo);
 			}
 
 			AMediaCodec_releaseOutputBuffer(mAudioCodec, outputIndex, false);
@@ -579,6 +595,8 @@ void FVdjmAndroidRecordSession::Terminate()
 	mEosSent = false;
 	mRunning = false;
 	mInitialized = false;
+	mFirstVideoPtsUs = -1;
+	mFirstAudioPtsUs = -1;
 }
 
 bool FVdjmAndroidRecordSession::IsValidSession() const

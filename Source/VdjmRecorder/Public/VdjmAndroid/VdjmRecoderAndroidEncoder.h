@@ -126,6 +126,8 @@ public:
 		bool mMuxerStarted = false;
 		bool mEosSent = false;
 		int64 mNextAudioPtsUs = 0;
+		int64 mFirstVideoPtsUs = -1;
+		int64 mFirstAudioPtsUs = -1;
 		bool bAudioInputWarningLogged = false;
 		TSharedPtr<class FVdjmAndroidAudioCaptureBridge, ESPMode::ThreadSafe> mAudioCaptureBridge;
 	
