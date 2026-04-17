@@ -18,6 +18,7 @@
 #include "RHI.h"
 #include "Engine/Engine.h"
 #include "AudioDevice.h"
+#include "ISubmixBufferListener.h"
 #include "Sound/SoundSubmix.h"
 #include "VdjmAndroid/VdjmAndroidCore.h"
 
