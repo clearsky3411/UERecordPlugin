@@ -733,7 +733,7 @@ bool FVdjmAndroidRecordSession::AudioInit()
 
 	if (!mAudioCaptureBridge.IsValid())
 	{
-		mAudioCaptureBridge = MakeUnique<FVdjmAndroidAudioCaptureBridge>();
+		mAudioCaptureBridge = MakeShared<FVdjmAndroidAudioCaptureBridge, ESPMode::ThreadSafe>();
 	}
 
 	if (GEngine != nullptr)

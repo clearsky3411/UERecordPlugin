@@ -127,7 +127,7 @@ public:
 		bool mEosSent = false;
 		int64 mNextAudioPtsUs = 0;
 		bool bAudioInputWarningLogged = false;
-		TUniquePtr<class FVdjmAndroidAudioCaptureBridge> mAudioCaptureBridge;
+		TSharedPtr<class FVdjmAndroidAudioCaptureBridge, ESPMode::ThreadSafe> mAudioCaptureBridge;
 	
 	TWeakPtr<FVdjmAndroidEncoderImpl> mOwnerEncoderImpl;
 	TUniquePtr<FVdjmAndroidEncoderBackend> mGraphicBackend;
