@@ -94,12 +94,12 @@ class VDJMRECORDER_API UVdjmAndroidRecordPipeline : public UVdjmRecordUnitPipeli
 	GENERATED_BODY()
 
 public:
-	virtual void InitializeRecordPipeline(UVdjmRecordResource* recordResource) override;
+	virtual bool InitializeRecordPipeline(UVdjmRecordResource* recordResource) override;
 	virtual void ExecuteRecordPipeline(const FVdjmRecordUnitParamContext& context,
 		FVdjmRecordUnitParamPayload& payload) override;
 	virtual void StopRecordPipelineExecution() override;
 	virtual void ReleaseRecordPipeline() override;
-	virtual bool DbcIsValid() const override;
+	virtual bool DbcIsValidPipelineInit() const override;
 	
 	bool ValidateForAndroidPipeline(FVdjmRecordEnvPlatformInfo* platformInfo) const;
 };

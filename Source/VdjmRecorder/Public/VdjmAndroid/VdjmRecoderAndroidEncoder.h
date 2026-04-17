@@ -18,6 +18,7 @@
 struct ANativeWindow;
 class FVdjmAndroidEncoderImpl;
 class FVdjmAndroidRecordSession;
+class UVdjmRecordAndroidResource;
 
 
 
@@ -53,7 +54,7 @@ public:
 	FVdjmAndroidEncoderBackend();
 	virtual ~FVdjmAndroidEncoderBackend();
 	
-	virtual bool Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow) = 0;
+	virtual bool Init(const FVdjmAndroidEncoderSnapshot& config, ANativeWindow* inputWindow) = 0;
 	virtual bool Start() = 0;
 	
 	virtual bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec);
@@ -77,7 +78,7 @@ public:
 	FVdjmAndroidRecordSession();
 	virtual ~FVdjmAndroidRecordSession();
 	
-	bool Initialize(const FVdjmAndroidEncoderConfigure& configurer);
+	bool Initialize(const FVdjmAndroidEncoderSnapshot& configurer);
 	bool Start();
 	void Drain(bool bEndOfStream);
 	bool Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture, double timeStampSec);
@@ -99,22 +100,29 @@ public:
 	AMediaMuxer* GetMediaMuxer() { return mMuxer; }
 	AMediaCodec* GetMediaCodec() { return mCodec; }
 	
-	const FVdjmAndroidEncoderConfigure& getConfig() const { return mConfig; }
+	const FVdjmAndroidEncoderSnapshot& getConfig() const { return mConfig; }
 	
-protected:
-	FVdjmAndroidEncoderConfigure mConfig;
-	AMediaCodec* mCodec = nullptr;
-	AMediaMuxer* mMuxer = nullptr;
+	protected:
+		bool VideoInit();
+		bool AudioInit();
+		bool AudioStart();
+
+		FVdjmAndroidEncoderSnapshot mConfig;
+		AMediaCodec* mCodec = nullptr;
+		AMediaCodec* mAudioCodec = nullptr;
+		AMediaMuxer* mMuxer = nullptr;
 	
 	ANativeWindow* mInputWindow = nullptr;
 	int32 mOutputFd = -1;
 	
-	int32 mTrackIndex = -1;
-	bool mInitialized = false;
-	bool mRunning = false;
-	bool mCodecStarted = false;
-	bool mMuxerStarted = false;
-	bool mEosSent = false;
+		int32 mTrackIndex = -1;
+		int32 mAudioTrackIndex = -1;
+		bool mInitialized = false;
+		bool mRunning = false;
+		bool mCodecStarted = false;
+		bool mAudioCodecStarted = false;
+		bool mMuxerStarted = false;
+		bool mEosSent = false;
 	
 	TWeakPtr<FVdjmAndroidEncoderImpl> mOwnerEncoderImpl;
 	TUniquePtr<FVdjmAndroidEncoderBackend> mGraphicBackend;
@@ -152,11 +160,13 @@ public:
 	
 	FString DefaultMimeType = "video/avc";
 
-private:
-	TSharedPtr<FVdjmAndroidRecordSession> mRecordSession;
+	private:
+		TSharedPtr<FVdjmAndroidRecordSession> mRecordSession;
+		bool BuildSnapshotFromResource(const UVdjmRecordAndroidResource& androidRecordResource,
+			FVdjmAndroidEncoderSnapshot& outSnapshot) const;
 
-	FVdjmAndroidEncoderConfigure mConfig;
-};
+		FVdjmAndroidEncoderSnapshot mConfig;
+	};
 
 
 #endif
