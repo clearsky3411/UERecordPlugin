@@ -991,6 +991,10 @@ namespace VdjmRecordUtils
 			{
 				FString BaseDir = FilePaths::GetPlatformRecordBaseDir(inPlatform);
 				FPaths::NormalizeFilename(BaseDir);
+				while (BaseDir.EndsWith(TEXT("/")))
+				{
+					BaseDir.LeftChopInline(1, EAllowShrinking::No);
+				}
 
 				FString candiPath = inRequestedPath;
 				candiPath.TrimStartAndEndInline();
@@ -1005,6 +1009,10 @@ namespace VdjmRecordUtils
 					if (AndroidBaseNoLeadingSlash.StartsWith(TEXT("/")))
 					{
 						AndroidBaseNoLeadingSlash.RightChopInline(1, EAllowShrinking::No);
+					}
+					while (AndroidBaseNoLeadingSlash.EndsWith(TEXT("/")))
+					{
+						AndroidBaseNoLeadingSlash.LeftChopInline(1, EAllowShrinking::No);
 					}
 
 					if (!AndroidBaseNoLeadingSlash.IsEmpty())

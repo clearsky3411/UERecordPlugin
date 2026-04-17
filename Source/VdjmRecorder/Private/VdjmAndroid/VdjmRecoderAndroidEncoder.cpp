@@ -839,7 +839,14 @@ bool FVdjmAndroidEncoderImpl::BuildSnapshotFromResource(const UVdjmRecordAndroid
 			outSnapshot.AudioConfig.bAudioRequired = runtimePolicy->bRequireAVSync;
 			outSnapshot.AudioConfig.AudioDriftToleranceMs = runtimePolicy->AllowedDriftMs;
 		}
-	}
+			if (outSnapshot.AudioConfig.bEnableAudio)
+			{
+				UE_LOG(LogVdjmRecorderCore, Warning,
+					TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Internal audio capture input path is not wired yet on Android. Forcing video-only recording."));
+				outSnapshot.AudioConfig.bEnableAudio = false;
+				outSnapshot.AudioConfig.bAudioRequired = false;
+			}
+		}
 
 	if (outSnapshot.VideoConfig.VideoIntervalSec <= 0)
 	{
