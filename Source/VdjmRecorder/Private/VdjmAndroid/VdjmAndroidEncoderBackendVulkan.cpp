@@ -1447,6 +1447,7 @@ FVdjmAndroidEncoderBackendVulkan::FVdjmAndroidEncoderBackendVulkan()
 
 bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderSnapshot& config, ANativeWindow* inputWindow)
 {
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("FVdjmAndroidEncoderBackendVulkan::Init - Initializing Vulkan encoder backend with config: %s"), *config.ToString());
 	if (not config.IsValidateEncoderArguments() || inputWindow == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderBackendVulkan::Init - Invalid encoder configuration or input window is null."));

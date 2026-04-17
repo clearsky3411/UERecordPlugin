@@ -441,6 +441,8 @@ public:
 	virtual FTextureRHIRef GetCurrPooledTextureRHI()PURE_VIRTUAL(UVdjmRecordResource::GetCurrPooledTextureRHI, return nullptr; );
 	virtual FTextureRHIRef GetNextPooledTextureRHI()PURE_VIRTUAL(UVdjmRecordResource::GetNextPooledTextureRHI, return nullptr; );
 	
+	virtual FString ToString() const { return FString::Printf(TEXT("UVdjmRecordResource - Status: %s"), *UEnum::GetValueAsString(CurrentResourceStatus)); }
+	
 	bool DbcIsValidResourceInit() const
 	{
 		return (LinkedOwnerBridge.IsValid());
