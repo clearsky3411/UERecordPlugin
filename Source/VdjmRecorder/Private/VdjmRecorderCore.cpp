@@ -576,6 +576,7 @@ UVdjmRecordResource* UVdjmRecordEnvResolver::CreateResolvedRecordResource(const 
 			newResource = nullptr;
 			return nullptr;
 		}
+		UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Successfully created and initialized record resource: %s"), *newResource->GetName());
 		return newResource;
 		
 	}
@@ -1940,7 +1941,7 @@ void AVdjmRecordBridgeActor::ChainInit_InitializeCurrentEnvironment()
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitErrorEnd);
 		return;
 	}
-	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_InitializeCurrentEnvironment - Environment resolver initialized successfully."));
 	OnTryChainInitNext(EVdjmRecordBridgeInitStep::ECreateRecordResource);
 }
 
@@ -1959,6 +1960,7 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitErrorEnd);
 		return;
 	}
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordResource - Platform preset found for target platform."));
 	//	해당 프리셋에 맞는 현재 티어를 가져온다.
 	const FVdjmEncoderInitRequest* initPreset = envPreset->GetEncoderInitRequest(mCurrentQualityTier);
 	if (initPreset == nullptr)
@@ -1967,14 +1969,14 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitErrorEnd);
 		return;
 	}
-	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordResource - Encoder init preset found for current quality tier."));
 	if (mRecordResource != nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("ChainInit_CreateRecordResource - Record resource already exists. Releasing existing resource before creating new one."));
 		mRecordResource->ReleaseResources();
 		mRecordResource = nullptr;
 	}
-	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordResource - Attempting to create record resource with environment resolver."));
 	//	resolver 통해서 record resource 생성 시도, 심지어 이 단계에서 데이터 에셋의 프리셋이 mResolvedPreset 로 변화함.
 	mRecordResource = mEnvResolver->CreateResolvedRecordResource(envPreset);
 	if (mRecordResource == nullptr)
@@ -1983,7 +1985,7 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
-	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordResource - Record resource created from environment resolver."));
 	if (not mRecordResource->DbcIsInitializedResource())
     {
     	UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to initialize record resource with resolver."));
@@ -1997,7 +1999,7 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
 	 * - mEnvResolver : 환경 리졸버 인스턴스가 생성되어 있고, InitResolverEnvironment 까지 호출되어 있음. 내부적으로 mResolvedPreset 이 업데이트 되어있음.
 	 * - mRecordResource : 환경 리졸버를 통해서 레코드 리소스가 생성되어 있음. 내부적으로 mRecordResource 가 업데이트 되어있음.
 	 */
-	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordResource - Record resource created successfully with environment resolver."));
 	OnTryChainInitNext(EVdjmRecordBridgeInitStep::EPostResourceInitResolve);
 }
 
@@ -2013,28 +2015,28 @@ void AVdjmRecordBridgeActor::ChainInit_PostResourceInitResolve()
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
-	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_PostResourceInitResolve - Environment resolver is valid after initialization."));
 	if (mRecordResource == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_PostResourceInitResolve - Record resource is null after initialization."));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
-	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_PostResourceInitResolve - Record resource is valid after initialization."));
 	if (not mEnvResolver->IsValidPreset() ||not mRecordResource->DbcIsInitializedResource())
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_PostResourceInitResolve - Environment resolver preset is not valid or record resource is not properly initialized after creation."));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
-	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_PostResourceInitResolve - Environment resolver preset is valid and record resource is properly initialized."));
 	if (not mRecordResource->IsLazyPostInitializeCheck())
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordResource - Record resource failed extended initialization with environment resolver."));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
-	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_PostResourceInitResolve - Record resource passed extended initialization checks with environment resolver."));
 	OnTryChainInitNext(EVdjmRecordBridgeInitStep::ECreatePipelines);
 }
 
@@ -2051,13 +2053,14 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordPipeline()
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
-	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordPipeline - Environment resolver is valid for creating record pipeline."));
 	if (mRecordResource == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Record resource is null. Cannot create record pipeline without valid record resource."));
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordPipeline - Record resource is valid for creating record pipeline."));
 	//	여기에서 pipeline 을 바인딩한다.
 	TSubclassOf<UVdjmRecordUnitPipeline> pipelineCls = mEnvResolver->TryGetResolvedPipelineClass();
 	if (pipelineCls == nullptr)
@@ -2066,14 +2069,14 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordPipeline()
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
-	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordPipeline - Resolved pipeline class from environment resolver: %s"), *pipelineCls->GetName());
 	if (not BindingRecordPipeline(pipelineCls,mRecordResource))
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Failed to bind record pipeline with class %s."), *pipelineCls->GetName());
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
-	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordPipeline - Record pipeline bound successfully with class %s."), *pipelineCls->GetName());
 	if (not mEnvResolver->InitComplete(this,mRecordResource,mRecordPipeline))
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("ChainInit_CreateRecordPipeline - Environment resolver is not valid after pipeline initialization. Transitioning to EInitError."));

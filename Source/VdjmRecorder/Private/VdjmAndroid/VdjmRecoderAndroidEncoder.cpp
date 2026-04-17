@@ -689,6 +689,7 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoderExtended(const TWeakObjectPtr<UVd
 bool FVdjmAndroidEncoderImpl::BuildSnapshotFromResource(const UVdjmRecordAndroidResource& androidRecordResource,
 	FVdjmAndroidEncoderSnapshot& outSnapshot) const
 {
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Building snapshot from resource: %s"), *androidRecordResource.ToString());
 	outSnapshot.Clear();
 
 	outSnapshot.VideoConfig.OutputFilePath = androidRecordResource.FinalFilePath;
@@ -730,8 +731,15 @@ bool FVdjmAndroidEncoderImpl::BuildSnapshotFromResource(const UVdjmRecordAndroid
 	{
 		outSnapshot.VideoConfig.VideoIntervalSec = 1;
 	}
-
-	return outSnapshot.IsValidateEncoderArguments();
+	
+	if (not outSnapshot.IsValidateEncoderArguments())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Built snapshot is invalid."));
+		return false;
+	}
+	
+	UE_LOG(LogVdjmRecorderCore, Log, TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Built snapshot: %s"), *outSnapshot.ToString());
+	return true;
 }
 
 VdjmResult FVdjmAndroidEncoderImpl::StartEncoder()

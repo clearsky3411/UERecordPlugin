@@ -28,7 +28,8 @@ public:
 	virtual FTextureRHIRef GetNextPooledTextureRHI() override;
 	virtual bool DbcIsValidResource() const override;
 	virtual void BeginDestroy() override;
-	
+	virtual bool IsLazyPostInitializeCheck() const override;
+	virtual FString ToString() const override;
 };
 
 
