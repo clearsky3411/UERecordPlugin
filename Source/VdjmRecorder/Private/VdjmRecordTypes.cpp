@@ -309,6 +309,17 @@ bool FVdjmEncoderInitRequestAudio::EvaluateValidation() const
 
 namespace
 {
+	bool IsAllowedOutputExtension(const FString& extensionLower)
+	{
+#if PLATFORM_ANDROID
+		return extensionLower == TEXT("mp4");
+#elif PLATFORM_WINDOWS || PLATFORM_MAC || PLATFORM_IOS
+		return extensionLower == TEXT("mp4") || extensionLower == TEXT("mov");
+#else
+		return extensionLower == TEXT("mp4");
+#endif
+	}
+
 	bool EvaluateOutputFilePathValidation(const FString& InOutputFilePath)
 	{
 		if (InOutputFilePath.IsEmpty())
@@ -329,8 +340,8 @@ namespace
 			return false;
 		}
 
-		const FString Extension = FPaths::GetExtension(FileName, false).ToLower();
-		if (!(Extension == TEXT("mp4") || Extension == TEXT("mov")))
+		const FString extension = FPaths::GetExtension(FileName, false).ToLower();
+		if (!IsAllowedOutputExtension(extension))
 		{
 			return false;
 		}

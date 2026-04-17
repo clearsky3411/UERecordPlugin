@@ -981,66 +981,103 @@ namespace VdjmRecordUtils
 			}
 			return Fps;
 		}
-		inline FString ResolveOutputPath(
-		EVdjmRecordEnvPlatform InPlatform,
-		const FString& InRequestedPath,
-		const FString& InCustomFileName,
-		const FString& InSessionId,
-		const bool bOverwriteExists,
-		const TCHAR* DebugOwner)
-		{
-			const FString BaseDir = FilePaths::GetPlatformRecordBaseDir(InPlatform);
-
-			FString CandidatePath = InRequestedPath;
-			CandidatePath.TrimStartAndEndInline();
-
-			if (CandidatePath.IsEmpty())
+			inline FString ResolveOutputPath(
+				EVdjmRecordEnvPlatform inPlatform,
+				const FString& inRequestedPath,
+				const FString& inCustomFileName,
+				const FString& inSessionId,
+				const bool bOverwriteExists,
+				const TCHAR* debugOwner)
 			{
-				const FString BaseName = FilePaths::MakeSafeBaseName(InCustomFileName, InSessionId);
-				CandidatePath = FPaths::Combine(
-					BaseDir,
-					FString::Printf(TEXT("%s_%lld.mp4"), *BaseName, FDateTime::Now().GetTicks()));
-			}
-			else
-			{
-				if (FPaths::IsRelative(CandidatePath))
+				FString BaseDir = FilePaths::GetPlatformRecordBaseDir(inPlatform);
+				FPaths::NormalizeFilename(BaseDir);
+				while (BaseDir.EndsWith(TEXT("/")))
 				{
-					CandidatePath = FPaths::Combine(BaseDir, CandidatePath);
+					BaseDir.LeftChopInline(1, EAllowShrinking::No);
 				}
 
-				const FString Dir = FPaths::GetPath(CandidatePath);
-				const FString BaseName = FPaths::GetBaseFilename(CandidatePath, false);
-				CandidatePath = FPaths::Combine(Dir, BaseName + TEXT(".mp4"));
-			}
+				FString candiPath = inRequestedPath;
+				candiPath.TrimStartAndEndInline();
+				FPaths::NormalizeFilename(candiPath);
 
-			FString SafePath;
-			if (!Validations::DbcValidateOutputFilePath(CandidatePath, SafePath, DebugOwner))
-			{
-				return FString();
-			}
+				// Android에서 '/storage/...' 대신 'storage/...' 형태(선행 슬래시 누락)가
+				// 들어오면 relative로 오인되어 BaseDir가 반복 결합될 수 있다.
+				// 선행 슬래시를 복원하고, 이미 중복 결합된 prefix도 1회 경로로 정규화한다.
+				if (inPlatform == EVdjmRecordEnvPlatform::EAndroid && !candiPath.IsEmpty())
+				{
+					FString AndroidBaseNoLeadingSlash = BaseDir;
+					if (AndroidBaseNoLeadingSlash.StartsWith(TEXT("/")))
+					{
+						AndroidBaseNoLeadingSlash.RightChopInline(1, EAllowShrinking::No);
+					}
+					while (AndroidBaseNoLeadingSlash.EndsWith(TEXT("/")))
+					{
+						AndroidBaseNoLeadingSlash.LeftChopInline(1, EAllowShrinking::No);
+					}
 
-			if (!bOverwriteExists && IFileManager::Get().FileExists(*SafePath))
-			{
-				const FString Dir = FPaths::GetPath(SafePath);
-				const FString BaseName = FPaths::GetBaseFilename(SafePath, false);
+					if (!AndroidBaseNoLeadingSlash.IsEmpty())
+					{
+						if (candiPath.StartsWith(AndroidBaseNoLeadingSlash, ESearchCase::IgnoreCase))
+						{
+							candiPath = TEXT("/") + candiPath;
+						}
 
-				const FString UniquePath = FPaths::Combine(
-					Dir,
-					FString::Printf(TEXT("%s_%lld.mp4"), *BaseName, FDateTime::Now().GetTicks()));
+						const FString DuplicatedPrefix = FPaths::Combine(BaseDir, AndroidBaseNoLeadingSlash);
+						while (candiPath.StartsWith(DuplicatedPrefix, ESearchCase::IgnoreCase))
+						{
+							candiPath.RightChopInline(BaseDir.Len() + 1, EAllowShrinking::No);
+							candiPath = TEXT("/") + candiPath;
+						}
+					}
+				}
 
-				FString UniqueSafePath;
-				if (!Validations::DbcValidateOutputFilePath(
-					UniquePath,
-					UniqueSafePath,
-					DebugOwner))
+				if (candiPath.IsEmpty())
+				{
+					const FString BaseName = FilePaths::MakeSafeBaseName(inCustomFileName, inSessionId);
+					candiPath = FPaths::Combine(
+						BaseDir,
+						FString::Printf(TEXT("%s_%lld.mp4"), *BaseName, FDateTime::Now().GetTicks()));
+				}
+				else
+				{
+					if (FPaths::IsRelative(candiPath))
+					{
+						candiPath = FPaths::Combine(BaseDir, candiPath);
+					}
+
+					const FString Dir = FPaths::GetPath(candiPath);
+					const FString BaseName = FPaths::GetBaseFilename(candiPath, false);
+					candiPath = FPaths::Combine(Dir, BaseName + TEXT(".mp4"));
+				}
+
+				FString safePath;
+				if (!Validations::DbcValidateOutputFilePath(candiPath, safePath, debugOwner))
 				{
 					return FString();
 				}
 
-				SafePath = MoveTemp(UniqueSafePath);
+				if (!bOverwriteExists && IFileManager::Get().FileExists(*safePath))
+				{
+					const FString safeDir = FPaths::GetPath(safePath);
+					const FString baseName = FPaths::GetBaseFilename(safePath, false);
+
+					const FString UniquePath = FPaths::Combine(
+						safeDir,
+						FString::Printf(TEXT("%s_%lld.mp4"), *baseName, FDateTime::Now().GetTicks()));
+
+					FString uniqueSafePath;
+					if (!Validations::DbcValidateOutputFilePath(
+						UniquePath,
+						uniqueSafePath,
+						debugOwner))
+					{
+						return FString();
+					}
+
+					safePath = MoveTemp(uniqueSafePath);
+				}
+				return safePath;
 			}
-			return SafePath;
-		}
 		inline int32 ResolveAudioBitrateBps(
 			const int32 InSampleRate,
 			const int32 InChannelCount,

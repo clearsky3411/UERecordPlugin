@@ -194,14 +194,9 @@ VdjmResult UVdjmRecordAndroidUnit::RecordStartCheck()
 		return VdjmResults::Fail;
 	}
 	
-	if (not mAndroidEncoderImpl->InitializeEncoder(
-		LinkedRecordResource->FinalFilePath,
-		LinkedRecordResource->OriginResolution.X,
-		LinkedRecordResource->OriginResolution.Y,
-		LinkedRecordResource->FinalBitrate,
-		LinkedRecordResource->FinalFrameRate))
+	if (not mAndroidEncoderImpl->InitializeEncoderExtended(LinkedRecordResource))
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidUnit::RecordStartCheck - Failed to initialize Android Encoder."));
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidUnit::RecordStartCheck - Failed to initialize Android Encoder with extended settings."));
 		mAndroidEncoderImpl->TerminateEncoder();
 		return VdjmResults::InvalidArg;
 	}
@@ -269,58 +264,59 @@ void UVdjmRecordAndroidUnit::SubmitFrameToSurfacer(FRDGBuilder& graphBuilder, co
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	
 class UVdjmRecordAndroidResource : public UVdjmRecordResource
 */
-void UVdjmAndroidRecordPipeline::InitializeRecordPipeline(UVdjmRecordResource* recordResource)
+bool UVdjmAndroidRecordPipeline::InitializeRecordPipeline(UVdjmRecordResource* recordResource)
 {
 	Super::InitializeRecordPipeline(recordResource);
 	if (recordResource == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - recordResource is null."));
-		return;
+		return false;
 	}
 	
 	LinkedBridgeActor = recordResource->LinkedOwnerBridge;
 	if (not LinkedBridgeActor.IsValid())
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - LinkedBridgeActor is not valid."));
-		return;
+		return false;
 	}
 	if (not LinkedBridgeActor->DbcValidRecordResource())
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - LinkedBridgeActor does not have a valid record resource."));
-		return;
+		return false;
 	}
 	EVdjmRecordEnvPlatform isAndroid = AVdjmRecordBridgeActor::GetTargetPlatform();
 	if (isAndroid != EVdjmRecordEnvPlatform::EAndroid)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - Target platform is not Android. Current platform: %d"), (int32)isAndroid);
-		return;
+		return false;
 	}
 
 	UVdjmRecordEnvDataAsset* dataAsset = LinkedBridgeActor->GetRecordEnvConfigureDataAsset();
 	if (dataAsset == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - LinkedBridgeActor does not have a valid record environment data asset."));
-		return;
+		return false;
 	}
 	
-	
-	//	그런데 이미 위에서 nullptr 을 검증하고 오는데 그냥 독립적이라 생각하고 해주자.
-	FVdjmRecordEnvPlatformInfo* platformInfo = dataAsset->GetPlatformInfo(isAndroid);
-	if (not ValidateForAndroidPipeline(platformInfo))
+	if (const FVdjmRecordEnvPlatformPreset* platformPreset = dataAsset->GetPlatformPreset(isAndroid))
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - Platform info validation failed for Android pipeline."));
-		return;
-	}
-	
-	if (const TSubclassOf<UVdjmRecordUnit>* foundState = platformInfo->GetPipelineState(EVdjmRecordPipelineStages::ESurfaceEncodeAndWrite))
-	{
-		CreateUnit(*foundState);
+		if (const TSubclassOf<UVdjmRecordUnit>* foundState = platformPreset->GetPipelineState(EVdjmRecordPipelineStages::ESurfaceEncodeAndWrite))
+		{
+			CreateUnit(*foundState);
+		}
+		else
+		{
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - Platform info does not contain a valid unit class for ESurfaceEncodeAndWrite stage."));
+			return false;
+		}
 	}
 	else
 	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - Platform info does not contain a valid unit class for ESurfaceEncodeAndWrite stage."));
-		return;
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordAndroidResource::InitializeRecordPipeline - No platform preset found for Android in the record environment data asset."));
+		return false;
 	}
+	
+	return true;
 	
 }
 
@@ -374,9 +370,9 @@ void UVdjmAndroidRecordPipeline::ReleaseRecordPipeline()
 	Super::ReleaseRecordPipeline();
 }
 
-bool UVdjmAndroidRecordPipeline::DbcIsValid() const
+bool UVdjmAndroidRecordPipeline::DbcIsValidPipelineInit() const
 {
-	return Super::DbcIsValid();
+	return Super::DbcIsValidPipelineInit();
 }
 
 bool UVdjmAndroidRecordPipeline::ValidateForAndroidPipeline(FVdjmRecordEnvPlatformInfo* platformInfo) const
