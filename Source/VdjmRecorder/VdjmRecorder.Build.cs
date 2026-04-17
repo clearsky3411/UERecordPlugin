@@ -23,6 +23,7 @@ public class VdjmRecorder : ModuleRules
             {
                 "CoreUObject",
                 "Engine",
+                "AudioMixer",
                 "Slate",
                 "SlateCore",
                 "SlateRHIRenderer"	//	for recorder

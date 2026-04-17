@@ -16,6 +16,9 @@
 
 #include "HardwareInfo.h"
 #include "RHI.h"
+#include "Engine/Engine.h"
+#include "AudioDevice.h"
+#include "Sound/SoundSubmix.h"
 #include "VdjmAndroid/VdjmAndroidCore.h"
 
 #include "VdjmAndroid/VdjmAndroidEncoderBackendOpenGL.h"
@@ -27,6 +30,64 @@ namespace
 	static constexpr int32 VdjmColorFormatSurface = 0x7F000789; // COLOR_FormatSurface
 	static constexpr int64 VdjmDrainTimeoutUs = 10000;
 }
+
+class FVdjmAndroidAudioCaptureBridge final : public ISubmixBufferListener
+{
+public:
+	void OnNewSubmixBuffer(const USoundSubmix* OwningSubmix, float* AudioData, int32 NumSamples, int32 NumChannels,
+		const int32 SampleRate, double AudioClock) override
+	{
+		if (AudioData == nullptr || NumSamples <= 0 || NumChannels <= 0 || SampleRate <= 0)
+		{
+			return;
+		}
+
+		FScopeLock lock(&Mutex);
+		LastSampleRate = SampleRate;
+		LastNumChannels = NumChannels;
+		PendingPcm.Reserve(PendingPcm.Num() + NumSamples);
+
+		for (int32 i = 0; i < NumSamples; ++i)
+		{
+			const float clamped = FMath::Clamp(AudioData[i], -1.0f, 1.0f);
+			PendingPcm.Add(static_cast<int16>(clamped * 32767.0f));
+		}
+	}
+
+	int32 PopPcmSamples(TArray<int16>& outSamples, const int32 maxSamples)
+	{
+		FScopeLock lock(&Mutex);
+		if (PendingPcm.Num() <= 0 || maxSamples <= 0)
+		{
+			outSamples.Reset();
+			return 0;
+		}
+
+		const int32 count = FMath::Min(maxSamples, PendingPcm.Num());
+		outSamples.Reset(count);
+		outSamples.Append(PendingPcm.GetData(), count);
+		PendingPcm.RemoveAt(0, count, EAllowShrinking::No);
+		return count;
+	}
+
+	int32 GetLastSampleRate() const
+	{
+		FScopeLock lock(&Mutex);
+		return LastSampleRate;
+	}
+
+	int32 GetLastNumChannels() const
+	{
+		FScopeLock lock(&Mutex);
+		return LastNumChannels;
+	}
+
+private:
+	mutable FCriticalSection Mutex;
+	TArray<int16> PendingPcm;
+	int32 LastSampleRate = 0;
+	int32 LastNumChannels = 0;
+};
 
 FVdjmAndroidEncoderBackend::FVdjmAndroidEncoderBackend()
 {
@@ -339,6 +400,8 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 		return;
 	}
 
+	PumpAudioInputToCodec();
+
 	while (true)
 	{
 		AMediaCodecBufferInfo bufferInfo{};
@@ -442,8 +505,7 @@ void FVdjmAndroidRecordSession::Stop()
 	}
 	if (mAudioCodec && mAudioCodecStarted)
 	{
-		AMediaCodec_stop(mAudioCodec);
-		mAudioCodecStarted = false;
+		AudioStop();
 	}
 
 	if (mMuxer && mMuxerStarted)
@@ -630,6 +692,8 @@ bool FVdjmAndroidRecordSession::AudioInit()
 		resolvedAudioMime = TEXT("audio/mp4a-latm");
 	}
 	mConfig.AudioConfig.AudioMimeType = resolvedAudioMime;
+	mNextAudioPtsUs = 0;
+	bAudioInputWarningLogged = false;
 
 	mAudioCodec = AMediaCodec_createEncoderByType(TCHAR_TO_UTF8(*mConfig.AudioConfig.AudioMimeType));
 	if (mAudioCodec == nullptr)
@@ -666,6 +730,19 @@ bool FVdjmAndroidRecordSession::AudioInit()
 		return false;
 	}
 
+	if (!mAudioCaptureBridge.IsValid())
+	{
+		mAudioCaptureBridge = MakeUnique<FVdjmAndroidAudioCaptureBridge>();
+	}
+
+	if (GEngine != nullptr)
+	{
+		if (FAudioDevice* audioDevice = GEngine->GetMainAudioDeviceRaw())
+		{
+			audioDevice->RegisterSubmixBufferListener(mAudioCaptureBridge.Get(), nullptr);
+		}
+	}
+
 	return true;
 }
 
@@ -688,6 +765,84 @@ bool FVdjmAndroidRecordSession::AudioStart()
 	}
 	mAudioCodecStarted = true;
 	return true;
+}
+
+void FVdjmAndroidRecordSession::AudioStop()
+{
+	if (mAudioCodec == nullptr)
+	{
+		return;
+	}
+
+	if (GEngine != nullptr)
+	{
+		if (FAudioDevice* audioDevice = GEngine->GetMainAudioDeviceRaw())
+		{
+			audioDevice->UnregisterSubmixBufferListener(mAudioCaptureBridge.Get(), nullptr);
+		}
+	}
+
+	AMediaCodecBufferInfo bufferInfo{};
+	const ssize_t inputIndex = AMediaCodec_dequeueInputBuffer(mAudioCodec, 0);
+	if (inputIndex >= 0)
+	{
+		AMediaCodec_queueInputBuffer(mAudioCodec, inputIndex, 0, 0, mNextAudioPtsUs, AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
+	}
+
+	AMediaCodec_stop(mAudioCodec);
+	mAudioCodecStarted = false;
+}
+
+void FVdjmAndroidRecordSession::PumpAudioInputToCodec()
+{
+	if (mAudioCodec == nullptr || !mAudioCodecStarted || !mAudioCaptureBridge.IsValid())
+	{
+		return;
+	}
+
+	const int32 channels = FMath::Max(1, mConfig.AudioConfig.AudioChannelCount);
+	const int32 samplesPerChunk = channels * 1024;
+	const int32 sampleRate = FMath::Max(1, mAudioCaptureBridge->GetLastSampleRate() > 0
+		? mAudioCaptureBridge->GetLastSampleRate()
+		: mConfig.AudioConfig.AudioSampleRate);
+
+	while (true)
+	{
+		const ssize_t inputIndex = AMediaCodec_dequeueInputBuffer(mAudioCodec, 0);
+		if (inputIndex < 0)
+		{
+			break;
+		}
+
+		TArray<int16> pcmSamples;
+		const int32 poppedSamples = mAudioCaptureBridge->PopPcmSamples(pcmSamples, samplesPerChunk);
+		if (poppedSamples <= 0)
+		{
+			if (!bAudioInputWarningLogged)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::PumpAudioInputToCodec - No captured submix PCM yet."));
+				bAudioInputWarningLogged = true;
+			}
+			break;
+		}
+		bAudioInputWarningLogged = false;
+
+		size_t inputBufferSize = 0;
+		uint8* inputBuffer = AMediaCodec_getInputBuffer(mAudioCodec, inputIndex, &inputBufferSize);
+		if (inputBuffer == nullptr || inputBufferSize == 0)
+		{
+			AMediaCodec_queueInputBuffer(mAudioCodec, inputIndex, 0, 0, mNextAudioPtsUs, 0);
+			continue;
+		}
+
+		const int32 bytesToWrite = FMath::Min<int32>(static_cast<int32>(inputBufferSize), poppedSamples * static_cast<int32>(sizeof(int16)));
+		FMemory::Memcpy(inputBuffer, pcmSamples.GetData(), bytesToWrite);
+
+		const int32 samplesWritten = bytesToWrite / static_cast<int32>(sizeof(int16));
+		const int32 framesWritten = FMath::Max(1, samplesWritten / channels);
+		AMediaCodec_queueInputBuffer(mAudioCodec, inputIndex, 0, bytesToWrite, mNextAudioPtsUs, 0);
+		mNextAudioPtsUs += static_cast<int64>(framesWritten) * 1000000LL / sampleRate;
+	}
 }
 
 /*
@@ -839,13 +994,6 @@ bool FVdjmAndroidEncoderImpl::BuildSnapshotFromResource(const UVdjmRecordAndroid
 			outSnapshot.AudioConfig.bAudioRequired = runtimePolicy->bRequireAVSync;
 			outSnapshot.AudioConfig.AudioDriftToleranceMs = runtimePolicy->AllowedDriftMs;
 		}
-			if (outSnapshot.AudioConfig.bEnableAudio)
-			{
-				UE_LOG(LogVdjmRecorderCore, Warning,
-					TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Internal audio capture input path is not wired yet on Android. Forcing video-only recording."));
-				outSnapshot.AudioConfig.bEnableAudio = false;
-				outSnapshot.AudioConfig.bAudioRequired = false;
-			}
 		}
 
 	if (outSnapshot.VideoConfig.VideoIntervalSec <= 0)

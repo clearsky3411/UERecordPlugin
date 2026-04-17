@@ -106,6 +106,8 @@ public:
 		bool VideoInit();
 		bool AudioInit();
 		bool AudioStart();
+		void AudioStop();
+		void PumpAudioInputToCodec();
 
 		FVdjmAndroidEncoderSnapshot mConfig;
 		AMediaCodec* mCodec = nullptr;
@@ -123,6 +125,9 @@ public:
 		bool mAudioCodecStarted = false;
 		bool mMuxerStarted = false;
 		bool mEosSent = false;
+		int64 mNextAudioPtsUs = 0;
+		bool bAudioInputWarningLogged = false;
+		TUniquePtr<class FVdjmAndroidAudioCaptureBridge> mAudioCaptureBridge;
 	
 	TWeakPtr<FVdjmAndroidEncoderImpl> mOwnerEncoderImpl;
 	TUniquePtr<FVdjmAndroidEncoderBackend> mGraphicBackend;
