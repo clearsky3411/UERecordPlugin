@@ -109,11 +109,6 @@ bool FVdjmAndroidRecordSession::Start()
 		Terminate();
 		return false;
 	}
-	if (!AudioStart())
-	{
-		Terminate();
-		return false;
-	}
 	
 	if (not mGraphicBackend.IsValid())
 	{
@@ -175,7 +170,22 @@ bool FVdjmAndroidRecordSession::VideoInit()
 		return false;
 	}
 
-	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, TCHAR_TO_UTF8(*mConfig.VideoConfig.MimeType));
+	FString codecMimeType = mConfig.VideoConfig.MimeType.ToLower();
+	if (codecMimeType == TEXT("video/mp4"))
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("FVdjmAndroidRecordSession::VideoInit - Container mime '%s' detected. Using codec mime '%s' for MediaCodec."),
+			*mConfig.VideoConfig.MimeType, UTF8_TO_TCHAR(VdjmMimeAvc));
+		codecMimeType = UTF8_TO_TCHAR(VdjmMimeAvc);
+	}
+	else if (codecMimeType != UTF8_TO_TCHAR(VdjmMimeAvc))
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("FVdjmAndroidRecordSession::VideoInit - Unsupported codec mime '%s'. Forcing '%s'."),
+			*mConfig.VideoConfig.MimeType, UTF8_TO_TCHAR(VdjmMimeAvc));
+		codecMimeType = UTF8_TO_TCHAR(VdjmMimeAvc);
+	}
+	AMediaFormat_setString(format, AMEDIAFORMAT_KEY_MIME, TCHAR_TO_UTF8(*codecMimeType));
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_WIDTH, mConfig.VideoConfig.VideoWidth);
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_HEIGHT, mConfig.VideoConfig.VideoHeight);
 	AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_BIT_RATE, mConfig.VideoConfig.VideoBitrate);
@@ -689,7 +699,6 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoderExtended(const TWeakObjectPtr<UVd
 bool FVdjmAndroidEncoderImpl::BuildSnapshotFromResource(const UVdjmRecordAndroidResource& androidRecordResource,
 	FVdjmAndroidEncoderSnapshot& outSnapshot) const
 {
-	UE_LOG(LogVdjmRecorderCore, Log, TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Building snapshot from resource: %s"), *androidRecordResource.ToString());
 	outSnapshot.Clear();
 
 	outSnapshot.VideoConfig.OutputFilePath = androidRecordResource.FinalFilePath;
@@ -707,7 +716,25 @@ bool FVdjmAndroidEncoderImpl::BuildSnapshotFromResource(const UVdjmRecordAndroid
 		const UVdjmRecordEnvResolver* resolver = androidRecordResource.LinkedResolver.Get();
 		if (const FVdjmEncoderInitRequestVideo* videoConfig = resolver->TryGetResolvedVideoConfig())
 		{
-			outSnapshot.VideoConfig.MimeType = videoConfig->MimeType.IsEmpty() ? DefaultMimeType : videoConfig->MimeType;
+			FString resolvedMimeType = videoConfig->MimeType.IsEmpty() ? DefaultMimeType : videoConfig->MimeType;
+			resolvedMimeType = resolvedMimeType.ToLower();
+			if (resolvedMimeType == TEXT("video/mp4"))
+			{
+				UE_LOG(LogVdjmRecorderCore, Warning,
+					TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Received container mime '%s'. Converting to codec mime '%s'."),
+					*resolvedMimeType,
+					*DefaultMimeType);
+				resolvedMimeType = DefaultMimeType;
+			}
+			else if (resolvedMimeType != TEXT("video/avc"))
+			{
+				UE_LOG(LogVdjmRecorderCore, Warning,
+					TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Unsupported video mime for Android encoder: %s. Forcing %s."),
+					*resolvedMimeType,
+					*DefaultMimeType);
+				resolvedMimeType = DefaultMimeType;
+			}
+			outSnapshot.VideoConfig.MimeType = resolvedMimeType;
 			outSnapshot.VideoConfig.VideoIntervalSec = FMath::Max(1, videoConfig->KeyframeInterval);
 		}
 		if (const FVdjmEncoderInitRequestAudio* audioConfig = resolver->TryGetResolvedAudioConfig())
@@ -731,15 +758,8 @@ bool FVdjmAndroidEncoderImpl::BuildSnapshotFromResource(const UVdjmRecordAndroid
 	{
 		outSnapshot.VideoConfig.VideoIntervalSec = 1;
 	}
-	
-	if (not outSnapshot.IsValidateEncoderArguments())
-	{
-		UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Built snapshot is invalid."));
-		return false;
-	}
-	
-	UE_LOG(LogVdjmRecorderCore, Log, TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Built snapshot: %s"), *outSnapshot.ToString());
-	return true;
+
+	return outSnapshot.IsValidateEncoderArguments();
 }
 
 VdjmResult FVdjmAndroidEncoderImpl::StartEncoder()

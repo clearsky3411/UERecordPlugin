@@ -36,10 +36,17 @@ bool FVdjmAndroidEncoderSnapshot::IsValidateEncoderArguments() const
 	}
 
 	// 2. MIME
-	// 오늘 목표 기준으로 H.264 AVC만 허용하는 편이 가장 안전함
-	if (VideoConfig.MimeType.IsEmpty() || !VideoConfig.MimeType.Equals(TEXT("video/avc"), ESearchCase::IgnoreCase))
+	// video/mp4 는 컨테이너 성격 값으로 들어오는 경우가 있어 호환 처리 허용.
+	// 실제 코덱 설정 직전에는 video/avc 로 정규화한다.
+	if (VideoConfig.MimeType.IsEmpty())
 	{
-		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Unsupported MimeType: %s (Only video/avc is supported for now)"), *VideoConfig.MimeType);
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - MimeType is empty."));
+		return false;
+	}
+	const FString mimeTypeLower = VideoConfig.MimeType.ToLower();
+	if (mimeTypeLower != TEXT("video/avc") && mimeTypeLower != TEXT("video/mp4"))
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidEncoderImpl::ValidateEncoderArguments - Unsupported MimeType: %s"), *VideoConfig.MimeType);
 		return false;
 	}
 

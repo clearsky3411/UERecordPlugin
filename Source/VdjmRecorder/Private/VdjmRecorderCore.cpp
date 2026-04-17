@@ -576,7 +576,6 @@ UVdjmRecordResource* UVdjmRecordEnvResolver::CreateResolvedRecordResource(const 
 			newResource = nullptr;
 			return nullptr;
 		}
-		UE_LOG(LogVdjmRecorderCore, Log, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Successfully created and initialized record resource: %s"), *newResource->GetName());
 		return newResource;
 		
 	}
@@ -1985,7 +1984,7 @@ void AVdjmRecordBridgeActor::ChainInit_CreateRecordResource()
 		OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitError);
 		return;
 	}
-	UE_LOG(LogVdjmRecorderCore, Log, TEXT("ChainInit_CreateRecordResource - Record resource created from environment resolver."));
+	
 	if (not mRecordResource->DbcIsInitializedResource())
     {
     	UE_LOG(LogVdjmRecorderCore, Error, TEXT("UVdjmRecordEnvResolver::CreateResolvedRecordResource - Failed to initialize record resource with resolver."));
