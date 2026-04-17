@@ -94,8 +94,15 @@ bool FVdjmAndroidRecordSession::Start()
 
 	if (!AudioInit())
 	{
-		Terminate();
-		return false;
+		if (mConfig.AudioConfig.bAudioRequired)
+		{
+			Terminate();
+			return false;
+		}
+
+		UE_LOG(LogTemp, Warning,
+			TEXT("FVdjmAndroidRecordSession::Start - Audio init failed but audio is optional. Continuing with video-only recording."));
+		mConfig.AudioConfig.bEnableAudio = false;
 	}
 
 	const media_status_t status = AMediaCodec_start(mCodec);
@@ -106,8 +113,15 @@ bool FVdjmAndroidRecordSession::Start()
 	}
 	if (!AudioStart())
 	{
-		Terminate();
-		return false;
+		if (mConfig.AudioConfig.bAudioRequired)
+		{
+			Terminate();
+			return false;
+		}
+
+		UE_LOG(LogTemp, Warning,
+			TEXT("FVdjmAndroidRecordSession::Start - Audio start failed but audio is optional. Continuing with video-only recording."));
+		mConfig.AudioConfig.bEnableAudio = false;
 	}
 	
 	if (not mGraphicBackend.IsValid())
@@ -238,6 +252,31 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 {
 	if (!mCodec)
 		return;
+
+	auto TryStartMuxerIfReady = [this]()
+	{
+		if (mMuxerStarted || mTrackIndex < 0)
+		{
+			return;
+		}
+
+		const bool bAudioExpected = mConfig.AudioConfig.bEnableAudio && mAudioCodecStarted;
+		const bool bAudioTrackReady = !bAudioExpected || mAudioTrackIndex >= 0;
+		if (!bAudioTrackReady)
+		{
+			return;
+		}
+
+		if (AMediaMuxer_start(mMuxer) == AMEDIA_OK)
+		{
+			mMuxerStarted = true;
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::Drain - AMediaMuxer_start failed."));
+		}
+	};
+
 	if (bEndOfStream && !mEosSent)
 	{
 		UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidRecordSession::Drain - Signaling end of input stream to codec."));
@@ -260,14 +299,17 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 			if (!newFormat)
 				break;
 
-			mTrackIndex = AMediaMuxer_addTrack(mMuxer, newFormat);
+			if (mTrackIndex < 0)
+			{
+				mTrackIndex = AMediaMuxer_addTrack(mMuxer, newFormat);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::Drain - Video track already added. Ignoring duplicate format change."));
+			}
 			AMediaFormat_delete(newFormat);
 
-			if (mTrackIndex >= 0 && !mMuxerStarted)
-			{
-				AMediaMuxer_start(mMuxer);
-				mMuxerStarted = true;
-			}
+			TryStartMuxerIfReady();
 		}
 		else if (outputIndex >= 0)
 		{
@@ -314,14 +356,17 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 				break;
 			}
 
-			mAudioTrackIndex = AMediaMuxer_addTrack(mMuxer, newFormat);
+			if (mAudioTrackIndex < 0)
+			{
+				mAudioTrackIndex = AMediaMuxer_addTrack(mMuxer, newFormat);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::Drain - Audio track already added. Ignoring duplicate format change."));
+			}
 			AMediaFormat_delete(newFormat);
 
-			if (mAudioTrackIndex >= 0 && !mMuxerStarted)
-			{
-				AMediaMuxer_start(mMuxer);
-				mMuxerStarted = true;
-			}
+			TryStartMuxerIfReady();
 		}
 		else if (outputIndex >= 0)
 		{
@@ -562,6 +607,30 @@ bool FVdjmAndroidRecordSession::AudioInit()
 		return true;
 	}
 
+	FString resolvedAudioMime = mConfig.AudioConfig.AudioMimeType.ToLower();
+	if (resolvedAudioMime.IsEmpty())
+	{
+		resolvedAudioMime = TEXT("audio/mp4a-latm");
+	}
+
+	if (resolvedAudioMime == TEXT("audio/aac"))
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("FVdjmAndroidRecordSession::AudioInit - Converting audio mime '%s' to '%s' for MediaCodec."),
+			*mConfig.AudioConfig.AudioMimeType,
+			TEXT("audio/mp4a-latm"));
+		resolvedAudioMime = TEXT("audio/mp4a-latm");
+	}
+	else if (resolvedAudioMime != TEXT("audio/mp4a-latm"))
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("FVdjmAndroidRecordSession::AudioInit - Unsupported audio mime '%s'. Forcing '%s'."),
+			*mConfig.AudioConfig.AudioMimeType,
+			TEXT("audio/mp4a-latm"));
+		resolvedAudioMime = TEXT("audio/mp4a-latm");
+	}
+	mConfig.AudioConfig.AudioMimeType = resolvedAudioMime;
+
 	mAudioCodec = AMediaCodec_createEncoderByType(TCHAR_TO_UTF8(*mConfig.AudioConfig.AudioMimeType));
 	if (mAudioCodec == nullptr)
 	{
@@ -744,7 +813,25 @@ bool FVdjmAndroidEncoderImpl::BuildSnapshotFromResource(const UVdjmRecordAndroid
 			outSnapshot.AudioConfig.AudioChannelCount = audioConfig->ChannelCount;
 			outSnapshot.AudioConfig.AudioBitrate = audioConfig->Bitrate;
 			outSnapshot.AudioConfig.AudioAacProfile = audioConfig->AacProfile;
-			outSnapshot.AudioConfig.AudioMimeType = audioConfig->AudioMimeType;
+			FString resolvedAudioMimeType = audioConfig->AudioMimeType.IsEmpty()
+				? TEXT("audio/mp4a-latm")
+				: audioConfig->AudioMimeType.ToLower();
+			if (resolvedAudioMimeType == TEXT("audio/aac"))
+			{
+				UE_LOG(LogVdjmRecorderCore, Warning,
+					TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Converting audio mime '%s' to '%s'."),
+					*resolvedAudioMimeType,
+					TEXT("audio/mp4a-latm"));
+				resolvedAudioMimeType = TEXT("audio/mp4a-latm");
+			}
+			else if (resolvedAudioMimeType != TEXT("audio/mp4a-latm"))
+			{
+				UE_LOG(LogVdjmRecorderCore, Warning,
+					TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Unsupported audio mime for Android encoder: %s. Forcing audio/mp4a-latm."),
+					*resolvedAudioMimeType);
+				resolvedAudioMimeType = TEXT("audio/mp4a-latm");
+			}
+			outSnapshot.AudioConfig.AudioMimeType = resolvedAudioMimeType;
 			outSnapshot.AudioConfig.AudioSourceId = audioConfig->SourceSubMixName.ToString();
 		}
 		if (const FVdjmEncoderInitRequestRuntimePolicy* runtimePolicy = resolver->TryGetResolvedRuntimePolicyConfig())
