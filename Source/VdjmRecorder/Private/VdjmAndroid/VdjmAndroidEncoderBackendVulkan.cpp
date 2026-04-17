@@ -878,7 +878,7 @@ bool FVdjmVkRecoderHandles::InitializeFromDynamicRHI(IVulkanDynamicRHI* inVulkan
 }
 
 bool FVdjmVkCodecInputSurfaceState::InitializeSurfaceState(const FVdjmVkRecoderHandles& vkHandles,
-	ANativeWindow* inputWindow, const FVdjmAndroidEncoderConfigure& config)
+	ANativeWindow* inputWindow, const FVdjmAndroidEncoderSnapshot& config)
 {
 	if (!vkHandles.IsValid() || inputWindow == nullptr || !config.IsValidateEncoderArguments())
 	{
@@ -950,7 +950,7 @@ bool FVdjmVkCodecInputSurfaceState::CreateSurface(const FVdjmVkRecoderHandles& v
 
 bool FVdjmVkCodecInputSurfaceState::CreateSwapchain(
 	const FVdjmVkRecoderHandles& vkHandles,
-	const FVdjmAndroidEncoderConfigure& config)
+	const FVdjmAndroidEncoderSnapshot& config)
 {
 	if (!vkHandles.IsValid() || mSurface == VK_NULL_HANDLE)
 	{
@@ -1445,7 +1445,7 @@ void FVdjmVkIntermediateState::Release(const FVdjmVkRecoderHandles& vkHandles)
 FVdjmAndroidEncoderBackendVulkan::FVdjmAndroidEncoderBackendVulkan()
 {}
 
-bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderConfigure& config, ANativeWindow* inputWindow)
+bool FVdjmAndroidEncoderBackendVulkan::Init(const FVdjmAndroidEncoderSnapshot& config, ANativeWindow* inputWindow)
 {
 	if (not config.IsValidateEncoderArguments() || inputWindow == nullptr)
 	{
