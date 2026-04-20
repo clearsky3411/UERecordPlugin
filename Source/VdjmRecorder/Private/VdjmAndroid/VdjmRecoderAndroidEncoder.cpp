@@ -24,6 +24,7 @@
 
 #include "VdjmAndroid/VdjmAndroidEncoderBackendOpenGL.h"
 #include "VdjmAndroid/VdjmAndroidEncoderBackendVulkan.h"
+#include "Async/Async.h"
 
 namespace 
 {
@@ -245,6 +246,7 @@ bool FVdjmAndroidRecordSession::Start()
 	mMuxerStarted = false;
 	mTrackIndex = -1;
 	mEosSent = false;
+	mAudioEosReceived = false;
 	mFirstVideoPtsUs = -1;
 	mFirstAudioPtsUs = -1;
 	if (not mGraphicBackend->Start())
@@ -252,6 +254,7 @@ bool FVdjmAndroidRecordSession::Start()
 		Terminate();
 		return false;
 	}
+	StartAudioDrainThread();
 	mRunning = true;
 	return true;
 }
@@ -348,30 +351,6 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 	if (!mCodec)
 		return;
 
-	auto TryStartMuxerIfReady = [this]()
-	{
-		if (mMuxerStarted || mTrackIndex < 0)
-		{
-			return;
-		}
-
-		const bool bAudioExpected = mConfig.AudioConfig.bEnableAudio && mAudioCodecStarted;
-		const bool bAudioTrackReady = !bAudioExpected || mAudioTrackIndex >= 0;
-		if (!bAudioTrackReady)
-		{
-			return;
-		}
-
-		if (AMediaMuxer_start(mMuxer) == AMEDIA_OK)
-		{
-			mMuxerStarted = true;
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::Drain - AMediaMuxer_start failed."));
-		}
-	};
-
 	if (bEndOfStream && !mEosSent)
 	{
 		UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidRecordSession::Drain - Signaling end of input stream to codec."));
@@ -388,42 +367,49 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 		{
 			break;
 		}
-		else if (outputIndex == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED)
-		{
-			AMediaFormat* newFormat = AMediaCodec_getOutputFormat(mCodec);
-			if (!newFormat)
-				break;
-
-			if (mTrackIndex < 0)
+			else if (outputIndex == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED)
 			{
-				mTrackIndex = AMediaMuxer_addTrack(mMuxer, newFormat);
-			}
-			else
-			{
-				UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::Drain - Video track already added. Ignoring duplicate format change."));
-			}
-			AMediaFormat_delete(newFormat);
+				AMediaFormat* newFormat = AMediaCodec_getOutputFormat(mCodec);
+				if (!newFormat)
+					break;
 
-			TryStartMuxerIfReady();
-		}
-		else if (outputIndex >= 0)
-		{
-			size_t outSize = 0;
-			uint8_t* outBuffer = AMediaCodec_getOutputBuffer(mCodec, outputIndex, &outSize);
-
-			if (outBuffer && bufferInfo.size > 0 && mMuxerStarted)
-			{
-				if (mFirstVideoPtsUs < 0)
 				{
-					mFirstVideoPtsUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs);
+					FScopeLock muxerLock(&mMuxerMutex);
+					if (mTrackIndex < 0)
+					{
+						mTrackIndex = AMediaMuxer_addTrack(mMuxer, newFormat);
+					}
+					else
+					{
+						UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::Drain - Video track already added. Ignoring duplicate format change."));
+					}
+				}
+				AMediaFormat_delete(newFormat);
+
+				TryStartMuxerIfReady();
+			}
+			else if (outputIndex >= 0)
+			{
+				size_t outSize = 0;
+				uint8_t* outBuffer = AMediaCodec_getOutputBuffer(mCodec, outputIndex, &outSize);
+
+				if (outBuffer && bufferInfo.size > 0)
+				{
+					FScopeLock muxerLock(&mMuxerMutex);
+					if (mMuxerStarted)
+					{
+						if (mFirstVideoPtsUs < 0)
+						{
+							mFirstVideoPtsUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs);
+						}
+
+						AMediaCodecBufferInfo normalizedInfo = bufferInfo;
+						normalizedInfo.presentationTimeUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs - mFirstVideoPtsUs);
+						AMediaMuxer_writeSampleData(mMuxer, mTrackIndex, outBuffer, &normalizedInfo);
+					}
 				}
 
-				AMediaCodecBufferInfo normalizedInfo = bufferInfo;
-				normalizedInfo.presentationTimeUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs - mFirstVideoPtsUs);
-				AMediaMuxer_writeSampleData(mMuxer, mTrackIndex, outBuffer, &normalizedInfo);
-			}
-
-			AMediaCodec_releaseOutputBuffer(mCodec, outputIndex, false);
+				AMediaCodec_releaseOutputBuffer(mCodec, outputIndex, false);
 
 			if ((bufferInfo.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0)
 			{
@@ -431,76 +417,10 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 			}
 		}
 		else
-		{
-			break;
-		}
-	}
-
-	if (!mAudioCodec || !mAudioCodecStarted)
-	{
-		return;
-	}
-
-	PumpAudioInputToCodec();
-
-	while (true)
-	{
-		AMediaCodecBufferInfo bufferInfo{};
-		const ssize_t outputIndex = AMediaCodec_dequeueOutputBuffer(mAudioCodec, &bufferInfo, 0);
-
-		if (outputIndex == AMEDIACODEC_INFO_TRY_AGAIN_LATER)
-		{
-			break;
-		}
-		else if (outputIndex == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED)
-		{
-			AMediaFormat* newFormat = AMediaCodec_getOutputFormat(mAudioCodec);
-			if (!newFormat)
-			{
-				break;
-			}
-
-			if (mAudioTrackIndex < 0)
-			{
-				mAudioTrackIndex = AMediaMuxer_addTrack(mMuxer, newFormat);
-			}
-			else
-			{
-				UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::Drain - Audio track already added. Ignoring duplicate format change."));
-			}
-			AMediaFormat_delete(newFormat);
-
-			TryStartMuxerIfReady();
-		}
-		else if (outputIndex >= 0)
-		{
-			size_t outSize = 0;
-			uint8_t* outBuffer = AMediaCodec_getOutputBuffer(mAudioCodec, outputIndex, &outSize);
-
-			if (outBuffer && bufferInfo.size > 0 && mMuxerStarted && mAudioTrackIndex >= 0)
-			{
-				if (mFirstAudioPtsUs < 0)
-				{
-					mFirstAudioPtsUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs);
-				}
-
-				AMediaCodecBufferInfo normalizedInfo = bufferInfo;
-				normalizedInfo.presentationTimeUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs - mFirstAudioPtsUs);
-				AMediaMuxer_writeSampleData(mMuxer, mAudioTrackIndex, outBuffer, &normalizedInfo);
-			}
-
-			AMediaCodec_releaseOutputBuffer(mAudioCodec, outputIndex, false);
-
-			if ((bufferInfo.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0)
 			{
 				break;
 			}
 		}
-		else
-		{
-			break;
-		}
-	}
 }
 
 bool FVdjmAndroidRecordSession::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,
@@ -545,6 +465,7 @@ void FVdjmAndroidRecordSession::Stop()
 	}
 	
 	Drain(true);
+	StopAudioDrainThread();
 
 	if (mCodec && mCodecStarted)
 	{
@@ -624,6 +545,7 @@ void FVdjmAndroidRecordSession::Terminate()
 	mCodecStarted = false;
 	mAudioCodecStarted = false;
 	mEosSent = false;
+	mAudioEosReceived = false;
 	mRunning = false;
 	mInitialized = false;
 	mFirstVideoPtsUs = -1;
@@ -710,6 +632,74 @@ void FVdjmAndroidRecordSession::Clear()
 	Terminate();
 	mConfig.Clear();
 	mOwnerEncoderImpl = nullptr;
+}
+
+bool FVdjmAndroidRecordSession::TryStartMuxerIfReady()
+{
+	FScopeLock muxerLock(&mMuxerMutex);
+	if (mMuxerStarted || mTrackIndex < 0)
+	{
+		return mMuxerStarted;
+	}
+
+	const bool bAudioExpected = mConfig.AudioConfig.bEnableAudio && mAudioCodecStarted;
+	const bool bAudioTrackReady = !bAudioExpected || mAudioTrackIndex >= 0;
+	if (!bAudioTrackReady)
+	{
+		return false;
+	}
+
+	if (AMediaMuxer_start(mMuxer) == AMEDIA_OK)
+	{
+		mMuxerStarted = true;
+		return true;
+	}
+
+	UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::TryStartMuxerIfReady - AMediaMuxer_start failed."));
+	return false;
+}
+
+void FVdjmAndroidRecordSession::StartAudioDrainThread()
+{
+	if (!mConfig.AudioConfig.bEnableAudio || !mAudioCodecStarted || bAudioDrainThreadRunning)
+	{
+		return;
+	}
+
+	bAudioDrainStopRequested = false;
+	bAudioDrainThreadRunning = true;
+
+	Async(EAsyncExecution::Thread, [this]()
+	{
+		AudioDrainLoop();
+	});
+}
+
+void FVdjmAndroidRecordSession::StopAudioDrainThread()
+{
+	if (!bAudioDrainThreadRunning)
+	{
+		return;
+	}
+
+	bAudioDrainStopRequested = true;
+	while (bAudioDrainThreadRunning)
+	{
+		FPlatformProcess::SleepNoStats(0.001f);
+	}
+}
+
+void FVdjmAndroidRecordSession::AudioDrainLoop()
+{
+	while (!bAudioDrainStopRequested)
+	{
+		PumpAudioInputToCodec();
+		DrainAudioCodecOutput();
+		FPlatformProcess::SleepNoStats(0.005f);
+	}
+
+	DrainAudioCodecOutput();
+	bAudioDrainThreadRunning = false;
 }
 
 bool FVdjmAndroidRecordSession::AudioInit()
@@ -826,6 +816,7 @@ bool FVdjmAndroidRecordSession::AudioStart()
 		return false;
 	}
 	mAudioCodecStarted = true;
+	mAudioEosReceived = false;
 	return true;
 }
 
@@ -851,9 +842,89 @@ void FVdjmAndroidRecordSession::AudioStop()
 		AMediaCodec_queueInputBuffer(mAudioCodec, inputIndex, 0, 0, mNextAudioPtsUs, AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
 	}
 
+	for (int32 retry = 0; retry < 60 && !mAudioEosReceived; ++retry)
+	{
+		DrainAudioCodecOutput();
+		FPlatformProcess::SleepNoStats(0.005f);
+	}
+
 	AMediaCodec_stop(mAudioCodec);
 	mAudioCodecStarted = false;
 	mPendingCodecInputPcm.Reset();
+}
+
+void FVdjmAndroidRecordSession::DrainAudioCodecOutput()
+{
+	if (!mAudioCodec || !mAudioCodecStarted)
+	{
+		return;
+	}
+
+	while (true)
+	{
+		AMediaCodecBufferInfo bufferInfo{};
+		const ssize_t outputIndex = AMediaCodec_dequeueOutputBuffer(mAudioCodec, &bufferInfo, 0);
+
+		if (outputIndex == AMEDIACODEC_INFO_TRY_AGAIN_LATER)
+		{
+			break;
+		}
+		else if (outputIndex == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED)
+		{
+			AMediaFormat* newFormat = AMediaCodec_getOutputFormat(mAudioCodec);
+			if (!newFormat)
+			{
+				break;
+			}
+
+			{
+				FScopeLock muxerLock(&mMuxerMutex);
+				if (mAudioTrackIndex < 0)
+				{
+					mAudioTrackIndex = AMediaMuxer_addTrack(mMuxer, newFormat);
+				}
+				else
+				{
+					UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::DrainAudioCodecOutput - Audio track already added. Ignoring duplicate format change."));
+				}
+			}
+			AMediaFormat_delete(newFormat);
+			TryStartMuxerIfReady();
+		}
+		else if (outputIndex >= 0)
+		{
+			size_t outSize = 0;
+			uint8_t* outBuffer = AMediaCodec_getOutputBuffer(mAudioCodec, outputIndex, &outSize);
+
+			if (outBuffer && bufferInfo.size > 0 && mAudioTrackIndex >= 0)
+			{
+				FScopeLock muxerLock(&mMuxerMutex);
+				if (mMuxerStarted)
+				{
+					if (mFirstAudioPtsUs < 0)
+					{
+						mFirstAudioPtsUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs);
+					}
+
+					AMediaCodecBufferInfo normalizedInfo = bufferInfo;
+					normalizedInfo.presentationTimeUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs - mFirstAudioPtsUs);
+					AMediaMuxer_writeSampleData(mMuxer, mAudioTrackIndex, outBuffer, &normalizedInfo);
+				}
+			}
+
+			AMediaCodec_releaseOutputBuffer(mAudioCodec, outputIndex, false);
+
+			if ((bufferInfo.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0)
+			{
+				mAudioEosReceived = true;
+				break;
+			}
+		}
+		else
+		{
+			break;
+		}
+}
 }
 
 void FVdjmAndroidRecordSession::PumpAudioInputToCodec()
