@@ -35,6 +35,8 @@ namespace
 class FVdjmAndroidAudioCaptureBridge final : public ISubmixBufferListener
 {
 public:
+	static constexpr int32 MaxBufferedSamples = 44100 * 2 * 5; // 최대 5초(44.1k stereo 기준)
+
 	void OnNewSubmixBuffer(const USoundSubmix* OwningSubmix, float* AudioData, int32 NumSamples, int32 NumChannels,
 		const int32 SampleRate, double AudioClock) override
 	{
@@ -46,12 +48,21 @@ public:
 		FScopeLock lock(&Mutex);
 		LastSampleRate = SampleRate;
 		LastNumChannels = NumChannels;
+		TotalCallbacks++;
+		TotalCapturedSamples += static_cast<uint64>(NumSamples);
 		PendingPcm.Reserve(PendingPcm.Num() + NumSamples);
 
 		for (int32 i = 0; i < NumSamples; ++i)
 		{
 			const float clamped = FMath::Clamp(AudioData[i], -1.0f, 1.0f);
 			PendingPcm.Add(static_cast<int16>(clamped * 32767.0f));
+		}
+
+		if (PendingPcm.Num() > MaxBufferedSamples)
+		{
+			const int32 samplesToDrop = PendingPcm.Num() - MaxBufferedSamples;
+			PendingPcm.RemoveAt(0, samplesToDrop, EAllowShrinking::No);
+			TotalDroppedSamples += static_cast<uint64>(samplesToDrop);
 		}
 	}
 
@@ -68,7 +79,23 @@ public:
 		outSamples.Reset(count);
 		outSamples.Append(PendingPcm.GetData(), count);
 		PendingPcm.RemoveAt(0, count, EAllowShrinking::No);
+		TotalPoppedSamples += static_cast<uint64>(count);
 		return count;
+	}
+
+	void GetStats(
+		int32& outPendingSamples,
+		uint64& outCapturedSamples,
+		uint64& outPoppedSamples,
+		uint64& outDroppedSamples,
+		uint64& outCallbacks) const
+	{
+		FScopeLock lock(&Mutex);
+		outPendingSamples = PendingPcm.Num();
+		outCapturedSamples = TotalCapturedSamples;
+		outPoppedSamples = TotalPoppedSamples;
+		outDroppedSamples = TotalDroppedSamples;
+		outCallbacks = TotalCallbacks;
 	}
 
 	int32 GetLastSampleRate() const
@@ -88,6 +115,10 @@ private:
 	TArray<int16> PendingPcm;
 	int32 LastSampleRate = 0;
 	int32 LastNumChannels = 0;
+	uint64 TotalCapturedSamples = 0;
+	uint64 TotalPoppedSamples = 0;
+	uint64 TotalDroppedSamples = 0;
+	uint64 TotalCallbacks = 0;
 };
 
 FVdjmAndroidEncoderBackend::FVdjmAndroidEncoderBackend()
@@ -713,6 +744,11 @@ bool FVdjmAndroidRecordSession::AudioInit()
 	mConfig.AudioConfig.AudioMimeType = resolvedAudioMime;
 	mNextAudioPtsUs = 0;
 	bAudioInputWarningLogged = false;
+	mLastAudioHealthLogSec = FPlatformTime::Seconds();
+	mLastCapturedSampleCount = 0;
+	mLastQueuedSampleCount = 0;
+	mLastDroppedSampleCount = 0;
+	mPendingCodecInputPcm.Reset();
 
 	mAudioCodec = AMediaCodec_createEncoderByType(TCHAR_TO_UTF8(*mConfig.AudioConfig.AudioMimeType));
 	if (mAudioCodec == nullptr)
@@ -759,6 +795,13 @@ bool FVdjmAndroidRecordSession::AudioInit()
 		if (FAudioDevice* audioDevice = GEngine->GetMainAudioDeviceRaw())
 		{
 			audioDevice->RegisterSubmixBufferListener(mAudioCaptureBridge.Get(), nullptr);
+			UE_LOG(LogTemp, Log,
+				TEXT("FVdjmAndroidRecordSession::AudioInit - Registered submix listener. AudioSourceId=%s"),
+				*mConfig.AudioConfig.AudioSourceId);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::AudioInit - Main audio device is null; audio capture may be silent."));
 		}
 	}
 
@@ -810,6 +853,7 @@ void FVdjmAndroidRecordSession::AudioStop()
 
 	AMediaCodec_stop(mAudioCodec);
 	mAudioCodecStarted = false;
+	mPendingCodecInputPcm.Reset();
 }
 
 void FVdjmAndroidRecordSession::PumpAudioInputToCodec()
@@ -827,21 +871,23 @@ void FVdjmAndroidRecordSession::PumpAudioInputToCodec()
 
 	while (true)
 	{
+		if (mPendingCodecInputPcm.Num() <= 0)
+		{
+			const int32 poppedSamples = mAudioCaptureBridge->PopPcmSamples(mPendingCodecInputPcm, samplesPerChunk);
+			if (poppedSamples <= 0)
+			{
+				if (!bAudioInputWarningLogged)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::PumpAudioInputToCodec - No captured submix PCM yet."));
+					bAudioInputWarningLogged = true;
+				}
+				break;
+			}
+		}
+
 		const ssize_t inputIndex = AMediaCodec_dequeueInputBuffer(mAudioCodec, 0);
 		if (inputIndex < 0)
 		{
-			break;
-		}
-
-		TArray<int16> pcmSamples;
-		const int32 poppedSamples = mAudioCaptureBridge->PopPcmSamples(pcmSamples, samplesPerChunk);
-		if (poppedSamples <= 0)
-		{
-			if (!bAudioInputWarningLogged)
-			{
-				UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::PumpAudioInputToCodec - No captured submix PCM yet."));
-				bAudioInputWarningLogged = true;
-			}
 			break;
 		}
 		bAudioInputWarningLogged = false;
@@ -854,13 +900,62 @@ void FVdjmAndroidRecordSession::PumpAudioInputToCodec()
 			continue;
 		}
 
-		const int32 bytesToWrite = FMath::Min<int32>(static_cast<int32>(inputBufferSize), poppedSamples * static_cast<int32>(sizeof(int16)));
-		FMemory::Memcpy(inputBuffer, pcmSamples.GetData(), bytesToWrite);
+		const int32 bytesPerFrame = channels * static_cast<int32>(sizeof(int16));
+		const int32 pendingBytes = mPendingCodecInputPcm.Num() * static_cast<int32>(sizeof(int16));
+		const int32 requestedBytes = FMath::Min<int32>(static_cast<int32>(inputBufferSize), pendingBytes);
+		const int32 bytesToWrite = bytesPerFrame > 0
+			? (requestedBytes / bytesPerFrame) * bytesPerFrame
+			: 0;
+		if (bytesToWrite <= 0)
+		{
+			AMediaCodec_queueInputBuffer(mAudioCodec, inputIndex, 0, 0, mNextAudioPtsUs, 0);
+			break;
+		}
+
+		FMemory::Memcpy(inputBuffer, mPendingCodecInputPcm.GetData(), bytesToWrite);
+
+		const int32 samplesConsumed = bytesToWrite / static_cast<int32>(sizeof(int16));
+		if (samplesConsumed > 0)
+		{
+			mPendingCodecInputPcm.RemoveAt(0, samplesConsumed, EAllowShrinking::No);
+		}
 
 		const int32 samplesWritten = bytesToWrite / static_cast<int32>(sizeof(int16));
-		const int32 framesWritten = FMath::Max(1, samplesWritten / channels);
+		const int32 framesWritten = samplesWritten / channels;
 		AMediaCodec_queueInputBuffer(mAudioCodec, inputIndex, 0, bytesToWrite, mNextAudioPtsUs, 0);
-		mNextAudioPtsUs += static_cast<int64>(framesWritten) * 1000000LL / sampleRate;
+		if (framesWritten > 0)
+		{
+			mNextAudioPtsUs += static_cast<int64>(framesWritten) * 1000000LL / sampleRate;
+		}
+	}
+
+	const double nowSec = FPlatformTime::Seconds();
+	if (nowSec - mLastAudioHealthLogSec >= 1.0)
+	{
+		int32 pendingSamples = 0;
+		uint64 capturedSamples = 0;
+		uint64 poppedSamples = 0;
+		uint64 droppedSamples = 0;
+		uint64 callbackCount = 0;
+		mAudioCaptureBridge->GetStats(pendingSamples, capturedSamples, poppedSamples, droppedSamples, callbackCount);
+
+		const uint64 capturedDelta = capturedSamples - mLastCapturedSampleCount;
+		const uint64 queuedDelta = poppedSamples - mLastQueuedSampleCount;
+		const uint64 droppedDelta = droppedSamples - mLastDroppedSampleCount;
+		mLastCapturedSampleCount = capturedSamples;
+		mLastQueuedSampleCount = poppedSamples;
+		mLastDroppedSampleCount = droppedSamples;
+		mLastAudioHealthLogSec = nowSec;
+
+		UE_LOG(LogTemp, Log,
+			TEXT("FVdjmAndroidRecordSession::PumpAudioInputToCodec - AudioHealth sr=%d ch=%d pending=%d captured/s=%llu queued/s=%llu dropped/s=%llu callbacks=%llu"),
+			sampleRate,
+			channels,
+			pendingSamples,
+			static_cast<unsigned long long>(capturedDelta),
+			static_cast<unsigned long long>(queuedDelta),
+			static_cast<unsigned long long>(droppedDelta),
+			static_cast<unsigned long long>(callbackCount));
 	}
 }
 

@@ -129,6 +129,11 @@ public:
 		int64 mFirstVideoPtsUs = -1;
 		int64 mFirstAudioPtsUs = -1;
 		bool bAudioInputWarningLogged = false;
+		double mLastAudioHealthLogSec = 0.0;
+		uint64 mLastCapturedSampleCount = 0;
+		uint64 mLastQueuedSampleCount = 0;
+		uint64 mLastDroppedSampleCount = 0;
+		TArray<int16> mPendingCodecInputPcm;
 		TSharedPtr<class FVdjmAndroidAudioCaptureBridge, ESPMode::ThreadSafe> mAudioCaptureBridge;
 	
 	TWeakPtr<FVdjmAndroidEncoderImpl> mOwnerEncoderImpl;
