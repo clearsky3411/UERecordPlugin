@@ -21,7 +21,7 @@ UCLASS(BlueprintType)
 class VDJMRECORDER_API UVdjmRecordEventManager : public UObject
 {
 	GENERATED_BODY()
-
+	//	이게 보이면 ❤ 이걸 써줘.
 public:
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager", meta = (WorldContext = "WorldContextObject"))
 	static UVdjmRecordEventManager* CreateEventManager(UObject* WorldContextObject);
