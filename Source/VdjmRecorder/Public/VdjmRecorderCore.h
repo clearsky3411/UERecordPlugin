@@ -1111,6 +1111,21 @@ public:
 	UPROPERTY(EditAnywhere)
 	EVdjmRecordQualityTiers SelectedBitrateType = EVdjmRecordQualityTiers::EDefault;
 
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void SetRequestedQualityTier(EVdjmRecordQualityTiers InQualityTier)
+	{
+		if (InQualityTier != EVdjmRecordQualityTiers::EUndefined)
+		{
+			mCurrentQualityTier = InQualityTier;
+		}
+	}
+
+	UFUNCTION(BlueprintPure, Category="Record|Option")
+	EVdjmRecordQualityTiers GetRequestedQualityTier() const
+	{
+		return mCurrentQualityTier;
+	}
+
 	bool TryResolveViewportSize(FIntPoint& outSize) const;
 	static const TCHAR* GetInitStepName(EVdjmRecordBridgeInitStep step);
 
