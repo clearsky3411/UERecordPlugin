@@ -140,6 +140,11 @@ int32 UVdjmRecordEventManager::GetCurrentFlowIndex() const
 	return CurrentFlowIndex;
 }
 
+UWorld* UVdjmRecordEventManager::GetManagerWorld() const
+{
+	return CachedWorld.Get();
+}
+
 int32 UVdjmRecordEventManager::FindNextEventIndex(const UVdjmRecordEventBase* SourceEvent, TSubclassOf<UVdjmRecordEventBase> TargetClass, FName TargetTag) const
 {
 	const UVdjmRecordEventFlowDataAsset* FlowAsset = ActiveFlowAsset.Get();

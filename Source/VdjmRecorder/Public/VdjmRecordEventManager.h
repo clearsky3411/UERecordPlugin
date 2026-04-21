@@ -69,6 +69,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
 	int32 GetCurrentFlowIndex() const;
 
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
+	UWorld* GetManagerWorld() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
 	int32 FindNextEventIndex(const UVdjmRecordEventBase* SourceEvent, TSubclassOf<UVdjmRecordEventBase> TargetClass, FName TargetTag) const;
 

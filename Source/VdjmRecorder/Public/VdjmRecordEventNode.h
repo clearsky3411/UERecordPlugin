@@ -91,3 +91,33 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventFlow")
 	bool bAbortIfNotFound = false;
 };
+
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
+class VDJMRECORDER_API UVdjmRecordEventSpawnBridgeActorNode : public UVdjmRecordEventBase
+{
+	GENERATED_BODY()
+
+public:
+	virtual FVdjmRecordEventResult ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor) override;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventFlow")
+	bool bReuseExistingBridgeActor = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventFlow")
+	TSubclassOf<AVdjmRecordBridgeActor> BridgeActorClass;
+};
+
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
+class VDJMRECORDER_API UVdjmRecordEventSetEnvDataAssetPathNode : public UVdjmRecordEventBase
+{
+	GENERATED_BODY()
+
+public:
+	virtual FVdjmRecordEventResult ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor) override;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventFlow")
+	FSoftObjectPath EnvDataAssetPath;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventFlow")
+	bool bRequireLoadSuccess = false;
+};
