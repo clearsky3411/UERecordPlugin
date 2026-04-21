@@ -1,5 +1,6 @@
 #include "VdjmRecorderStateObserver.h"
 
+#include "VdjmRecordBridgeActor.h"
 #include "VdjmRecorderCore.h"
 
 UVdjmRecorderStateObserver* UVdjmRecorderStateObserver::CreateObserver(UObject* WorldContextObject)

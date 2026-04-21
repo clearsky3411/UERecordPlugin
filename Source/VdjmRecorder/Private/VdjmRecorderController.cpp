@@ -1,5 +1,6 @@
 #include "VdjmRecorderController.h"
 
+#include "VdjmRecordBridgeActor.h"
 #include "VdjmRecorderCore.h"
 #include "VdjmRecorderStateObserver.h"
 

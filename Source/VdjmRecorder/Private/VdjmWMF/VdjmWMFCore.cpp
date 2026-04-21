@@ -2,6 +2,7 @@
 
 
 #include "VdjmWMF/VdjmWMFCore.h"
+#include "VdjmRecordBridgeActor.h"
 
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
@@ -607,5 +608,4 @@ void UVdjmRecordWMFUnitDefaultPipeline::ReleaseRecordPipeline()
 {
 	Super::ReleaseRecordPipeline();
 }
-
 
