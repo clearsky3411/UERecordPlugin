@@ -26,6 +26,10 @@ public:
 	//static UVdjmRecordDepreDataAsset* TryGetRecordConfigure();
 
 	static UVdjmRecordEnvDataAsset* TryGetRecordEnvConfigure();
+	UFUNCTION(BlueprintCallable, Category = "Record|Config")
+	static void SetRecordEnvDataAssetPath(const FSoftObjectPath& InDataAssetPath);
+	UFUNCTION(BlueprintPure, Category = "Record|Config")
+	static FSoftObjectPath GetRecordEnvDataAssetPath();
 	static AVdjmRecordBridgeActor* TryGetRecordBridgeActor(UWorld* worldContext = nullptr);
 	
 	AVdjmRecordBridgeActor();
@@ -275,6 +279,8 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<UVdjmRecordEnvDataAsset> mRecordConfigureDataAsset;
+
+	static FSoftObjectPath RecordEnvDataAssetPath;
 	
 
 	UPROPERTY()
@@ -295,4 +301,3 @@ protected:
 	UPROPERTY()
 	TObjectPtr<UVdjmRecordEnvResolver> mEnvResolver;
 };
-

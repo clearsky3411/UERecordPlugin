@@ -9,6 +9,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "Slate/SceneViewport.h"
 
+FSoftObjectPath AVdjmRecordBridgeActor::RecordEnvDataAssetPath(TEXT("/Script/VdjmRecorder.VdjmRecordEnvDataAsset'/Game/Temp/VdjmTestDataAsset.VdjmTestDataAsset'"));
+
 UVdjmRecordEnvDataAsset* AVdjmRecordBridgeActor::TryGetRecordEnvConfigure()
 {
 	/*
@@ -18,7 +20,20 @@ UVdjmRecordEnvDataAsset* AVdjmRecordBridgeActor::TryGetRecordEnvConfigure()
 	 *
 	 * /Script/VdjmRecorder.VdjmRecordEnvDataAsset'/VdjmMobileUi/Record/Bp_VdjmRecordConfigDataAsset.Bp_VdjmRecordConfigDataAsset'
 	 */
-	return FVdjmFunctionLibraryHelper::TryGetRecordConfigureDataAsset<UVdjmRecordEnvDataAsset>(FSoftObjectPath(TEXT("/Script/VdjmRecorder.VdjmRecordEnvDataAsset'/Game/Temp/VdjmTestDataAsset.VdjmTestDataAsset'")));
+	return FVdjmFunctionLibraryHelper::TryGetRecordConfigureDataAsset<UVdjmRecordEnvDataAsset>(RecordEnvDataAssetPath);
+}
+
+void AVdjmRecordBridgeActor::SetRecordEnvDataAssetPath(const FSoftObjectPath& InDataAssetPath)
+{
+	if (InDataAssetPath.IsValid())
+	{
+		RecordEnvDataAssetPath = InDataAssetPath;
+	}
+}
+
+FSoftObjectPath AVdjmRecordBridgeActor::GetRecordEnvDataAssetPath()
+{
+	return RecordEnvDataAssetPath;
 }
 
 AVdjmRecordBridgeActor* AVdjmRecordBridgeActor::TryGetRecordBridgeActor(UWorld* worldContext)
