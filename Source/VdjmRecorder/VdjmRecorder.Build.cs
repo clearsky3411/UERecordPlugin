@@ -23,6 +23,8 @@ public class VdjmRecorder : ModuleRules
             {
                 "CoreUObject",
                 "Engine",
+                "Json",
+                "JsonUtilities",
                 "AudioMixer",
                 "Slate",
                 "SlateCore",
