@@ -2,6 +2,7 @@
 
 
 #include "VdjmAndroid/VdjmAndroidCore.h"
+#include "VdjmRecordBridgeActor.h"
 
 #include "RenderGraphUtils.h"
 #include "VdjmRecordShader.h"

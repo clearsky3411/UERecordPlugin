@@ -1001,8 +1001,8 @@ namespace VdjmRecordUtils
 				FPaths::NormalizeFilename(candiPath);
 
 				// Android에서 '/storage/...' 대신 'storage/...' 형태(선행 슬래시 누락)가
-				// 들어오면 relative로 오인되어 BaseDir가 반복 결합될 수 있다.
-				// 선행 슬래시를 복원하고, 이미 중복 결합된 prefix도 1회 경로로 정규화한다.
+				// 들어오거나, BaseDir가 중첩되어 '/.../files/storage/.../files/..' 형태가 되면
+				// 경로가 계속 길어질 수 있다. 시작 prefix 중복을 모두 축약해 1회 경로로 고정한다.
 				if (inPlatform == EVdjmRecordEnvPlatform::EAndroid && !candiPath.IsEmpty())
 				{
 					FString AndroidBaseNoLeadingSlash = BaseDir;
@@ -1022,11 +1022,18 @@ namespace VdjmRecordUtils
 							candiPath = TEXT("/") + candiPath;
 						}
 
-						const FString DuplicatedPrefix = FPaths::Combine(BaseDir, AndroidBaseNoLeadingSlash);
-						while (candiPath.StartsWith(DuplicatedPrefix, ESearchCase::IgnoreCase))
+						const FString DuplicatedPrefixA = FPaths::Combine(BaseDir, AndroidBaseNoLeadingSlash);
+						while (candiPath.StartsWith(DuplicatedPrefixA, ESearchCase::IgnoreCase))
 						{
 							candiPath.RightChopInline(BaseDir.Len() + 1, EAllowShrinking::No);
 							candiPath = TEXT("/") + candiPath;
+						}
+
+						const FString DuplicatedPrefixB = BaseDir + TEXT("/") + AndroidBaseNoLeadingSlash;
+						while (candiPath.StartsWith(DuplicatedPrefixB, ESearchCase::IgnoreCase))
+						{
+							const FString suffix = candiPath.RightChop(DuplicatedPrefixB.Len());
+							candiPath = BaseDir + suffix;
 						}
 					}
 				}

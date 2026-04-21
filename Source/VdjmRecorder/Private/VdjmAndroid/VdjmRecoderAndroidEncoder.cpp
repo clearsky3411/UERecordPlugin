@@ -24,6 +24,7 @@
 
 #include "VdjmAndroid/VdjmAndroidEncoderBackendOpenGL.h"
 #include "VdjmAndroid/VdjmAndroidEncoderBackendVulkan.h"
+#include "Async/Async.h"
 
 namespace 
 {
@@ -35,6 +36,8 @@ namespace
 class FVdjmAndroidAudioCaptureBridge final : public ISubmixBufferListener
 {
 public:
+	static constexpr int32 MaxBufferedSamples = 44100 * 2 * 5; // 최대 5초(44.1k stereo 기준)
+
 	void OnNewSubmixBuffer(const USoundSubmix* OwningSubmix, float* AudioData, int32 NumSamples, int32 NumChannels,
 		const int32 SampleRate, double AudioClock) override
 	{
@@ -46,12 +49,21 @@ public:
 		FScopeLock lock(&Mutex);
 		LastSampleRate = SampleRate;
 		LastNumChannels = NumChannels;
+		TotalCallbacks++;
+		TotalCapturedSamples += static_cast<uint64>(NumSamples);
 		PendingPcm.Reserve(PendingPcm.Num() + NumSamples);
 
 		for (int32 i = 0; i < NumSamples; ++i)
 		{
 			const float clamped = FMath::Clamp(AudioData[i], -1.0f, 1.0f);
 			PendingPcm.Add(static_cast<int16>(clamped * 32767.0f));
+		}
+
+		if (PendingPcm.Num() > MaxBufferedSamples)
+		{
+			const int32 samplesToDrop = PendingPcm.Num() - MaxBufferedSamples;
+			PendingPcm.RemoveAt(0, samplesToDrop, EAllowShrinking::No);
+			TotalDroppedSamples += static_cast<uint64>(samplesToDrop);
 		}
 	}
 
@@ -68,7 +80,23 @@ public:
 		outSamples.Reset(count);
 		outSamples.Append(PendingPcm.GetData(), count);
 		PendingPcm.RemoveAt(0, count, EAllowShrinking::No);
+		TotalPoppedSamples += static_cast<uint64>(count);
 		return count;
+	}
+
+	void GetStats(
+		int32& outPendingSamples,
+		uint64& outCapturedSamples,
+		uint64& outPoppedSamples,
+		uint64& outDroppedSamples,
+		uint64& outCallbacks) const
+	{
+		FScopeLock lock(&Mutex);
+		outPendingSamples = PendingPcm.Num();
+		outCapturedSamples = TotalCapturedSamples;
+		outPoppedSamples = TotalPoppedSamples;
+		outDroppedSamples = TotalDroppedSamples;
+		outCallbacks = TotalCallbacks;
 	}
 
 	int32 GetLastSampleRate() const
@@ -88,6 +116,10 @@ private:
 	TArray<int16> PendingPcm;
 	int32 LastSampleRate = 0;
 	int32 LastNumChannels = 0;
+	uint64 TotalCapturedSamples = 0;
+	uint64 TotalPoppedSamples = 0;
+	uint64 TotalDroppedSamples = 0;
+	uint64 TotalCallbacks = 0;
 };
 
 FVdjmAndroidEncoderBackend::FVdjmAndroidEncoderBackend()
@@ -214,6 +246,7 @@ bool FVdjmAndroidRecordSession::Start()
 	mMuxerStarted = false;
 	mTrackIndex = -1;
 	mEosSent = false;
+	mAudioEosReceived = false;
 	mFirstVideoPtsUs = -1;
 	mFirstAudioPtsUs = -1;
 	if (not mGraphicBackend->Start())
@@ -221,6 +254,7 @@ bool FVdjmAndroidRecordSession::Start()
 		Terminate();
 		return false;
 	}
+	StartAudioDrainThread();
 	mRunning = true;
 	return true;
 }
@@ -317,30 +351,6 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 	if (!mCodec)
 		return;
 
-	auto TryStartMuxerIfReady = [this]()
-	{
-		if (mMuxerStarted || mTrackIndex < 0)
-		{
-			return;
-		}
-
-		const bool bAudioExpected = mConfig.AudioConfig.bEnableAudio && mAudioCodecStarted;
-		const bool bAudioTrackReady = !bAudioExpected || mAudioTrackIndex >= 0;
-		if (!bAudioTrackReady)
-		{
-			return;
-		}
-
-		if (AMediaMuxer_start(mMuxer) == AMEDIA_OK)
-		{
-			mMuxerStarted = true;
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::Drain - AMediaMuxer_start failed."));
-		}
-	};
-
 	if (bEndOfStream && !mEosSent)
 	{
 		UE_LOG(LogTemp, Log, TEXT("FVdjmAndroidRecordSession::Drain - Signaling end of input stream to codec."));
@@ -357,42 +367,49 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 		{
 			break;
 		}
-		else if (outputIndex == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED)
-		{
-			AMediaFormat* newFormat = AMediaCodec_getOutputFormat(mCodec);
-			if (!newFormat)
-				break;
-
-			if (mTrackIndex < 0)
+			else if (outputIndex == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED)
 			{
-				mTrackIndex = AMediaMuxer_addTrack(mMuxer, newFormat);
-			}
-			else
-			{
-				UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::Drain - Video track already added. Ignoring duplicate format change."));
-			}
-			AMediaFormat_delete(newFormat);
+				AMediaFormat* newFormat = AMediaCodec_getOutputFormat(mCodec);
+				if (!newFormat)
+					break;
 
-			TryStartMuxerIfReady();
-		}
-		else if (outputIndex >= 0)
-		{
-			size_t outSize = 0;
-			uint8_t* outBuffer = AMediaCodec_getOutputBuffer(mCodec, outputIndex, &outSize);
-
-			if (outBuffer && bufferInfo.size > 0 && mMuxerStarted)
-			{
-				if (mFirstVideoPtsUs < 0)
 				{
-					mFirstVideoPtsUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs);
+					FScopeLock muxerLock(&mMuxerMutex);
+					if (mTrackIndex < 0)
+					{
+						mTrackIndex = AMediaMuxer_addTrack(mMuxer, newFormat);
+					}
+					else
+					{
+						UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::Drain - Video track already added. Ignoring duplicate format change."));
+					}
+				}
+				AMediaFormat_delete(newFormat);
+
+				TryStartMuxerIfReady();
+			}
+			else if (outputIndex >= 0)
+			{
+				size_t outSize = 0;
+				uint8_t* outBuffer = AMediaCodec_getOutputBuffer(mCodec, outputIndex, &outSize);
+
+				if (outBuffer && bufferInfo.size > 0)
+				{
+					FScopeLock muxerLock(&mMuxerMutex);
+					if (mMuxerStarted)
+					{
+						if (mFirstVideoPtsUs < 0)
+						{
+							mFirstVideoPtsUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs);
+						}
+
+						AMediaCodecBufferInfo normalizedInfo = bufferInfo;
+						normalizedInfo.presentationTimeUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs - mFirstVideoPtsUs);
+						AMediaMuxer_writeSampleData(mMuxer, mTrackIndex, outBuffer, &normalizedInfo);
+					}
 				}
 
-				AMediaCodecBufferInfo normalizedInfo = bufferInfo;
-				normalizedInfo.presentationTimeUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs - mFirstVideoPtsUs);
-				AMediaMuxer_writeSampleData(mMuxer, mTrackIndex, outBuffer, &normalizedInfo);
-			}
-
-			AMediaCodec_releaseOutputBuffer(mCodec, outputIndex, false);
+				AMediaCodec_releaseOutputBuffer(mCodec, outputIndex, false);
 
 			if ((bufferInfo.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0)
 			{
@@ -400,76 +417,10 @@ void FVdjmAndroidRecordSession::Drain(bool bEndOfStream)
 			}
 		}
 		else
-		{
-			break;
-		}
-	}
-
-	if (!mAudioCodec || !mAudioCodecStarted)
-	{
-		return;
-	}
-
-	PumpAudioInputToCodec();
-
-	while (true)
-	{
-		AMediaCodecBufferInfo bufferInfo{};
-		const ssize_t outputIndex = AMediaCodec_dequeueOutputBuffer(mAudioCodec, &bufferInfo, 0);
-
-		if (outputIndex == AMEDIACODEC_INFO_TRY_AGAIN_LATER)
-		{
-			break;
-		}
-		else if (outputIndex == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED)
-		{
-			AMediaFormat* newFormat = AMediaCodec_getOutputFormat(mAudioCodec);
-			if (!newFormat)
-			{
-				break;
-			}
-
-			if (mAudioTrackIndex < 0)
-			{
-				mAudioTrackIndex = AMediaMuxer_addTrack(mMuxer, newFormat);
-			}
-			else
-			{
-				UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::Drain - Audio track already added. Ignoring duplicate format change."));
-			}
-			AMediaFormat_delete(newFormat);
-
-			TryStartMuxerIfReady();
-		}
-		else if (outputIndex >= 0)
-		{
-			size_t outSize = 0;
-			uint8_t* outBuffer = AMediaCodec_getOutputBuffer(mAudioCodec, outputIndex, &outSize);
-
-			if (outBuffer && bufferInfo.size > 0 && mMuxerStarted && mAudioTrackIndex >= 0)
-			{
-				if (mFirstAudioPtsUs < 0)
-				{
-					mFirstAudioPtsUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs);
-				}
-
-				AMediaCodecBufferInfo normalizedInfo = bufferInfo;
-				normalizedInfo.presentationTimeUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs - mFirstAudioPtsUs);
-				AMediaMuxer_writeSampleData(mMuxer, mAudioTrackIndex, outBuffer, &normalizedInfo);
-			}
-
-			AMediaCodec_releaseOutputBuffer(mAudioCodec, outputIndex, false);
-
-			if ((bufferInfo.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0)
 			{
 				break;
 			}
 		}
-		else
-		{
-			break;
-		}
-	}
 }
 
 bool FVdjmAndroidRecordSession::Running(FRHICommandList& RHICmdList, const FTextureRHIRef& srcTexture,
@@ -514,6 +465,7 @@ void FVdjmAndroidRecordSession::Stop()
 	}
 	
 	Drain(true);
+	StopAudioDrainThread();
 
 	if (mCodec && mCodecStarted)
 	{
@@ -593,6 +545,7 @@ void FVdjmAndroidRecordSession::Terminate()
 	mCodecStarted = false;
 	mAudioCodecStarted = false;
 	mEosSent = false;
+	mAudioEosReceived = false;
 	mRunning = false;
 	mInitialized = false;
 	mFirstVideoPtsUs = -1;
@@ -681,6 +634,74 @@ void FVdjmAndroidRecordSession::Clear()
 	mOwnerEncoderImpl = nullptr;
 }
 
+bool FVdjmAndroidRecordSession::TryStartMuxerIfReady()
+{
+	FScopeLock muxerLock(&mMuxerMutex);
+	if (mMuxerStarted || mTrackIndex < 0)
+	{
+		return mMuxerStarted;
+	}
+
+	const bool bAudioExpected = mConfig.AudioConfig.bEnableAudio && mAudioCodecStarted;
+	const bool bAudioTrackReady = !bAudioExpected || mAudioTrackIndex >= 0;
+	if (!bAudioTrackReady)
+	{
+		return false;
+	}
+
+	if (AMediaMuxer_start(mMuxer) == AMEDIA_OK)
+	{
+		mMuxerStarted = true;
+		return true;
+	}
+
+	UE_LOG(LogTemp, Error, TEXT("FVdjmAndroidRecordSession::TryStartMuxerIfReady - AMediaMuxer_start failed."));
+	return false;
+}
+
+void FVdjmAndroidRecordSession::StartAudioDrainThread()
+{
+	if (!mConfig.AudioConfig.bEnableAudio || !mAudioCodecStarted || bAudioDrainThreadRunning)
+	{
+		return;
+	}
+
+	bAudioDrainStopRequested = false;
+	bAudioDrainThreadRunning = true;
+
+	Async(EAsyncExecution::Thread, [this]()
+	{
+		AudioDrainLoop();
+	});
+}
+
+void FVdjmAndroidRecordSession::StopAudioDrainThread()
+{
+	if (!bAudioDrainThreadRunning)
+	{
+		return;
+	}
+
+	bAudioDrainStopRequested = true;
+	while (bAudioDrainThreadRunning)
+	{
+		FPlatformProcess::SleepNoStats(0.001f);
+	}
+}
+
+void FVdjmAndroidRecordSession::AudioDrainLoop()
+{
+	while (!bAudioDrainStopRequested)
+	{
+		PumpAudioInputToCodec();
+		DrainAudioCodecOutput();
+		FPlatformProcess::SleepNoStats(0.005f);
+	}
+
+	DrainAudioCodecOutput();
+	bAudioDrainThreadRunning = false;
+}
+
 bool FVdjmAndroidRecordSession::AudioInit()
 {
 	if (!mConfig.AudioConfig.bEnableAudio)
@@ -713,6 +734,11 @@ bool FVdjmAndroidRecordSession::AudioInit()
 	mConfig.AudioConfig.AudioMimeType = resolvedAudioMime;
 	mNextAudioPtsUs = 0;
 	bAudioInputWarningLogged = false;
+	mLastAudioHealthLogSec = FPlatformTime::Seconds();
+	mLastCapturedSampleCount = 0;
+	mLastQueuedSampleCount = 0;
+	mLastDroppedSampleCount = 0;
+	mPendingCodecInputPcm.Reset();
 
 	mAudioCodec = AMediaCodec_createEncoderByType(TCHAR_TO_UTF8(*mConfig.AudioConfig.AudioMimeType));
 	if (mAudioCodec == nullptr)
@@ -759,6 +785,13 @@ bool FVdjmAndroidRecordSession::AudioInit()
 		if (FAudioDevice* audioDevice = GEngine->GetMainAudioDeviceRaw())
 		{
 			audioDevice->RegisterSubmixBufferListener(mAudioCaptureBridge.Get(), nullptr);
+			UE_LOG(LogTemp, Log,
+				TEXT("FVdjmAndroidRecordSession::AudioInit - Registered submix listener. AudioSourceId=%s"),
+				*mConfig.AudioConfig.AudioSourceId);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::AudioInit - Main audio device is null; audio capture may be silent."));
 		}
 	}
 
@@ -783,6 +816,7 @@ bool FVdjmAndroidRecordSession::AudioStart()
 		return false;
 	}
 	mAudioCodecStarted = true;
+	mAudioEosReceived = false;
 	return true;
 }
 
@@ -808,8 +842,89 @@ void FVdjmAndroidRecordSession::AudioStop()
 		AMediaCodec_queueInputBuffer(mAudioCodec, inputIndex, 0, 0, mNextAudioPtsUs, AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
 	}
 
+	for (int32 retry = 0; retry < 60 && !mAudioEosReceived; ++retry)
+	{
+		DrainAudioCodecOutput();
+		FPlatformProcess::SleepNoStats(0.005f);
+	}
+
 	AMediaCodec_stop(mAudioCodec);
 	mAudioCodecStarted = false;
+	mPendingCodecInputPcm.Reset();
+}
+
+void FVdjmAndroidRecordSession::DrainAudioCodecOutput()
+{
+	if (!mAudioCodec || !mAudioCodecStarted)
+	{
+		return;
+	}
+
+	while (true)
+	{
+		AMediaCodecBufferInfo bufferInfo{};
+		const ssize_t outputIndex = AMediaCodec_dequeueOutputBuffer(mAudioCodec, &bufferInfo, 0);
+
+		if (outputIndex == AMEDIACODEC_INFO_TRY_AGAIN_LATER)
+		{
+			break;
+		}
+		else if (outputIndex == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED)
+		{
+			AMediaFormat* newFormat = AMediaCodec_getOutputFormat(mAudioCodec);
+			if (!newFormat)
+			{
+				break;
+			}
+
+			{
+				FScopeLock muxerLock(&mMuxerMutex);
+				if (mAudioTrackIndex < 0)
+				{
+					mAudioTrackIndex = AMediaMuxer_addTrack(mMuxer, newFormat);
+				}
+				else
+				{
+					UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::DrainAudioCodecOutput - Audio track already added. Ignoring duplicate format change."));
+				}
+			}
+			AMediaFormat_delete(newFormat);
+			TryStartMuxerIfReady();
+		}
+		else if (outputIndex >= 0)
+		{
+			size_t outSize = 0;
+			uint8_t* outBuffer = AMediaCodec_getOutputBuffer(mAudioCodec, outputIndex, &outSize);
+
+			if (outBuffer && bufferInfo.size > 0 && mAudioTrackIndex >= 0)
+			{
+				FScopeLock muxerLock(&mMuxerMutex);
+				if (mMuxerStarted)
+				{
+					if (mFirstAudioPtsUs < 0)
+					{
+						mFirstAudioPtsUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs);
+					}
+
+					AMediaCodecBufferInfo normalizedInfo = bufferInfo;
+					normalizedInfo.presentationTimeUs = FMath::Max<int64>(0, bufferInfo.presentationTimeUs - mFirstAudioPtsUs);
+					AMediaMuxer_writeSampleData(mMuxer, mAudioTrackIndex, outBuffer, &normalizedInfo);
+				}
+			}
+
+			AMediaCodec_releaseOutputBuffer(mAudioCodec, outputIndex, false);
+
+			if ((bufferInfo.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) != 0)
+			{
+				mAudioEosReceived = true;
+				break;
+			}
+		}
+		else
+		{
+			break;
+		}
+}
 }
 
 void FVdjmAndroidRecordSession::PumpAudioInputToCodec()
@@ -827,21 +942,23 @@ void FVdjmAndroidRecordSession::PumpAudioInputToCodec()
 
 	while (true)
 	{
+		if (mPendingCodecInputPcm.Num() <= 0)
+		{
+			const int32 poppedSamples = mAudioCaptureBridge->PopPcmSamples(mPendingCodecInputPcm, samplesPerChunk);
+			if (poppedSamples <= 0)
+			{
+				if (!bAudioInputWarningLogged)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::PumpAudioInputToCodec - No captured submix PCM yet."));
+					bAudioInputWarningLogged = true;
+				}
+				break;
+			}
+		}
+
 		const ssize_t inputIndex = AMediaCodec_dequeueInputBuffer(mAudioCodec, 0);
 		if (inputIndex < 0)
 		{
-			break;
-		}
-
-		TArray<int16> pcmSamples;
-		const int32 poppedSamples = mAudioCaptureBridge->PopPcmSamples(pcmSamples, samplesPerChunk);
-		if (poppedSamples <= 0)
-		{
-			if (!bAudioInputWarningLogged)
-			{
-				UE_LOG(LogTemp, Warning, TEXT("FVdjmAndroidRecordSession::PumpAudioInputToCodec - No captured submix PCM yet."));
-				bAudioInputWarningLogged = true;
-			}
 			break;
 		}
 		bAudioInputWarningLogged = false;
@@ -854,13 +971,62 @@ void FVdjmAndroidRecordSession::PumpAudioInputToCodec()
 			continue;
 		}
 
-		const int32 bytesToWrite = FMath::Min<int32>(static_cast<int32>(inputBufferSize), poppedSamples * static_cast<int32>(sizeof(int16)));
-		FMemory::Memcpy(inputBuffer, pcmSamples.GetData(), bytesToWrite);
+		const int32 bytesPerFrame = channels * static_cast<int32>(sizeof(int16));
+		const int32 pendingBytes = mPendingCodecInputPcm.Num() * static_cast<int32>(sizeof(int16));
+		const int32 requestedBytes = FMath::Min<int32>(static_cast<int32>(inputBufferSize), pendingBytes);
+		const int32 bytesToWrite = bytesPerFrame > 0
+			? (requestedBytes / bytesPerFrame) * bytesPerFrame
+			: 0;
+		if (bytesToWrite <= 0)
+		{
+			AMediaCodec_queueInputBuffer(mAudioCodec, inputIndex, 0, 0, mNextAudioPtsUs, 0);
+			break;
+		}
+
+		FMemory::Memcpy(inputBuffer, mPendingCodecInputPcm.GetData(), bytesToWrite);
+
+		const int32 samplesConsumed = bytesToWrite / static_cast<int32>(sizeof(int16));
+		if (samplesConsumed > 0)
+		{
+			mPendingCodecInputPcm.RemoveAt(0, samplesConsumed, EAllowShrinking::No);
+		}
 
 		const int32 samplesWritten = bytesToWrite / static_cast<int32>(sizeof(int16));
-		const int32 framesWritten = FMath::Max(1, samplesWritten / channels);
+		const int32 framesWritten = samplesWritten / channels;
 		AMediaCodec_queueInputBuffer(mAudioCodec, inputIndex, 0, bytesToWrite, mNextAudioPtsUs, 0);
-		mNextAudioPtsUs += static_cast<int64>(framesWritten) * 1000000LL / sampleRate;
+		if (framesWritten > 0)
+		{
+			mNextAudioPtsUs += static_cast<int64>(framesWritten) * 1000000LL / sampleRate;
+		}
+	}
+
+	const double nowSec = FPlatformTime::Seconds();
+	if (nowSec - mLastAudioHealthLogSec >= 1.0)
+	{
+		int32 pendingSamples = 0;
+		uint64 capturedSamples = 0;
+		uint64 poppedSamples = 0;
+		uint64 droppedSamples = 0;
+		uint64 callbackCount = 0;
+		mAudioCaptureBridge->GetStats(pendingSamples, capturedSamples, poppedSamples, droppedSamples, callbackCount);
+
+		const uint64 capturedDelta = capturedSamples - mLastCapturedSampleCount;
+		const uint64 queuedDelta = poppedSamples - mLastQueuedSampleCount;
+		const uint64 droppedDelta = droppedSamples - mLastDroppedSampleCount;
+		mLastCapturedSampleCount = capturedSamples;
+		mLastQueuedSampleCount = poppedSamples;
+		mLastDroppedSampleCount = droppedSamples;
+		mLastAudioHealthLogSec = nowSec;
+
+		UE_LOG(LogTemp, Log,
+			TEXT("FVdjmAndroidRecordSession::PumpAudioInputToCodec - AudioHealth sr=%d ch=%d pending=%d captured/s=%llu queued/s=%llu dropped/s=%llu callbacks=%llu"),
+			sampleRate,
+			channels,
+			pendingSamples,
+			static_cast<unsigned long long>(capturedDelta),
+			static_cast<unsigned long long>(queuedDelta),
+			static_cast<unsigned long long>(droppedDelta),
+			static_cast<unsigned long long>(callbackCount));
 	}
 }
 
