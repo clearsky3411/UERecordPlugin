@@ -103,7 +103,7 @@ FVdjmRecordEventResult UVdjmRecordEventSpawnBridgeActorNode::ExecuteEvent_Implem
 		}
 	}
 
-	TSubclassOf<AVdjmRecordBridgeActor> SpawnClass = BridgeActorClass ? BridgeActorClass : AVdjmRecordBridgeActor::StaticClass();
+	TSubclassOf<AVdjmRecordBridgeActor> SpawnClass = BridgeActorClass ? BridgeActorClass.Get() : AVdjmRecordBridgeActor::StaticClass();
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	AVdjmRecordBridgeActor* SpawnedBridge = World->SpawnActor<AVdjmRecordBridgeActor>(SpawnClass, FTransform::Identity, SpawnParameters);
