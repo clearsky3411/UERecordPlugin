@@ -1,6 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "VdjmRecordBridgeActor.h"
+
+#include "RenderGraphBuilder.h"
+#include "RenderGraphUtils.h"
 #include "VdjmRecorderCore.h"
 
 #include "Kismet/GameplayStatics.h"

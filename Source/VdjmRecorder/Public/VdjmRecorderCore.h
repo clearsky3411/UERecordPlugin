@@ -30,6 +30,7 @@ class AVdjmRecordBridgeActor;
 class FRHIGPUTextureReadback;
 
 
+
 /*§		↓			class FVdjmReadBackHelper		begin		↓	 */
 class FVdjmReadBackHelper
 {
@@ -291,7 +292,7 @@ public:
 	TArray<TObjectPtr<UVdjmRecordUnit>> RecordUnits;
 	UPROPERTY()
 	TWeakObjectPtr<UVdjmRecordResource> LinkedRecordResource;
-	UPROPERTY()
+
 	TWeakObjectPtr<AVdjmRecordBridgeActor> LinkedBridgeActor;
 protected:
 	void TravelLoopUnits(TFunctionRef<int32(UVdjmRecordUnit* unit)> travelFunc) const;
@@ -877,23 +878,6 @@ private:
 	bool mHasResolved = false;
 };
 
-
-/*
-§	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
-	↓		class  UVdjmRecordFileSaver : public UObject		↓
-	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
-*/
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVdjmRecordInitEvent,AVdjmRecordBridgeActor*, bridgeActor);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVdjmRecordInitErrorEvent,AVdjmRecordBridgeActor*, bridgeActor,EVdjmRecordBridgeInitStep,prevStep,int32,retryStep);
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVdjmRecordEvent,UVdjmRecordResource*, recordData);
-DECLARE_MULTICAST_DELEGATE_OneParam(FVdjmRecordInnerEvent,UVdjmRecordResource*);
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmRecordTickEvent,UVdjmRecordResource*, recordResource, float, deltaTime);
-DECLARE_MULTICAST_DELEGATE_TwoParams(FVdjmRecordTickInnerEvent,UVdjmRecordResource*,  float);
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVdjmRecordBridgeActorChainInitEvent, AVdjmRecordBridgeActor*, bridgeActor, EVdjmRecordBridgeInitStep, prevInitstep, EVdjmRecordBridgeInitStep, currentInitStep);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmRecordQualityTierChangedEvent, AVdjmRecordBridgeActor*, bridgeActor, EVdjmRecordQualityTiers, newQualityTier);
 
 DECLARE_DELEGATE_RetVal(VdjmResult,FVdjmRecordStartEvent);
 
