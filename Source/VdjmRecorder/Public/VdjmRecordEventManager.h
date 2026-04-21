@@ -10,6 +10,7 @@
 class AVdjmRecordBridgeActor;
 class UVdjmRecordEventBase;
 class UVdjmRecordEventFlowDataAsset;
+class UVdjmRecordEventFlowRuntime;
 class UVdjmRecordResource;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
@@ -58,6 +59,12 @@ public:
 	bool StartEventFlow(UVdjmRecordEventFlowDataAsset* InFlowAsset, bool bResetRuntimeStates = true);
 
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool StartEventFlowRuntime(UVdjmRecordEventFlowRuntime* InFlowRuntime, bool bResetRuntimeStates = true);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool StartEventFlowFromJsonString(const FString& InJsonString, FString& OutError, bool bResetRuntimeStates = true);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
 	void StopEventFlow();
 
 	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
@@ -65,6 +72,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
 	UVdjmRecordEventFlowDataAsset* GetActiveFlowAsset() const;
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
+	UVdjmRecordEventFlowRuntime* GetActiveFlowRuntime() const;
 
 	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
 	int32 GetCurrentFlowIndex() const;
@@ -98,6 +108,8 @@ private:
 	TWeakObjectPtr<UWorld> CachedWorld;
 	TWeakObjectPtr<AVdjmRecordBridgeActor> WeakBridgeActor;
 	TWeakObjectPtr<UVdjmRecordEventFlowDataAsset> ActiveFlowAsset;
+	UPROPERTY(Transient)
+	TObjectPtr<UVdjmRecordEventFlowRuntime> ActiveFlowRuntime;
 
 	int32 CurrentFlowIndex = INDEX_NONE;
 	float NextExecutableTime = 0.0f;
