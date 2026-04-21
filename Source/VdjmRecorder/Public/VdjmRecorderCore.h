@@ -863,8 +863,10 @@ public:
 	TWeakObjectPtr<AVdjmRecordBridgeActor> LinkedOwnerBridge = nullptr;
 	TWeakObjectPtr<UVdjmRecordResource> LinkedRecordResource = nullptr;
 	TWeakObjectPtr<UVdjmRecordUnitPipeline> LinkedPipeline = nullptr;
-private:
+
 	bool ResolveEnvPlatform(const FVdjmRecordEnvPlatformPreset* presetData);
+
+private:
 	bool ResolvedFinalFilePath(const FString& customFileName);
 	
 	
@@ -891,6 +893,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmRecordTickEvent,UVdjmRecordRes
 DECLARE_MULTICAST_DELEGATE_TwoParams(FVdjmRecordTickInnerEvent,UVdjmRecordResource*,  float);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVdjmRecordBridgeActorChainInitEvent, AVdjmRecordBridgeActor*, bridgeActor, EVdjmRecordBridgeInitStep, prevInitstep, EVdjmRecordBridgeInitStep, currentInitStep);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmRecordQualityTierChangedEvent, AVdjmRecordBridgeActor*, bridgeActor, EVdjmRecordQualityTiers, newQualityTier);
 
 DECLARE_DELEGATE_RetVal(VdjmResult,FVdjmRecordStartEvent);
 
@@ -1093,6 +1096,9 @@ public:
 	
 	UPROPERTY(BlueprintAssignable,EditAnywhere)
 	FVdjmRecordBridgeActorChainInitEvent OnChainInitEvent;
+
+	UPROPERTY(BlueprintAssignable,EditAnywhere)
+	FVdjmRecordQualityTierChangedEvent OnRequestedQualityTierChanged;
 	
 	FVdjmRecordStartEvent OnRecordStartRetValEvent;
 	
@@ -1110,6 +1116,30 @@ public:
 
 	UPROPERTY(EditAnywhere)
 	EVdjmRecordQualityTiers SelectedBitrateType = EVdjmRecordQualityTiers::EDefault;
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void SetRequestedQualityTier(EVdjmRecordQualityTiers InQualityTier);
+
+	UFUNCTION(BlueprintPure, Category="Record|Option")
+	EVdjmRecordQualityTiers GetRequestedQualityTier() const
+	{
+		return mCurrentQualityTier;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Record|State")
+	bool IsRecording() const
+	{
+		return bIsRecording;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Record|State")
+	EVdjmRecordBridgeInitStep GetCurrentInitStep() const
+	{
+		return mCurrentInitStep;
+	}
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	bool RefreshResolvedOptionsFromRequest(FString& OutErrorReason);
 
 	bool TryResolveViewportSize(FIntPoint& outSize) const;
 	static const TCHAR* GetInitStepName(EVdjmRecordBridgeInitStep step);

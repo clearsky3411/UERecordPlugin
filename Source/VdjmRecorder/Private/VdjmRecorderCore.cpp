@@ -626,8 +626,8 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 	}
 
 	const EVdjmRecordQualityTiers requestedTier =
-		(LinkedOwnerBridge->SelectedBitrateType != EVdjmRecordQualityTiers::EUndefined)
-			? LinkedOwnerBridge->SelectedBitrateType
+		(LinkedOwnerBridge->GetRequestedQualityTier() != EVdjmRecordQualityTiers::EUndefined)
+			? LinkedOwnerBridge->GetRequestedQualityTier()
 			: presetData->DefaultQualityTier;
 
 	constexpr EVdjmRecordQualityTiers tierOrder[] = {
@@ -1658,6 +1658,74 @@ void AVdjmRecordBridgeActor::OnBackBufferReady_RenderThread(SWindow& SlateWindow
 EVdjmRecordEnvPlatform AVdjmRecordBridgeActor::GetTargetPlatform()
 {
 	return VdjmRecordUtils::Platforms::GetTargetPlatform();
+}
+
+void AVdjmRecordBridgeActor::SetRequestedQualityTier(EVdjmRecordQualityTiers InQualityTier)
+{
+	if (InQualityTier == EVdjmRecordQualityTiers::EUndefined)
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("SetRequestedQualityTier - Undefined tier is ignored."));
+		return;
+	}
+
+	if (mCurrentQualityTier == InQualityTier)
+	{
+		return;
+	}
+
+	mCurrentQualityTier = InQualityTier;
+	SelectedBitrateType = InQualityTier;
+
+	FString errorReason;
+	if (!RefreshResolvedOptionsFromRequest(errorReason))
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("SetRequestedQualityTier - Unable to re-resolve options: %s"), *errorReason);
+	}
+
+	OnRequestedQualityTierChanged.Broadcast(this, mCurrentQualityTier);
+}
+
+bool AVdjmRecordBridgeActor::RefreshResolvedOptionsFromRequest(FString& OutErrorReason)
+{
+	OutErrorReason.Reset();
+
+	if (bIsRecording)
+	{
+		OutErrorReason = TEXT("Cannot refresh resolved options while recording is running.");
+		return false;
+	}
+
+	if (mEnvResolver == nullptr)
+	{
+		return true;
+	}
+
+	if (mRecordConfigureDataAsset == nullptr)
+	{
+		OutErrorReason = TEXT("Record configure asset is not ready.");
+		return false;
+	}
+
+	const FVdjmRecordEnvPlatformPreset* envPreset = mRecordConfigureDataAsset->GetPlatformPreset(GetTargetPlatform());
+	if (envPreset == nullptr)
+	{
+		OutErrorReason = TEXT("Platform preset is not available.");
+		return false;
+	}
+
+	if (!mEnvResolver->ResolveEnvPlatform(envPreset))
+	{
+		OutErrorReason = TEXT("Resolver failed to apply requested quality tier.");
+		return false;
+	}
+
+	if (mRecordResource != nullptr && !mRecordResource->UpdateFinalFilePathFromResolver())
+	{
+		OutErrorReason = TEXT("Failed to update resource output path from resolver.");
+		return false;
+	}
+
+	return true;
 }
 
 bool AVdjmRecordBridgeActor::EvaluateInitRequest(const FVdjmEncoderInitRequest* initPreset)
