@@ -7,6 +7,7 @@
 
 class AVdjmRecordBridgeActor;
 class UVdjmRecordEnvDataAsset;
+class UVdjmRecorderStateObserver;
 
 USTRUCT(BlueprintType)
 struct VDJMRECORDER_API FVdjmRecorderOptionRequest
@@ -53,15 +54,20 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Recorder|Controller")
 	UVdjmRecordEnvDataAsset* GetResolvedDataAsset() const;
 
+	UFUNCTION(BlueprintPure, Category = "Recorder|Controller")
+	UVdjmRecorderStateObserver* GetStateObserver() const;
+
 protected:
 	virtual UWorld* GetWorld() const override;
 
 private:
 	bool EnsureBridge();
+	void EnsureStateObserver();
 	bool ValidateRequest(const FVdjmRecorderOptionRequest& Request, FString& OutErrorReason) const;
 
 	TWeakObjectPtr<UWorld> CachedWorld;
 	TWeakObjectPtr<AVdjmRecordBridgeActor> WeakBridgeActor;
 	TWeakObjectPtr<UVdjmRecordEnvDataAsset> WeakDataAsset;
+	UPROPERTY()
+	TObjectPtr<UVdjmRecorderStateObserver> StateObserver;
 };
-

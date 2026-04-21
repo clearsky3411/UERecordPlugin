@@ -1,6 +1,7 @@
 #include "VdjmRecorderController.h"
 
 #include "VdjmRecorderCore.h"
+#include "VdjmRecorderStateObserver.h"
 
 UVdjmRecorderController* UVdjmRecorderController::CreateRecorderController(UObject* WorldContextObject)
 {
@@ -34,6 +35,7 @@ bool UVdjmRecorderController::InitializeController()
 	}
 
 	WeakDataAsset = AVdjmRecordBridgeActor::TryGetRecordEnvConfigure();
+	EnsureStateObserver();
 	return true;
 }
 
@@ -66,6 +68,14 @@ bool UVdjmRecorderController::ApplyOptionRequest(const FVdjmRecorderOptionReques
 	if (Request.bOverrideFileName)
 	{
 		bridge->SetCurrentFileName(Request.FileName);
+	}
+
+	if ((Request.bOverrideQualityTier || Request.bOverrideFileName))
+	{
+		if (!bridge->RefreshResolvedOptionsFromRequest(OutErrorReason))
+		{
+			return false;
+		}
 	}
 
 	return true;
@@ -110,6 +120,11 @@ UVdjmRecordEnvDataAsset* UVdjmRecorderController::GetResolvedDataAsset() const
 	return WeakDataAsset.Get();
 }
 
+UVdjmRecorderStateObserver* UVdjmRecorderController::GetStateObserver() const
+{
+	return StateObserver;
+}
+
 UWorld* UVdjmRecorderController::GetWorld() const
 {
 	return CachedWorld.Get();
@@ -129,7 +144,25 @@ bool UVdjmRecorderController::EnsureBridge()
 	}
 
 	WeakBridgeActor = AVdjmRecordBridgeActor::TryGetRecordBridgeActor(world);
+	EnsureStateObserver();
 	return WeakBridgeActor.IsValid();
+}
+
+void UVdjmRecorderController::EnsureStateObserver()
+{
+	if (StateObserver == nullptr)
+	{
+		StateObserver = NewObject<UVdjmRecorderStateObserver>(this);
+		if (StateObserver != nullptr)
+		{
+			StateObserver->InitializeObserver(this);
+		}
+	}
+
+	if (StateObserver != nullptr && WeakBridgeActor.IsValid())
+	{
+		StateObserver->BindBridge(WeakBridgeActor.Get());
+	}
 }
 
 bool UVdjmRecorderController::ValidateRequest(const FVdjmRecorderOptionRequest& Request, FString& OutErrorReason) const
@@ -154,4 +187,3 @@ bool UVdjmRecorderController::ValidateRequest(const FVdjmRecorderOptionRequest& 
 
 	return true;
 }
-
