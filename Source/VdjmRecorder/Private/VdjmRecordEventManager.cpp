@@ -1,6 +1,8 @@
 #include "VdjmRecordEventManager.h"
 
 #include "VdjmRecordBridgeActor.h"
+#include "VdjmRecordEventFlowDataAsset.h"
+#include "VdjmRecordEventNode.h"
 
 UVdjmRecordEventManager* UVdjmRecordEventManager::CreateEventManager(UObject* WorldContextObject)
 {
@@ -95,9 +97,211 @@ void UVdjmRecordEventManager::StopRecordingByManager()
 	}
 }
 
+bool UVdjmRecordEventManager::StartEventFlow(UVdjmRecordEventFlowDataAsset* InFlowAsset, bool bResetRuntimeStates)
+{
+	if (InFlowAsset == nullptr || InFlowAsset->Events.IsEmpty())
+	{
+		return false;
+	}
+
+	ActiveFlowAsset = InFlowAsset;
+	CurrentFlowIndex = 0;
+	bFlowRunning = true;
+	NextExecutableTime = 0.0f;
+
+	if (bResetRuntimeStates)
+	{
+		ResetFlowRuntimeStates();
+	}
+
+	return true;
+}
+
+void UVdjmRecordEventManager::StopEventFlow()
+{
+	bFlowRunning = false;
+	CurrentFlowIndex = INDEX_NONE;
+	NextExecutableTime = 0.0f;
+	ActiveFlowAsset.Reset();
+}
+
+bool UVdjmRecordEventManager::IsEventFlowRunning() const
+{
+	return bFlowRunning && ActiveFlowAsset.IsValid();
+}
+
+UVdjmRecordEventFlowDataAsset* UVdjmRecordEventManager::GetActiveFlowAsset() const
+{
+	return ActiveFlowAsset.Get();
+}
+
+int32 UVdjmRecordEventManager::GetCurrentFlowIndex() const
+{
+	return CurrentFlowIndex;
+}
+
+int32 UVdjmRecordEventManager::FindNextEventIndex(const UVdjmRecordEventBase* SourceEvent, TSubclassOf<UVdjmRecordEventBase> TargetClass, FName TargetTag) const
+{
+	const UVdjmRecordEventFlowDataAsset* FlowAsset = ActiveFlowAsset.Get();
+	if (FlowAsset == nullptr || SourceEvent == nullptr)
+	{
+		return INDEX_NONE;
+	}
+
+	const int32 SourceIndex = FlowAsset->Events.Find(const_cast<UVdjmRecordEventBase*>(SourceEvent));
+	if (SourceIndex == INDEX_NONE)
+	{
+		return INDEX_NONE;
+	}
+
+	for (int32 Index = SourceIndex + 1; Index < FlowAsset->Events.Num(); ++Index)
+	{
+		UVdjmRecordEventBase* Candidate = FlowAsset->Events[Index];
+		if (Candidate == nullptr)
+		{
+			continue;
+		}
+
+		const bool bClassMatched = (!TargetClass || Candidate->IsA(TargetClass));
+		const bool bTagMatched = (TargetTag.IsNone() || Candidate->EventTag == TargetTag);
+		if (bClassMatched && bTagMatched)
+		{
+			return Index;
+		}
+	}
+
+	return INDEX_NONE;
+}
+
 UWorld* UVdjmRecordEventManager::GetWorld() const
 {
 	return CachedWorld.Get();
+}
+
+void UVdjmRecordEventManager::Tick(float DeltaTime)
+{
+	TickEventFlow();
+}
+
+bool UVdjmRecordEventManager::IsTickable() const
+{
+	return !IsTemplate() && CachedWorld.IsValid();
+}
+
+TStatId UVdjmRecordEventManager::GetStatId() const
+{
+	RETURN_QUICK_DECLARE_CYCLE_STAT(UVdjmRecordEventManager, STATGROUP_Tickables);
+}
+
+void UVdjmRecordEventManager::TickEventFlow()
+{
+	if (!bFlowRunning || !ActiveFlowAsset.IsValid())
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (World == nullptr)
+	{
+		FinishFlow(EVdjmRecordEventResultType::Abort);
+		return;
+	}
+
+	if (World->GetTimeSeconds() < NextExecutableTime)
+	{
+		return;
+	}
+
+	UVdjmRecordEventFlowDataAsset* FlowAsset = ActiveFlowAsset.Get();
+	if (FlowAsset == nullptr)
+	{
+		FinishFlow(EVdjmRecordEventResultType::Abort);
+		return;
+	}
+
+	constexpr int32 MaxStepPerTick = 64;
+	for (int32 StepCount = 0; StepCount < MaxStepPerTick; ++StepCount)
+	{
+		if (CurrentFlowIndex < 0 || CurrentFlowIndex >= FlowAsset->Events.Num())
+		{
+			FinishFlow(EVdjmRecordEventResultType::Success);
+			return;
+		}
+
+		UVdjmRecordEventBase* Event = FlowAsset->Events[CurrentFlowIndex];
+		if (Event == nullptr)
+		{
+			++CurrentFlowIndex;
+			continue;
+		}
+
+		const FVdjmRecordEventResult Result = Event->ExecuteEvent(this, WeakBridgeActor.Get());
+		switch (Result.ResultType)
+		{
+		case EVdjmRecordEventResultType::Success:
+			Event->ResetRuntimeState();
+			++CurrentFlowIndex;
+			break;
+		case EVdjmRecordEventResultType::Failure:
+			FinishFlow(EVdjmRecordEventResultType::Failure);
+			return;
+		case EVdjmRecordEventResultType::Abort:
+			FinishFlow(EVdjmRecordEventResultType::Abort);
+			return;
+		case EVdjmRecordEventResultType::Running:
+			NextExecutableTime = World->GetTimeSeconds() + FMath::Max(0.0f, Result.WaitSeconds);
+			return;
+		case EVdjmRecordEventResultType::SelectIndex:
+			if (FlowAsset->Events.IsValidIndex(Result.SelectedIndex))
+			{
+				CurrentFlowIndex = Result.SelectedIndex;
+				break;
+			}
+			FinishFlow(EVdjmRecordEventResultType::Failure);
+			return;
+		case EVdjmRecordEventResultType::JumpToLabel:
+		{
+			const int32 JumpIndex = FlowAsset->FindEventIndexByTag(Result.JumpLabel);
+			if (FlowAsset->Events.IsValidIndex(JumpIndex))
+			{
+				CurrentFlowIndex = JumpIndex;
+				break;
+			}
+			FinishFlow(EVdjmRecordEventResultType::Failure);
+			return;
+		}
+		default:
+			FinishFlow(EVdjmRecordEventResultType::Failure);
+			return;
+		}
+	}
+}
+
+void UVdjmRecordEventManager::ResetFlowRuntimeStates()
+{
+	if (!ActiveFlowAsset.IsValid())
+	{
+		return;
+	}
+
+	for (UVdjmRecordEventBase* Event : ActiveFlowAsset->Events)
+	{
+		if (Event != nullptr)
+		{
+			Event->ResetRuntimeState();
+		}
+	}
+}
+
+void UVdjmRecordEventManager::FinishFlow(EVdjmRecordEventResultType FinalResultType)
+{
+	UVdjmRecordEventFlowDataAsset* FinishedAsset = ActiveFlowAsset.Get();
+	bFlowRunning = false;
+	CurrentFlowIndex = INDEX_NONE;
+	NextExecutableTime = 0.0f;
+	ActiveFlowAsset.Reset();
+
+	OnEventFlowFinished.Broadcast(this, FinishedAsset, FinalResultType);
 }
 
 void UVdjmRecordEventManager::HandleBridgeChainEvent(
