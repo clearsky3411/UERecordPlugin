@@ -3,190 +3,12 @@
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
-#include "VdjmRecordBridgeActor.h"
+#include "VdjmRecordEventJsonHelper.h"
 #include "VdjmRecordEventNode.h"
 
 namespace
 {
 	constexpr int32 FlowSchemaVersion = 1;
-
-	bool ParseEventNode(
-		const TSharedPtr<FJsonObject>& EventObject,
-		UObject* Outer,
-		UVdjmRecordEventBase*& OutEvent,
-		FString& OutError)
-	{
-		OutEvent = nullptr;
-		if (!EventObject.IsValid())
-		{
-			OutError = TEXT("Event object is invalid.");
-			return false;
-		}
-
-		FString ClassPath;
-		if (!EventObject->TryGetStringField(TEXT("class"), ClassPath) || ClassPath.IsEmpty())
-		{
-			OutError = TEXT("Missing 'class' in event object.");
-			return false;
-		}
-
-		UClass* EventClass = FindObject<UClass>(nullptr, *ClassPath);
-		if (EventClass == nullptr)
-		{
-			EventClass = LoadObject<UClass>(nullptr, *ClassPath);
-		}
-		if (EventClass == nullptr || !EventClass->IsChildOf(UVdjmRecordEventBase::StaticClass()))
-		{
-			OutError = FString::Printf(TEXT("Invalid event class: %s"), *ClassPath);
-			return false;
-		}
-
-		UVdjmRecordEventBase* CreatedEvent = NewObject<UVdjmRecordEventBase>(Outer, EventClass);
-		if (CreatedEvent == nullptr)
-		{
-			OutError = FString::Printf(TEXT("Failed to create event node: %s"), *ClassPath);
-			return false;
-		}
-
-		FString TagString;
-		if (EventObject->TryGetStringField(TEXT("tag"), TagString))
-		{
-			CreatedEvent->EventTag = FName(*TagString);
-		}
-
-		const TSharedPtr<FJsonObject>* ConfigObjectPtr = nullptr;
-		if (EventObject->TryGetObjectField(TEXT("config"), ConfigObjectPtr))
-		{
-			const TSharedPtr<FJsonObject>& ConfigObject = *ConfigObjectPtr;
-			if (UVdjmRecordEventSelectorNode* SelectorNode = Cast<UVdjmRecordEventSelectorNode>(CreatedEvent))
-			{
-				FString TargetClassPath;
-				if (ConfigObject->TryGetStringField(TEXT("target_class"), TargetClassPath) && !TargetClassPath.IsEmpty())
-				{
-					UClass* TargetClass = FindObject<UClass>(nullptr, *TargetClassPath);
-					if (TargetClass == nullptr)
-					{
-						TargetClass = LoadObject<UClass>(nullptr, *TargetClassPath);
-					}
-					if (TargetClass != nullptr && TargetClass->IsChildOf(UVdjmRecordEventBase::StaticClass()))
-					{
-						SelectorNode->TargetClass = TargetClass;
-					}
-				}
-
-				FString TargetTag;
-				if (ConfigObject->TryGetStringField(TEXT("target_tag"), TargetTag))
-				{
-					SelectorNode->TargetTag = FName(*TargetTag);
-				}
-
-				ConfigObject->TryGetBoolField(TEXT("abort_if_not_found"), SelectorNode->bAbortIfNotFound);
-			}
-			else if (UVdjmRecordEventSpawnBridgeActorNode* SpawnNode = Cast<UVdjmRecordEventSpawnBridgeActorNode>(CreatedEvent))
-			{
-				ConfigObject->TryGetBoolField(TEXT("reuse_existing_bridge_actor"), SpawnNode->bReuseExistingBridgeActor);
-
-				FString SpawnClassPath;
-				if (ConfigObject->TryGetStringField(TEXT("bridge_actor_class"), SpawnClassPath) && !SpawnClassPath.IsEmpty())
-				{
-					UClass* SpawnClass = FindObject<UClass>(nullptr, *SpawnClassPath);
-					if (SpawnClass == nullptr)
-					{
-						SpawnClass = LoadObject<UClass>(nullptr, *SpawnClassPath);
-					}
-					if (SpawnClass != nullptr && SpawnClass->IsChildOf(AVdjmRecordBridgeActor::StaticClass()))
-					{
-						SpawnNode->BridgeActorClass = SpawnClass;
-					}
-				}
-			}
-			else if (UVdjmRecordEventSetEnvDataAssetPathNode* SetPathNode = Cast<UVdjmRecordEventSetEnvDataAssetPathNode>(CreatedEvent))
-			{
-				FString EnvPath;
-				if (ConfigObject->TryGetStringField(TEXT("env_data_asset_path"), EnvPath))
-				{
-					SetPathNode->EnvDataAssetPath = FSoftObjectPath(EnvPath);
-				}
-				ConfigObject->TryGetBoolField(TEXT("require_load_success"), SetPathNode->bRequireLoadSuccess);
-			}
-		}
-
-		if (UVdjmRecordEventSequenceNode* SequenceNode = Cast<UVdjmRecordEventSequenceNode>(CreatedEvent))
-		{
-			const TArray<TSharedPtr<FJsonValue>>* ChildrenValues = nullptr;
-			if (EventObject->TryGetArrayField(TEXT("children"), ChildrenValues) && ChildrenValues != nullptr)
-			{
-				for (int32 ChildIndex = 0; ChildIndex < ChildrenValues->Num(); ++ChildIndex)
-				{
-					const TSharedPtr<FJsonValue>& ChildValue = (*ChildrenValues)[ChildIndex];
-					if (!ChildValue.IsValid() || ChildValue->Type != EJson::Object)
-					{
-						OutError = FString::Printf(TEXT("Invalid child node at index %d."), ChildIndex);
-						return false;
-					}
-
-					UVdjmRecordEventBase* ChildNode = nullptr;
-					if (!ParseEventNode(ChildValue->AsObject(), SequenceNode, ChildNode, OutError))
-					{
-						return false;
-					}
-					SequenceNode->Children.Add(ChildNode);
-				}
-			}
-		}
-
-		OutEvent = CreatedEvent;
-		return true;
-	}
-
-	TSharedPtr<FJsonObject> BuildEventJsonObject(const UVdjmRecordEventBase* Event)
-	{
-		if (Event == nullptr)
-		{
-			return nullptr;
-		}
-
-		const TSharedPtr<FJsonObject> EventObject = MakeShared<FJsonObject>();
-		EventObject->SetStringField(TEXT("class"), Event->GetClass()->GetPathName());
-		EventObject->SetStringField(TEXT("tag"), Event->EventTag.ToString());
-		EventObject->SetNumberField(TEXT("schema_version"), FlowSchemaVersion);
-		const TSharedPtr<FJsonObject> ConfigObject = MakeShared<FJsonObject>();
-		EventObject->SetObjectField(TEXT("config"), ConfigObject);
-
-		if (const UVdjmRecordEventSequenceNode* SequenceNode = Cast<UVdjmRecordEventSequenceNode>(Event))
-		{
-			TArray<TSharedPtr<FJsonValue>> ChildrenValues;
-			for (const UVdjmRecordEventBase* Child : SequenceNode->Children)
-			{
-				if (const TSharedPtr<FJsonObject> ChildObject = BuildEventJsonObject(Child))
-				{
-					ChildrenValues.Add(MakeShared<FJsonValueObject>(ChildObject));
-				}
-			}
-
-			EventObject->SetArrayField(TEXT("children"), ChildrenValues);
-		}
-		else if (const UVdjmRecordEventSelectorNode* SelectorNode = Cast<UVdjmRecordEventSelectorNode>(Event))
-		{
-			const FString TargetClassPath = SelectorNode->TargetClass ? SelectorNode->TargetClass->GetPathName() : FString();
-			ConfigObject->SetStringField(TEXT("target_class"), TargetClassPath);
-			ConfigObject->SetStringField(TEXT("target_tag"), SelectorNode->TargetTag.ToString());
-			ConfigObject->SetBoolField(TEXT("abort_if_not_found"), SelectorNode->bAbortIfNotFound);
-		}
-		else if (const UVdjmRecordEventSpawnBridgeActorNode* SpawnNode = Cast<UVdjmRecordEventSpawnBridgeActorNode>(Event))
-		{
-			const FString SpawnClassPath = SpawnNode->BridgeActorClass ? SpawnNode->BridgeActorClass->GetPathName() : FString();
-			ConfigObject->SetBoolField(TEXT("reuse_existing_bridge_actor"), SpawnNode->bReuseExistingBridgeActor);
-			ConfigObject->SetStringField(TEXT("bridge_actor_class"), SpawnClassPath);
-		}
-		else if (const UVdjmRecordEventSetEnvDataAssetPathNode* SetPathNode = Cast<UVdjmRecordEventSetEnvDataAssetPathNode>(Event))
-		{
-			ConfigObject->SetStringField(TEXT("env_data_asset_path"), SetPathNode->EnvDataAssetPath.ToString());
-			ConfigObject->SetBoolField(TEXT("require_load_success"), SetPathNode->bRequireLoadSuccess);
-		}
-
-		return EventObject;
-	}
 }
 
 UVdjmRecordEventFlowDataAsset* UVdjmRecordEventFlowDataAsset::TryGetEventFlowDataAsset(const FSoftObjectPath& AssetPath)
@@ -239,7 +61,7 @@ bool UVdjmRecordEventFlowDataAsset::ImportFlowFromJsonString(const FString& InJs
 		}
 
 		UVdjmRecordEventBase* NewNode = nullptr;
-		if (!ParseEventNode(EventValue->AsObject(), this, NewNode, OutError))
+		if (!VdjmRecordEventJson::DeserializeEventNodeFromJsonObject(EventValue->AsObject(), this, NewNode, OutError))
 		{
 			OutError = FString::Printf(TEXT("Event index %d parse failed: %s"), EventIndex, *OutError);
 			return false;
@@ -289,7 +111,7 @@ bool UVdjmRecordEventFlowDataAsset::ValidateFlowJson(const FString& InJsonString
 		}
 
 		UVdjmRecordEventBase* DummyNode = nullptr;
-		if (!ParseEventNode(EventValue->AsObject(), GetTransientPackage(), DummyNode, OutError))
+		if (!VdjmRecordEventJson::DeserializeEventNodeFromJsonObject(EventValue->AsObject(), GetTransientPackage(), DummyNode, OutError))
 		{
 			OutError = FString::Printf(TEXT("Event index %d validation failed: %s"), EventIndex, *OutError);
 			return false;
@@ -327,9 +149,15 @@ FString UVdjmRecordEventFlowDataAsset::ExportFlowToJsonString(bool bPrettyPrint)
 	TArray<TSharedPtr<FJsonValue>> EventValues;
 	for (const UVdjmRecordEventBase* Event : Events)
 	{
-		if (const TSharedPtr<FJsonObject> EventObject = BuildEventJsonObject(Event))
+		TSharedPtr<FJsonObject> EventObject;
+		FString SerializeError;
+		if (VdjmRecordEventJson::SerializeEventNodeToJsonObject(Event, EventObject, SerializeError) && EventObject.IsValid())
 		{
 			EventValues.Add(MakeShared<FJsonValueObject>(EventObject));
+		}
+		else if (!SerializeError.IsEmpty())
+		{
+			UE_LOG(LogTemp, Warning, TEXT("ExportFlowToJsonString - Failed to serialize event node: %s"), *SerializeError);
 		}
 	}
 	RootObject->SetArrayField(TEXT("events"), EventValues);
