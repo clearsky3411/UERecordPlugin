@@ -15,6 +15,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow")
 	static UVdjmRecordEventFlowDataAsset* TryGetEventFlowDataAsset(const FSoftObjectPath& AssetPath);
 
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow")
+	bool ImportFlowFromJsonString(const FString& InJsonString, FString& OutError);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow")
+	bool ValidateFlowJson(const FString& InJsonString, FString& OutError) const;
+
 	UFUNCTION(BlueprintPure, Category = "Recorder|EventFlow")
 	int32 FindEventIndexByTag(FName InTag) const;
 
