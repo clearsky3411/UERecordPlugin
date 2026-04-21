@@ -66,6 +66,137 @@
 
 ---
 
+## 실행 계획 v4 (OptionController + StateMachine + 서비스 확장)
+
+> 아래 블록은 그대로 복사해서 태스크/이슈 본문에 넣을 수 있는 실행안이다.
+
+### TL;DR
+1. `UOptionController`(UObject) 제작 → UI 연동
+2. StateMachine Observer 제작(Bridge와 분리, 감시 전용)
+3. Thumbnail 추출 파이프라인
+4. Metadata 스키마 + 권한 모델
+5. Serverless Video I/O + 서비스 페이지
+
+### 설계 원칙 (확정)
+- **OptionController는 명령 생성기**: 실제 적용은 Resource에 요청 메시지로 전달
+- **Resource는 단일 적용 지점**: 최종 실행값(`FinalFrameRate/FinalBitrate/FinalFilePath`) 보유
+- **Session은 스냅샷 소비자**: 실행 중 직접 설정 변경 최소화
+- **StateMachine Observer는 Bridge와 분리**: 상태 감시/로그/알림만 담당(제어권 없음)
+
+### 컴포넌트 정의
+#### 1) UOptionController (신규 UObject)
+- 책임
+  - UI 입력 수집
+  - `FOptionChangeRequest` 생성/전송
+  - 1차 입력 검증(범위/형식)
+- 비책임
+  - codec/session 직접 제어
+  - resolver/preset 직접 변경
+
+#### 2) Resource Option Apply Layer (기존 Resource 확장)
+- 책임
+  - `ApplyOptionRequest()`로 메시지 적용
+  - 2차 검증(디바이스/규칙/권한)
+  - 변경 이벤트 브로드캐스트
+- 결과
+  - effective config 업데이트
+  - 다음 snapshot 생성 시 반영
+
+#### 3) StateMachine Observer (신규 UObject, Bridge 분리)
+- 책임
+  - `ENew/Ready/Running/Waiting/Terminated/Error` 전이 감시
+  - 전이 시간, 실패 코드, 재시도 횟수 기록
+  - UI/Telemetry 전파
+- 비책임
+  - 상태 강제 변경(Observer는 감시 전용)
+
+---
+
+### 단계별 상세 플랜
+
+#### Phase 1 — OptionController 제작 (P0)
+- 산출물
+  - `UOptionController`
+  - `FOptionChangeRequest` / `FOptionValidationResult`
+  - `IOptionApplier` 인터페이스(Resource 구현체 연결)
+- 작업
+  - UI 위젯 바인딩(프레임레이트/비트레이트/키프레임/오디오소스/출력정책)
+  - 요청 큐(또는 즉시 적용) 정책 확정
+  - invalid 요청 rejection + 이유 반환
+- 완료 기준
+  - UI 조작 시 Resource 값 갱신
+  - 적용/거절 로그 일관성
+
+#### Phase 2 — StateMachine Observer (P0)
+- 산출물
+  - `URecordSessionStateObserver` (독립 UObject)
+  - 상태 전이 테이블 + 전이 이벤트 로그 포맷
+- 작업
+  - Resource/Bridge의 상태 이벤트 구독
+  - 전이 guard 검증(불법 전이 차단은 기존 제어부, observer는 탐지/신고)
+  - 장애 시나리오 리포트(초기화 실패, mux start 실패, upload 실패 등)
+- 완료 기준
+  - 상태 전이 타임라인 시각화 가능
+  - Error 전이 원인 코드 수집
+
+#### Phase 3 — Thumbnail (P1)
+- 산출물
+  - preview mp4(loop) 또는 gif 생성 Job
+  - 생성 결과 메타(길이/fps/용량/구간)
+- 작업
+  - mp4 전체에서 일부 구간 추출(예: 10~12%, 40~42%)
+  - 저화질/저fps 변환
+  - 상호작용 시 반복 재생용 asset 생성
+- 완료 기준
+  - 업로드 후 썸네일 URL 확보
+  - 서비스 페이지 hover/탭 재생 성공
+
+#### Phase 4 — Metadata (P0)
+- 산출물
+  - 메타 스키마 v1
+  - 권한 키(`canView/canEdit/ownerUserId`)
+- 작업
+  - 영상 식별(`videoId`) + 저장 위치(`storageKey`) + 포맷 정보
+  - 권한 검증 훅(소유자 편집 가능)
+  - 메타만으로 재생 가능한 조회 API 설계
+- 완료 기준
+  - 메타만으로 영상 조회/재생
+  - 소유자 편집 권한 enforcement
+
+#### Phase 5 — Serverless Video I/O + UI/서비스 페이지 (P0/P1)
+- 산출물
+  - Presigned Upload API
+  - 업로드 완료 콜백 + 메타 기록 + 썸네일 Job enqueue
+  - 리스트/상세/편집 페이지
+- 작업
+  - 상태 머신과 연계된 업로드 상태(`recorded/uploading/processing/ready/failed`)
+  - 재시도/멱등성/타임아웃 정책
+  - 오류 UX(재시도 버튼/로그 링크)
+- 완료 기준
+  - E2E: 녹화→업로드→메타/썸네일 생성→서비스 페이지 노출
+
+---
+
+### 검증 전략 (추가 필수)
+- **검증 2단계**
+  1) Controller 입력 검증
+  2) Resource 적용 검증(Resolver 규칙 + 디바이스 제약)
+- **회귀 테스트 축**
+  - A/V sync
+  - output path 중복 누적
+  - 상태 전이 유효성
+  - 업로드 실패 복구
+
+### 상태 머신(운영 관점) 제안
+`Idle -> Preparing -> Ready -> Recording -> Finalizing -> Uploading -> ProcessingPreview -> ReadyToServe`
+`-> Failed` (어느 단계에서든 진입 가능)
+
+각 상태는 다음을 기록:
+- `enteredAt`, `leftAt`, `durationMs`
+- `reasonCode`, `attempt`, `traceId`
+
+---
+
 ## 의사결정 사항(확정)
 - [x] VulkanBackend는 그래픽 백엔드 책임만 유지
 - [x] 내부 오디오는 Session 레벨에서 처리

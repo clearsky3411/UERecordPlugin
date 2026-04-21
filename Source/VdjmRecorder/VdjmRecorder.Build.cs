@@ -26,7 +26,9 @@ public class VdjmRecorder : ModuleRules
                 "AudioMixer",
                 "Slate",
                 "SlateCore",
-                "SlateRHIRenderer"	//	for recorder
+                "SlateRHIRenderer",	//	for recorder
+                "Json",
+                "JsonUtilities"
             }
         );
         

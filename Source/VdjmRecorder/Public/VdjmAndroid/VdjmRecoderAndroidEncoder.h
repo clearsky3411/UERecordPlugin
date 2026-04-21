@@ -107,6 +107,11 @@ public:
 		bool AudioInit();
 		bool AudioStart();
 		void AudioStop();
+		void StartAudioDrainThread();
+		void StopAudioDrainThread();
+		void AudioDrainLoop();
+		void DrainAudioCodecOutput();
+		bool TryStartMuxerIfReady();
 		void PumpAudioInputToCodec();
 
 		FVdjmAndroidEncoderSnapshot mConfig;
@@ -125,11 +130,20 @@ public:
 		bool mAudioCodecStarted = false;
 		bool mMuxerStarted = false;
 		bool mEosSent = false;
+		bool mAudioEosReceived = false;
 		int64 mNextAudioPtsUs = 0;
 		int64 mFirstVideoPtsUs = -1;
 		int64 mFirstAudioPtsUs = -1;
 		bool bAudioInputWarningLogged = false;
+		double mLastAudioHealthLogSec = 0.0;
+		uint64 mLastCapturedSampleCount = 0;
+		uint64 mLastQueuedSampleCount = 0;
+		uint64 mLastDroppedSampleCount = 0;
+		TArray<int16> mPendingCodecInputPcm;
 		TSharedPtr<class FVdjmAndroidAudioCaptureBridge, ESPMode::ThreadSafe> mAudioCaptureBridge;
+		FCriticalSection mMuxerMutex;
+		TAtomic<bool> bAudioDrainThreadRunning = false;
+		TAtomic<bool> bAudioDrainStopRequested = false;
 	
 	TWeakPtr<FVdjmAndroidEncoderImpl> mOwnerEncoderImpl;
 	TUniquePtr<FVdjmAndroidEncoderBackend> mGraphicBackend;
