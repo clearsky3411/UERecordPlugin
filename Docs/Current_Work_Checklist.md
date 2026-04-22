@@ -16,8 +16,8 @@
 
 ## 1. 현재 P0
 - [x] `StateMachine Observer`를 EventManager/세션 기준으로 재정의
-- [ ] `UOptionController` 도입
-- [ ] Resource Option Apply Layer 구현
+- [x] `RecorderController` 옵션 메시지/큐 리뉴얼 1차
+- [x] Resource Option Apply Layer 1차 구현
 - [ ] UI 엔트리 정리
 - [ ] 비UI 객체가 UI를 몰라도 되도록 연결 구조 정리
 
@@ -37,6 +37,7 @@
 - [ ] UI에서 호출 시 월드 자동 연결 확인
 - [ ] 상태 전이 로그 확인
 - [ ] 옵션 적용/거절 로그 확인
+- [ ] queue된 옵션의 safe apply 시점 확인
 - [ ] Android Vulkan 경로 재검증
 - [ ] Android OpenGL 경로 재검증
 - [ ] Windows WMF 경로 재검증

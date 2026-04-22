@@ -435,6 +435,7 @@ public:
 	virtual void BeginDestroy() override;
 	
 	virtual bool InitializeResource(UVdjmRecordEnvResolver* resolver);
+	bool RefreshResolvedRuntimeConfigFromResolver();
 	bool UpdateFinalFilePathFromResolver();
 	virtual void ResetResource();
 	virtual void ReleaseResources();

@@ -244,9 +244,9 @@ void AVdjmRecordBridgeActor::StartRecording()
 			bIsRecording = false;
 			return;
 		}
-		if (mRecordResource != nullptr && !mRecordResource->UpdateFinalFilePathFromResolver())
+		if (mRecordResource != nullptr && !mRecordResource->RefreshResolvedRuntimeConfigFromResolver())
 		{
-			UE_LOG(LogVdjmRecorderCore, Error, TEXT("StartRecording - Failed to update resource final file path from resolver."));
+			UE_LOG(LogVdjmRecorderCore, Error, TEXT("StartRecording - Failed to refresh resource runtime config from resolver."));
 			bIsRecording = false;
 			return;
 		}
@@ -456,14 +456,39 @@ void AVdjmRecordBridgeActor::SetRequestedQualityTier(EVdjmRecordQualityTiers InQ
 
 	mCurrentQualityTier = InQualityTier;
 	SelectedBitrateType = InQualityTier;
+	OnRequestedQualityTierChanged.Broadcast(this, mCurrentQualityTier);
+}
 
-	FString errorReason;
-	if (!RefreshResolvedOptionsFromRequest(errorReason))
+void AVdjmRecordBridgeActor::ClearRequestedQualityTier()
+{
+	if (mCurrentQualityTier == EVdjmRecordQualityTiers::EUndefined)
 	{
-		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("SetRequestedQualityTier - Unable to re-resolve options: %s"), *errorReason);
+		return;
 	}
 
+	mCurrentQualityTier = EVdjmRecordQualityTiers::EUndefined;
+	SelectedBitrateType = EVdjmRecordQualityTiers::EDefault;
 	OnRequestedQualityTierChanged.Broadcast(this, mCurrentQualityTier);
+}
+
+void AVdjmRecordBridgeActor::SetRequestedFrameRate(int32 InFrameRate)
+{
+	mRequestedFrameRate = FMath::Max(0, InFrameRate);
+}
+
+void AVdjmRecordBridgeActor::ClearRequestedFrameRate()
+{
+	mRequestedFrameRate = 0;
+}
+
+void AVdjmRecordBridgeActor::SetRequestedBitrate(int32 InBitrate)
+{
+	mRequestedBitrate = FMath::Max(0, InBitrate);
+}
+
+void AVdjmRecordBridgeActor::ClearRequestedBitrate()
+{
+	mRequestedBitrate = 0;
 }
 
 bool AVdjmRecordBridgeActor::RefreshResolvedOptionsFromRequest(FString& OutErrorReason)
@@ -500,9 +525,9 @@ bool AVdjmRecordBridgeActor::RefreshResolvedOptionsFromRequest(FString& OutError
 		return false;
 	}
 
-	if (mRecordResource != nullptr && !mRecordResource->UpdateFinalFilePathFromResolver())
+	if (mRecordResource != nullptr && !mRecordResource->RefreshResolvedRuntimeConfigFromResolver())
 	{
-		OutErrorReason = TEXT("Failed to update resource output path from resolver.");
+		OutErrorReason = TEXT("Failed to refresh resource runtime config from resolver.");
 		return false;
 	}
 

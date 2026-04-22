@@ -79,7 +79,7 @@
 | 항목 | 상태 | 메모 |
 | --- | --- | --- |
 | `EventManager` 분리 | 구현됨 | FlowRuntime/JSON + coarse session state + 브릿지 오케스트레이션 포함 |
-| `RecorderController` 초안 | 구현됨 | 월드에서 브릿지 탐색/기본 제어 가능 |
+| `RecorderController` 리뉴얼 1차 | 구현됨 | 옵션 메시지 큐/병합 + EventManager 소유 + 기본 제어 가능 |
 | `RecorderStateObserver` 초안 | 구현됨 | 현재는 EventManager 세션 상태 중심 관찰 |
 | Event Flow Runtime/JSON | 구현됨 | Asset clone + JSON import/export 가능 |
 | Android Session + 내부 오디오 | 부분 구현 | MediaCodec + Submix listener + mux start gate 코드 존재 |
@@ -117,14 +117,15 @@
 ### TL;DR
 0. `EventManager` 기반은 이미 도입됨 (현재 기반 단계)
 1. `StateMachine Observer` 재정의
-2. `UOptionController` 제작
+2. `RecorderController` 옵션 메시지/큐 리뉴얼
 3. UI 연결
 4. Thumbnail 추출 파이프라인
 5. Metadata 스키마 + 권한 모델
 6. Serverless Video I/O + 서비스 페이지 (최종 단계)
 
 ### 설계 원칙 (확정)
-- **OptionController는 명령 생성기**: 실제 적용은 Resource에 요청 메시지로 전달
+- **Option Request는 순수 메시지**: 값과 처리 의도만 담고, 실행 로직은 컨트롤러가 가진다
+- **RecorderController는 메시지 처리기**: queue/병합/safe apply를 담당한다
 - **Resource는 단일 적용 지점**: 최종 실행값(`FinalFrameRate/FinalBitrate/FinalFilePath`) 보유
 - **Session은 스냅샷 소비자**: 실행 중 직접 설정 변경 최소화
 - **StateMachine Observer는 Bridge와 분리**: 상태 감시/로그/알림만 담당(제어권 없음)
@@ -134,8 +135,9 @@
 ### 현재 우선순위 정리
 1. `StateMachine Observer`
    - `RecorderStateObserver`는 현재 `EventManager` 세션 상태를 감시하도록 재정의되었고, `chainInit` 상세 단계는 일반 observer 대상에서 제외했다.
-2. `UOptionController`
-   - 현재 `RecorderController`의 좁은 옵션 요청 구조를 `OptionController + Resource Apply Layer`로 분리한다.
+2. `RecorderController` 옵션 메시지/큐
+   - 현재 `RecorderController`는 `FVdjmRecorderOptionRequest` 메시지를 받아 `QualityTier/FileName/FrameRate/Bitrate`를 queue/병합/적용하는 1차 구조까지 들어갔다.
+   - 다음은 실제 UI 입력과의 연결, live apply 정책 세분화, 더 넓은 옵션 범위 확장이다.
 3. UI 연결
    - UI는 Controller/EventManager를 호출하고, 내부 월드 연결은 비UI 계층에서 자동 해결되도록 한다.
 4. Thumbnail
@@ -152,8 +154,8 @@
 - [x] `RecorderStateObserver` 초안 존재
 - [x] `StateMachine Observer`를 EventManager/세션 기준으로 재정의
 - [x] 이벤트 관련 파일을 `VdjmEvents` 폴더로 정리
-- [ ] `UOptionController` 도입
-- [ ] Resource Option Apply Layer 구현
+- [x] `RecorderController` 옵션 메시지/큐 리뉴얼 1차
+- [x] Resource Option Apply Layer 1차 구현
 - [ ] UI 엔트리/호스트 연결
 - [ ] Thumbnail 후처리 인터페이스 정리
 - [ ] Metadata 스키마 v1 정리
@@ -162,10 +164,10 @@
 - [ ] 서비스 페이지 연동 설계 정리
 
 ### 컴포넌트 정의
-#### 1) UOptionController (신규 UObject)
+#### 1) RecorderController Option Layer (기존 Controller 리뉴얼)
 - 책임
-  - UI 입력 수집
-  - `FOptionChangeRequest` 생성/전송
+  - `FVdjmRecorderOptionRequest` 메시지 수신
+  - queue/병합/safe apply 처리
   - 1차 입력 검증(범위/형식)
 - 비책임
   - codec/session 직접 제어
@@ -192,11 +194,11 @@
 
 ### 단계별 상세 플랜
 
-#### Phase 1 — OptionController 제작 (P0)
+#### Phase 1 — RecorderController Option Layer 확장 (P0)
 - 산출물
-  - `UOptionController`
-  - `FOptionChangeRequest` / `FOptionValidationResult`
-  - `IOptionApplier` 인터페이스(Resource 구현체 연결)
+  - `FVdjmRecorderOptionRequest`
+  - `UVdjmRecorderController` queue/merge 처리
+  - Resource runtime config refresh 경로
 - 작업
   - UI 위젯 바인딩(프레임레이트/비트레이트/키프레임/오디오소스/출력정책)
   - 요청 큐(또는 즉시 적용) 정책 확정
@@ -253,7 +255,7 @@
 - 완료 기준
   - E2E: 녹화→업로드→메타/썸네일 생성→서비스 페이지 노출
 
-> 주의: 현재 저장소 기준으로는 Phase 5가 당장 구현 대상이 아니라, **최종 연동 단계**다. 이 문서의 현재 작업 우선순위는 `Observer -> OptionController -> UI -> Thumbnail -> Metadata/권한 -> Serverless/서비스 페이지` 순서로 본다.
+> 주의: 현재 저장소 기준으로는 Phase 5가 당장 구현 대상이 아니라, **최종 연동 단계**다. 이 문서의 현재 작업 우선순위는 `Observer -> RecorderController Option Layer -> UI -> Thumbnail -> Metadata/권한 -> Serverless/서비스 페이지` 순서로 본다.
 
 ---
 
