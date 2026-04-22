@@ -59,6 +59,11 @@ public:
 	{
 		mCurrentCustomFileName = newFileName;
 	}
+	UFUNCTION(BlueprintCallable)
+	void ClearCurrentFileName()
+	{
+		mCurrentCustomFileName.Reset();
+	}
 	
 	UFUNCTION(BlueprintCallable)
 	void CriticalErrorStop(const FString& errorMessage)
@@ -215,6 +220,33 @@ public:
 		return mCurrentQualityTier;
 	}
 
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void ClearRequestedQualityTier();
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void SetRequestedFrameRate(int32 InFrameRate);
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void ClearRequestedFrameRate();
+
+	UFUNCTION(BlueprintPure, Category="Record|Option")
+	int32 GetRequestedFrameRate() const
+	{
+		return mRequestedFrameRate;
+	}
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void SetRequestedBitrate(int32 InBitrate);
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void ClearRequestedBitrate();
+
+	UFUNCTION(BlueprintPure, Category="Record|Option")
+	int32 GetRequestedBitrate() const
+	{
+		return mRequestedBitrate;
+	}
+
 	UFUNCTION(BlueprintPure, Category="Record|State")
 	bool IsRecording() const
 	{
@@ -295,7 +327,9 @@ protected:
 	int32 mRecordedFrameCount = 0;
 	
 	//	TODO(20260410 env control) - 
-	EVdjmRecordQualityTiers mCurrentQualityTier = EVdjmRecordQualityTiers::EDefault;	//	추후에 옵션을 바꿀 수 있는 인터페이스에 노출될 놈임.
+	EVdjmRecordQualityTiers mCurrentQualityTier = EVdjmRecordQualityTiers::EUndefined;	//	추후에 옵션을 바꿀 수 있는 인터페이스에 노출될 놈임.
+	int32 mRequestedFrameRate = 0;
+	int32 mRequestedBitrate = 0;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Record|Output", meta=(AllowPrivateAccess="true"))
 	FString mCurrentCustomFileName;
 	UPROPERTY()

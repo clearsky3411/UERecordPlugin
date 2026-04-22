@@ -43,9 +43,11 @@
 ### 2. Resolver/Resource/Pipeline/Unit
 - `UVdjmRecordEnvResolver`
   - DataAsset preset을 현재 플랫폼/품질/뷰포트 기준으로 해석한다.
+  - 현재는 `BridgeActor`가 들고 있는 explicit override(`QualityTier`, `FrameRate`, `Bitrate`, `FileName`)를 우선 반영한다.
   - 최종 해상도, 프레임레이트, 비트레이트, 출력 경로를 결정한다.
 - `UVdjmRecordResource`
   - 최종 실행값(`FinalFrameRate`, `FinalBitrate`, `FinalFilePath`)을 보유한다.
+  - 최근 변경 기준으로는 resolver 결과를 부분 파일경로만이 아니라 runtime config 단위로 다시 동기화할 수 있다.
   - 실제 플랫폼별 Resource는 이를 상속한다.
 - `UVdjmRecordUnitPipeline`
   - Resource를 입력으로 받아 Unit 인스턴스를 만든다.
@@ -56,6 +58,8 @@
 ### 3. Controller/Observer/EventManager
 - `UVdjmRecorderController`
   - 현재는 `EventManager`를 소유하는 상위 진입점이며, 옵션 적용/녹화 시작/정지는 가능한 한 이 레이어를 통해 들어가게 정리하는 중이다.
+  - `FVdjmRecorderOptionRequest`를 메시지로 받아서 처리하며, 요청이 몰릴 때는 controller 내부에서 `latest wins` 방식으로 병합한다.
+  - 브릿지가 아직 안전하게 적용할 수 없는 시점이면 요청을 pending으로 유지하고, 이후 tick에서 safe point에 재시도한다.
 - `UVdjmRecorderStateObserver`
   - 현재는 `BridgeActor` 직접 감시기가 아니라 `EventManager`가 내보내는 coarse session state 감시기다.
   - `chainInit`의 세부 스텝은 더 이상 observer가 직접 다루지 않고, 필요 시 `EventManager` 디버그 delegate 쪽에서만 본다.
@@ -84,6 +88,28 @@
 - 동시에 외부가 보기 쉬운 세션 상태(`ENew/EPreparing/EReady/ERecording/EFinalizing/ETerminated/EFailed`)를 coarse하게 정리한다.
 - 실제 녹화 자체는 여전히 브릿지와 플랫폼 파이프라인이 수행한다.
 - 즉, 지금 구조는 `EventManager가 브릿지 위에서 오케스트레이션을 담당하는 단계`다.
+
+## Option 메시지 구조
+
+### 현재 기준
+- `FVdjmRecorderOptionRequest`는 옵션 변경 메시지다.
+- 메시지 안에는 `QualityTier`, `FileName`, `FrameRate`, `Bitrate`에 대한 개별 action이 들어간다.
+- 각 필드는 `Ignore / Set / Clear` 개념으로 동작한다.
+- 요청 처리 정책도 메시지에 같이 담아서, 즉시 처리 시도 또는 queue only를 고를 수 있게 열어뒀다.
+
+### 실제 적용 흐름
+1. 외부(UI/코드)가 `FVdjmRecorderOptionRequest`를 만든다
+2. `UVdjmRecorderController`에 넣는다
+3. Controller가 기존 pending 요청과 병합한다
+4. safe point면 바로 `BridgeActor`에 override를 반영한다
+5. `BridgeActor -> Resolver -> Resource` 순서로 최종 runtime config를 재동기화한다
+6. safe point가 아니면 pending 상태로 남고 다음 tick에 다시 처리한다
+
+### 현재 의도
+- 메시지는 순수 데이터로 유지한다.
+- 처리 로직은 `RecorderController` 안에 둔다.
+- `BridgeActor`는 override 값 저장과 플랫폼 실행 문맥 연결을 담당한다.
+- `Resource`는 최종 실행값을 보유하는 단일 적용 지점 역할을 계속 강화하는 방향이다.
 
 ## 플랫폼별 실행 흐름
 

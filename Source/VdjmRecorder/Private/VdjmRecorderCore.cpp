@@ -702,8 +702,9 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 			candidateRequest.VideoConfig.bResolutionFitToDisplay,
 			tierMaxResolution);
 
+		const int32 requestedFrameRate = LinkedOwnerBridge->GetRequestedFrameRate();
 		const int32 safeFrameRate = VdjmRecordUtils::Resolvers::ResolveVideoFrameRate(
-			candidateRequest.VideoConfig.FrameRate,
+			requestedFrameRate > 0 ? requestedFrameRate : candidateRequest.VideoConfig.FrameRate,
 			activeRules,
 			safeDisplayRefreshHz);
 
@@ -713,9 +714,10 @@ bool UVdjmRecordEnvResolver::ResolveEnvPlatform(const FVdjmRecordEnvPlatformPres
 			candidateTier,
 			EVdjmRecordContentComplexity::EGameplay);
 
+		const int32 requestedBitrate = LinkedOwnerBridge->GetRequestedBitrate();
 		int32 safeBitrate = 0;
 		if (!VdjmRecordUtils::Validations::DbcValidateBitrate(
-			resolvedBitrateByTheory,
+			requestedBitrate > 0 ? requestedBitrate : resolvedBitrateByTheory,
 			safeBitrate,
 			TEXT("UVdjmRecordEnvResolver::ResolveEnvPlatform")))
 		{
@@ -945,32 +947,49 @@ bool UVdjmRecordResource::InitializeResource(UVdjmRecordEnvResolver* resolver)
 	return true;
 }
 
-bool UVdjmRecordResource::UpdateFinalFilePathFromResolver()
+bool UVdjmRecordResource::RefreshResolvedRuntimeConfigFromResolver()
 {
 	if (!LinkedResolver.IsValid())
 	{
-		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("UVdjmRecordResource::UpdateFinalFilePathFromResolver - LinkedResolver is invalid."));
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("UVdjmRecordResource::RefreshResolvedRuntimeConfigFromResolver - LinkedResolver is invalid."));
 		return false;
 	}
 
-	const FVdjmEncoderInitRequestOutput* outputConfig = LinkedResolver->TryGetResolvedOutputConfig();
-	if (outputConfig == nullptr)
+	const FVdjmEncoderInitRequest* resolvedInitRequest = LinkedResolver->TryGetResolvedEncoderInitRequest();
+	if (resolvedInitRequest == nullptr)
 	{
-		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("UVdjmRecordResource::UpdateFinalFilePathFromResolver - Output config is null."));
+		UE_LOG(LogVdjmRecorderCore, Warning, TEXT("UVdjmRecordResource::RefreshResolvedRuntimeConfigFromResolver - Resolved init request is null."));
+		return false;
+	}
+
+	int32 safeBitrate = 0;
+	if (!VdjmRecordUtils::Validations::DbcValidateBitrate(
+		resolvedInitRequest->VideoConfig.Bitrate,
+		safeBitrate,
+		TEXT("UVdjmRecordResource::RefreshResolvedRuntimeConfigFromResolver")))
+	{
 		return false;
 	}
 
 	FString safeOutputFilePath;
 	if (!VdjmRecordUtils::Validations::DbcValidateOutputFilePath(
-		outputConfig->OutputFilePath,
+		resolvedInitRequest->OutputConfig.OutputFilePath,
 		safeOutputFilePath,
-		TEXT("UVdjmRecordResource::UpdateFinalFilePathFromResolver")))
+		TEXT("UVdjmRecordResource::RefreshResolvedRuntimeConfigFromResolver")))
 	{
 		return false;
 	}
 
+	FinalFrameRate = FMath::Max(1, resolvedInitRequest->VideoConfig.FrameRate);
+	FinalBitrate = safeBitrate;
 	FinalFilePath = safeOutputFilePath;
+	OnResourceReadyForFilePath.Broadcast(this, FinalFilePath);
 	return true;
+}
+
+bool UVdjmRecordResource::UpdateFinalFilePathFromResolver()
+{
+	return RefreshResolvedRuntimeConfigFromResolver();
 }
 
 void UVdjmRecordResource::ResetResource()
