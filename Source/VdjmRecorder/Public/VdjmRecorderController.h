@@ -7,6 +7,7 @@
 
 class AVdjmRecordBridgeActor;
 class UVdjmRecordEnvDataAsset;
+class UVdjmRecordEventManager;
 class UVdjmRecorderStateObserver;
 
 USTRUCT(BlueprintType)
@@ -57,10 +58,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Recorder|Controller")
 	UVdjmRecorderStateObserver* GetStateObserver() const;
 
+	UFUNCTION(BlueprintPure, Category = "Recorder|Controller")
+	UVdjmRecordEventManager* GetEventManager() const;
+
 protected:
 	virtual UWorld* GetWorld() const override;
 
 private:
+	bool EnsureEventManager();
 	bool EnsureBridge();
 	void EnsureStateObserver();
 	bool ValidateRequest(const FVdjmRecorderOptionRequest& Request, FString& OutErrorReason) const;
@@ -68,6 +73,8 @@ private:
 	TWeakObjectPtr<UWorld> CachedWorld;
 	TWeakObjectPtr<AVdjmRecordBridgeActor> WeakBridgeActor;
 	TWeakObjectPtr<UVdjmRecordEnvDataAsset> WeakDataAsset;
+	UPROPERTY()
+	TObjectPtr<UVdjmRecordEventManager> EventManager;
 	UPROPERTY()
 	TObjectPtr<UVdjmRecorderStateObserver> StateObserver;
 };

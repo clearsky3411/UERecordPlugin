@@ -1,9 +1,9 @@
-#include "VdjmRecordEventManager.h"
+#include "VdjmEvents/VdjmRecordEventManager.h"
 
 #include "VdjmRecordBridgeActor.h"
-#include "VdjmRecordEventFlowDataAsset.h"
-#include "VdjmRecordEventFlowRuntime.h"
-#include "VdjmRecordEventNode.h"
+#include "VdjmEvents/VdjmRecordEventFlowDataAsset.h"
+#include "VdjmEvents/VdjmRecordEventFlowRuntime.h"
+#include "VdjmEvents/VdjmRecordEventNode.h"
 
 UVdjmRecordEventManager* UVdjmRecordEventManager::CreateEventManager(UObject* WorldContextObject)
 {
@@ -39,6 +39,8 @@ bool UVdjmRecordEventManager::InitializeManager(UObject* WorldContextObject)
 		return false;
 	}
 
+	ResetSessionState(EVdjmRecorderSessionState::ENew);
+
 	if (AVdjmRecordBridgeActor* BridgeActor = AVdjmRecordBridgeActor::TryGetRecordBridgeActor(CachedWorld.Get()))
 	{
 		return BindBridge(BridgeActor);
@@ -56,16 +58,28 @@ bool UVdjmRecordEventManager::BindBridge(AVdjmRecordBridgeActor* InBridgeActor)
 
 	if (WeakBridgeActor.Get() == InBridgeActor)
 	{
+		ApplySessionStateByBridgeSnapshot();
 		return true;
 	}
 
 	if (AVdjmRecordBridgeActor* ExistingBridge = WeakBridgeActor.Get())
 	{
 		ExistingBridge->OnChainInitEvent.RemoveDynamic(this, &UVdjmRecordEventManager::HandleBridgeChainEvent);
+		ExistingBridge->OnInitCompleteEvent.RemoveDynamic(this, &UVdjmRecordEventManager::HandleBridgeInitComplete);
+		ExistingBridge->OnInitErrorEndEvent.RemoveDynamic(this, &UVdjmRecordEventManager::HandleBridgeInitErrorEnd);
+		ExistingBridge->OnRecordStarted.RemoveDynamic(this, &UVdjmRecordEventManager::HandleBridgeRecordStarted);
+		ExistingBridge->OnRecordStopped.RemoveDynamic(this, &UVdjmRecordEventManager::HandleBridgeRecordStopped);
 	}
 
 	WeakBridgeActor = InBridgeActor;
+	bPendingFinalization = false;
+	ResetSessionState(EVdjmRecorderSessionState::ENew);
 	InBridgeActor->OnChainInitEvent.AddDynamic(this, &UVdjmRecordEventManager::HandleBridgeChainEvent);
+	InBridgeActor->OnInitCompleteEvent.AddDynamic(this, &UVdjmRecordEventManager::HandleBridgeInitComplete);
+	InBridgeActor->OnInitErrorEndEvent.AddDynamic(this, &UVdjmRecordEventManager::HandleBridgeInitErrorEnd);
+	InBridgeActor->OnRecordStarted.AddDynamic(this, &UVdjmRecordEventManager::HandleBridgeRecordStarted);
+	InBridgeActor->OnRecordStopped.AddDynamic(this, &UVdjmRecordEventManager::HandleBridgeRecordStopped);
+	ApplySessionStateByBridgeSnapshot();
 	return true;
 }
 
@@ -83,8 +97,10 @@ bool UVdjmRecordEventManager::StartRecordingByManager()
 
 	if (AVdjmRecordBridgeActor* BridgeActor = WeakBridgeActor.Get())
 	{
+		bPendingFinalization = false;
 		BridgeActor->StartRecording();
-		return true;
+		ApplySessionStateByBridgeSnapshot();
+		return BridgeActor->IsRecording();
 	}
 
 	return false;
@@ -94,6 +110,11 @@ void UVdjmRecordEventManager::StopRecordingByManager()
 {
 	if (AVdjmRecordBridgeActor* BridgeActor = WeakBridgeActor.Get())
 	{
+		if (BridgeActor->IsRecording())
+		{
+			bPendingFinalization = true;
+			TransitionSessionState(EVdjmRecorderSessionState::EFinalizing);
+		}
 		BridgeActor->StopRecording();
 	}
 }
@@ -201,6 +222,21 @@ UWorld* UVdjmRecordEventManager::GetManagerWorld() const
 	return CachedWorld.Get();
 }
 
+EVdjmRecorderSessionState UVdjmRecordEventManager::GetSessionState() const
+{
+	return CurrentSessionState;
+}
+
+double UVdjmRecordEventManager::GetLastSessionTransitionSeconds() const
+{
+	return LastSessionTransitionSeconds;
+}
+
+FString UVdjmRecordEventManager::GetLastSessionError() const
+{
+	return LastSessionError;
+}
+
 int32 UVdjmRecordEventManager::FindNextEventIndex(const UVdjmRecordEventBase* SourceEvent, TSubclassOf<UVdjmRecordEventBase> TargetClass, FName TargetTag) const
 {
 	const UVdjmRecordEventFlowRuntime* FlowRuntime = ActiveFlowRuntime;
@@ -242,6 +278,7 @@ UWorld* UVdjmRecordEventManager::GetWorld() const
 void UVdjmRecordEventManager::Tick(float DeltaTime)
 {
 	TickEventFlow();
+	ApplySessionStateByBridgeSnapshot();
 }
 
 bool UVdjmRecordEventManager::IsTickable() const
@@ -357,6 +394,13 @@ void UVdjmRecordEventManager::FinishFlow(EVdjmRecordEventResultType FinalResultT
 	ActiveFlowAsset.Reset();
 	ActiveFlowRuntime = nullptr;
 
+	if (FinalResultType == EVdjmRecordEventResultType::EFailure || FinalResultType == EVdjmRecordEventResultType::EAbort)
+	{
+		TransitionSessionState(
+			EVdjmRecorderSessionState::EFailed,
+			FString::Printf(TEXT("Event flow finished with result '%s'."), *StaticEnum<EVdjmRecordEventResultType>()->GetValueAsString(FinalResultType)));
+	}
+
 	OnEventFlowFinished.Broadcast(this, FinishedAsset, FinalResultType);
 }
 
@@ -366,4 +410,95 @@ void UVdjmRecordEventManager::HandleBridgeChainEvent(
 	EVdjmRecordBridgeInitStep CurrentStep)
 {
 	OnManagerObservedChainEvent.Broadcast(InBridgeActor, PrevStep, CurrentStep);
+	ApplySessionStateByBridgeSnapshot();
+}
+
+void UVdjmRecordEventManager::HandleBridgeInitComplete(AVdjmRecordBridgeActor* InBridgeActor)
+{
+	ApplySessionStateByBridgeSnapshot();
+}
+
+void UVdjmRecordEventManager::HandleBridgeInitErrorEnd(AVdjmRecordBridgeActor* InBridgeActor)
+{
+	TransitionSessionState(EVdjmRecorderSessionState::EFailed, TEXT("Bridge initialization failed."));
+}
+
+void UVdjmRecordEventManager::HandleBridgeRecordStarted(UVdjmRecordResource* InRecordResource)
+{
+	bPendingFinalization = false;
+	TransitionSessionState(EVdjmRecorderSessionState::ERecording);
+}
+
+void UVdjmRecordEventManager::HandleBridgeRecordStopped(UVdjmRecordResource* InRecordResource)
+{
+	bPendingFinalization = false;
+	TransitionSessionState(EVdjmRecorderSessionState::ETerminated);
+}
+
+void UVdjmRecordEventManager::ApplySessionStateByBridgeSnapshot()
+{
+	AVdjmRecordBridgeActor* BridgeActor = WeakBridgeActor.Get();
+	if (BridgeActor == nullptr)
+	{
+		if (CurrentSessionState != EVdjmRecorderSessionState::EFailed)
+		{
+			TransitionSessionState(EVdjmRecorderSessionState::ENew);
+		}
+		return;
+	}
+
+	if (BridgeActor->IsRecording())
+	{
+		bPendingFinalization = false;
+		TransitionSessionState(EVdjmRecorderSessionState::ERecording);
+		return;
+	}
+
+	const EVdjmRecordBridgeInitStep CurrentInitStep = BridgeActor->GetCurrentInitStep();
+	if (CurrentInitStep == EVdjmRecordBridgeInitStep::EInitError ||
+		CurrentInitStep == EVdjmRecordBridgeInitStep::EInitErrorEnd)
+	{
+		TransitionSessionState(EVdjmRecorderSessionState::EFailed, TEXT("Bridge reported an initialization error."));
+		return;
+	}
+
+	if (bPendingFinalization || CurrentSessionState == EVdjmRecorderSessionState::EFinalizing)
+	{
+		return;
+	}
+
+	if (CurrentInitStep == EVdjmRecordBridgeInitStep::EComplete)
+	{
+		TransitionSessionState(EVdjmRecorderSessionState::EReady);
+		return;
+	}
+
+	if (CurrentInitStep != EVdjmRecordBridgeInitStep::EInitializeStart)
+	{
+		TransitionSessionState(EVdjmRecorderSessionState::EPreparing);
+		return;
+	}
+
+	TransitionSessionState(EVdjmRecorderSessionState::ENew);
+}
+
+void UVdjmRecordEventManager::ResetSessionState(EVdjmRecorderSessionState NewState)
+{
+	CurrentSessionState = NewState;
+	LastSessionTransitionSeconds = FPlatformTime::Seconds();
+	LastSessionError.Reset();
+}
+
+void UVdjmRecordEventManager::TransitionSessionState(EVdjmRecorderSessionState NewState, const FString& InErrorMessage)
+{
+	if (CurrentSessionState == NewState && LastSessionError == InErrorMessage)
+	{
+		return;
+	}
+
+	const EVdjmRecorderSessionState PreviousState = CurrentSessionState;
+	CurrentSessionState = NewState;
+	LastSessionTransitionSeconds = FPlatformTime::Seconds();
+	LastSessionError = InErrorMessage;
+	OnSessionStateChanged.Broadcast(this, PreviousState, CurrentSessionState, LastSessionTransitionSeconds);
 }

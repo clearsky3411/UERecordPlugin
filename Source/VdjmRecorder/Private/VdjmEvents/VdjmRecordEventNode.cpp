@@ -1,7 +1,7 @@
-#include "VdjmRecordEventNode.h"
+#include "VdjmEvents/VdjmRecordEventNode.h"
 
 #include "VdjmRecordBridgeActor.h"
-#include "VdjmRecordEventManager.h"
+#include "VdjmEvents/VdjmRecordEventManager.h"
 #include "VdjmRecorderCore.h"
 
 FVdjmRecordEventResult UVdjmRecordEventBase::ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor)

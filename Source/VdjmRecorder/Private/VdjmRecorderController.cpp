@@ -1,6 +1,7 @@
 #include "VdjmRecorderController.h"
 
 #include "VdjmRecordBridgeActor.h"
+#include "VdjmEvents/VdjmRecordEventManager.h"
 #include "VdjmRecorderCore.h"
 #include "VdjmRecorderStateObserver.h"
 
@@ -30,11 +31,12 @@ UVdjmRecorderController* UVdjmRecorderController::CreateRecorderController(UObje
 
 bool UVdjmRecorderController::InitializeController()
 {
-	if (!EnsureBridge())
+	if (!EnsureEventManager())
 	{
 		return false;
 	}
 
+	EnsureBridge();
 	WeakDataAsset = AVdjmRecordBridgeActor::TryGetRecordEnvConfigure();
 	EnsureStateObserver();
 	return true;
@@ -84,36 +86,37 @@ bool UVdjmRecorderController::ApplyOptionRequest(const FVdjmRecorderOptionReques
 
 bool UVdjmRecorderController::StartRecording()
 {
-	if (!EnsureBridge())
+	if (!EnsureEventManager())
 	{
 		return false;
 	}
 
-	if (AVdjmRecordBridgeActor* bridge = WeakBridgeActor.Get())
-	{
-		bridge->StartRecording();
-		return true;
-	}
-
-	return false;
+	return EventManager->StartRecordingByManager();
 }
 
 void UVdjmRecorderController::StopRecording()
 {
-	if (!EnsureBridge())
+	if (!EnsureEventManager())
 	{
 		return;
 	}
 
-	if (AVdjmRecordBridgeActor* bridge = WeakBridgeActor.Get())
-	{
-		bridge->StopRecording();
-	}
+	EventManager->StopRecordingByManager();
 }
 
 AVdjmRecordBridgeActor* UVdjmRecorderController::GetBridgeActor() const
 {
-	return WeakBridgeActor.Get();
+	if (WeakBridgeActor.IsValid())
+	{
+		return WeakBridgeActor.Get();
+	}
+
+	if (EventManager != nullptr)
+	{
+		return EventManager->GetBoundBridge();
+	}
+
+	return nullptr;
 }
 
 UVdjmRecordEnvDataAsset* UVdjmRecorderController::GetResolvedDataAsset() const
@@ -126,15 +129,49 @@ UVdjmRecorderStateObserver* UVdjmRecorderController::GetStateObserver() const
 	return StateObserver;
 }
 
+UVdjmRecordEventManager* UVdjmRecorderController::GetEventManager() const
+{
+	return EventManager;
+}
+
 UWorld* UVdjmRecorderController::GetWorld() const
 {
 	return CachedWorld.Get();
+}
+
+bool UVdjmRecorderController::EnsureEventManager()
+{
+	if (EventManager != nullptr)
+	{
+		return true;
+	}
+
+	EventManager = UVdjmRecordEventManager::CreateEventManager(this);
+	if (EventManager == nullptr)
+	{
+		return false;
+	}
+
+	EnsureStateObserver();
+	return true;
 }
 
 bool UVdjmRecorderController::EnsureBridge()
 {
 	if (WeakBridgeActor.IsValid())
 	{
+		return true;
+	}
+
+	if (!EnsureEventManager())
+	{
+		return false;
+	}
+
+	if (AVdjmRecordBridgeActor* BoundBridge = EventManager->GetBoundBridge())
+	{
+		WeakBridgeActor = BoundBridge;
+		EnsureStateObserver();
 		return true;
 	}
 
@@ -145,6 +182,10 @@ bool UVdjmRecorderController::EnsureBridge()
 	}
 
 	WeakBridgeActor = AVdjmRecordBridgeActor::TryGetRecordBridgeActor(world);
+	if (WeakBridgeActor.IsValid())
+	{
+		EventManager->BindBridge(WeakBridgeActor.Get());
+	}
 	EnsureStateObserver();
 	return WeakBridgeActor.IsValid();
 }
@@ -160,9 +201,9 @@ void UVdjmRecorderController::EnsureStateObserver()
 		}
 	}
 
-	if (StateObserver != nullptr && WeakBridgeActor.IsValid())
+	if (StateObserver != nullptr && EventManager != nullptr)
 	{
-		StateObserver->BindBridge(WeakBridgeActor.Get());
+		StateObserver->BindEventManager(EventManager);
 	}
 }
 
