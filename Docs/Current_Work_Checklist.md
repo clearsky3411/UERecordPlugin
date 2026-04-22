@@ -8,6 +8,7 @@
 - [x] `EventManager` 분리
 - [x] `FlowRuntime` 도입
 - [x] JSON 실행 경로 통합
+- [x] `FlowFragment` 기반 코드 preset 조립 경로 추가
 - [x] `RecorderController` 초안 존재
 - [x] `RecorderStateObserver` 초안 존재
 - [x] `EVdjmRecordEventResultType`를 `E*` 규칙으로 정리
@@ -18,6 +19,7 @@
 - [x] `StateMachine Observer`를 EventManager/세션 기준으로 재정의
 - [x] `RecorderController` 옵션 메시지/큐 리뉴얼 1차
 - [x] Resource Option Apply Layer 1차 구현
+- [x] `FlowRuntime` mutation/fragment 1차 구현
 - [ ] UI 엔트리 정리
 - [ ] 비UI 객체가 UI를 몰라도 되도록 연결 구조 정리
 

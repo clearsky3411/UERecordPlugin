@@ -58,6 +58,25 @@ UVdjmRecordEventFlowRuntime* UVdjmRecordEventFlowRuntime::CreateFlowRuntimeFromJ
 	return NewFlowRuntime;
 }
 
+UVdjmRecordEventFlowRuntime* UVdjmRecordEventFlowRuntime::CreateEmptyFlowRuntime(UObject* Outer)
+{
+	UObject* RuntimeOuter = Outer ? Outer : GetTransientPackage();
+	UVdjmRecordEventFlowRuntime* NewFlowRuntime = NewObject<UVdjmRecordEventFlowRuntime>(RuntimeOuter);
+	if (NewFlowRuntime != nullptr)
+	{
+		NewFlowRuntime->InitializeEmpty();
+	}
+
+	return NewFlowRuntime;
+}
+
+bool UVdjmRecordEventFlowRuntime::InitializeEmpty()
+{
+	SourceFlowAsset = nullptr;
+	Events.Reset();
+	return true;
+}
+
 bool UVdjmRecordEventFlowRuntime::InitializeFromAsset(const UVdjmRecordEventFlowDataAsset* InSourceFlowAsset, FString& OutError)
 {
 	OutError.Reset();
@@ -112,6 +131,7 @@ bool UVdjmRecordEventFlowRuntime::InitializeFromJsonString(const FString& InJson
 bool UVdjmRecordEventFlowRuntime::ImportFlowFromJsonString(const FString& InJsonString, FString& OutError)
 {
 	OutError.Reset();
+	SourceFlowAsset = nullptr;
 
 	TSharedPtr<FJsonObject> RootObject;
 	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(InJsonString);
@@ -158,6 +178,80 @@ bool UVdjmRecordEventFlowRuntime::ImportFlowFromJsonString(const FString& InJson
 	}
 
 	Events = MoveTemp(NewEvents);
+	return true;
+}
+
+bool UVdjmRecordEventFlowRuntime::AppendFlowFragment(const FVdjmRecordEventFlowFragment& InFragment, FString& OutError)
+{
+	TArray<TObjectPtr<UVdjmRecordEventBase>> NewEvents;
+	if (!BuildEventNodesFromFragment(InFragment, NewEvents, OutError))
+	{
+		return false;
+	}
+
+	SourceFlowAsset = nullptr;
+	Events.Append(MoveTemp(NewEvents));
+	return true;
+}
+
+bool UVdjmRecordEventFlowRuntime::InsertFlowFragment(int32 InsertIndex, const FVdjmRecordEventFlowFragment& InFragment, FString& OutError)
+{
+	if (InsertIndex < 0 || InsertIndex > Events.Num())
+	{
+		OutError = TEXT("Insert index is out of range.");
+		return false;
+	}
+
+	TArray<TObjectPtr<UVdjmRecordEventBase>> NewEvents;
+	if (!BuildEventNodesFromFragment(InFragment, NewEvents, OutError))
+	{
+		return false;
+	}
+
+	if (NewEvents.Num() == 0)
+	{
+		return true;
+	}
+
+	SourceFlowAsset = nullptr;
+	for (int32 OffsetIndex = 0; OffsetIndex < NewEvents.Num(); ++OffsetIndex)
+	{
+		Events.Insert(NewEvents[OffsetIndex], InsertIndex + OffsetIndex);
+	}
+	return true;
+}
+
+bool UVdjmRecordEventFlowRuntime::ReplaceEventByTagFromFragment(FName InTag, const FVdjmRecordEventNodeFragment& InFragment, FString& OutError)
+{
+	OutError.Reset();
+
+	const int32 EventIndex = FindEventIndexByTag(InTag);
+	if (EventIndex == INDEX_NONE)
+	{
+		OutError = TEXT("Target event tag was not found.");
+		return false;
+	}
+
+	UVdjmRecordEventBase* NewEventNode = nullptr;
+	if (!BuildEventNodeFromFragment(InFragment, NewEventNode, OutError))
+	{
+		return false;
+	}
+
+	SourceFlowAsset = nullptr;
+	Events[EventIndex] = NewEventNode;
+	return true;
+}
+
+bool UVdjmRecordEventFlowRuntime::RemoveEventAt(int32 EventIndex)
+{
+	if (!Events.IsValidIndex(EventIndex))
+	{
+		return false;
+	}
+
+	SourceFlowAsset = nullptr;
+	Events.RemoveAt(EventIndex);
 	return true;
 }
 
@@ -236,4 +330,42 @@ void UVdjmRecordEventFlowRuntime::ResetRuntimeStates()
 UVdjmRecordEventFlowDataAsset* UVdjmRecordEventFlowRuntime::GetSourceFlowAsset() const
 {
 	return SourceFlowAsset.Get();
+}
+
+bool UVdjmRecordEventFlowRuntime::BuildEventNodeFromFragment(const FVdjmRecordEventNodeFragment& InFragment, UVdjmRecordEventBase*& OutEventNode, FString& OutError)
+{
+	OutError.Reset();
+	OutEventNode = nullptr;
+
+	TSharedPtr<FJsonObject> EventJsonObject;
+	if (!InFragment.WriteEventJsonObject(EventJsonObject, OutError))
+	{
+		return false;
+	}
+
+	return VdjmRecordEventJson::DeserializeEventNodeFromJsonObject(EventJsonObject, this, OutEventNode, OutError);
+}
+
+bool UVdjmRecordEventFlowRuntime::BuildEventNodesFromFragment(
+	const FVdjmRecordEventFlowFragment& InFragment,
+	TArray<TObjectPtr<UVdjmRecordEventBase>>& OutEvents,
+	FString& OutError)
+{
+	OutError.Reset();
+	OutEvents.Reset();
+
+	for (int32 EventIndex = 0; EventIndex < InFragment.Events.Num(); ++EventIndex)
+	{
+		UVdjmRecordEventBase* NewEventNode = nullptr;
+		if (!BuildEventNodeFromFragment(InFragment.Events[EventIndex], NewEventNode, OutError))
+		{
+			OutError = FString::Printf(TEXT("Fragment event index %d build failed: %s"), EventIndex, *OutError);
+			OutEvents.Reset();
+			return false;
+		}
+
+		OutEvents.Add(NewEventNode);
+	}
+
+	return true;
 }
