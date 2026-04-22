@@ -74,6 +74,7 @@
 - `UVdjmRecordEventManager`
 - `UVdjmRecordEventFlowDataAsset`
 - `UVdjmRecordEventFlowRuntime`
+- `FVdjmRecordEventFlowFragment`
 - `UVdjmRecordEventBase` 및 파생 노드들
 
 ### 현재 흐름
@@ -88,6 +89,20 @@
 - 동시에 외부가 보기 쉬운 세션 상태(`ENew/EPreparing/EReady/ERecording/EFinalizing/ETerminated/EFailed`)를 coarse하게 정리한다.
 - 실제 녹화 자체는 여전히 브릿지와 플랫폼 파이프라인이 수행한다.
 - 즉, 지금 구조는 `EventManager가 브릿지 위에서 오케스트레이션을 담당하는 단계`다.
+
+### Fragment 계층
+- `FVdjmRecordEventFlowFragment`는 코드에서 미리 조립하는 JSON 기반 flow 조각이다.
+- `FVdjmRecordEventNodeFragment`는 개별 event node의 `class + properties + children` 조합을 표현한다.
+- fragment는 `UVdjmRecordEventBase` UObject를 직접 들지 않는다.
+- 대신 기존 flow JSON 스키마를 그대로 출력하고, runtime은 그 JSON을 다시 event node로 역직렬화한다.
+- 이 덕분에 `DataAsset / Json / Fragment` 세 경로가 모두 같은 runtime 생성 경로로 합류한다.
+
+### 현재 가능한 것
+- fragment를 코드에서 체인해 preset을 만들 수 있다.
+- fragment를 JSON으로 내보내고 바로 runtime으로 만들 수 있다.
+- runtime에 fragment를 append/insert 할 수 있다.
+- tag 기준으로 기존 event를 fragment로 override 할 수 있다.
+- 이 구조는 이후 subgraph, override, 코드 preset 확장에 그대로 이어질 수 있다.
 
 ## Option 메시지 구조
 

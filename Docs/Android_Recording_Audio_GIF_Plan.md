@@ -79,6 +79,7 @@
 | 항목 | 상태 | 메모 |
 | --- | --- | --- |
 | `EventManager` 분리 | 구현됨 | FlowRuntime/JSON + coarse session state + 브릿지 오케스트레이션 포함 |
+| `FlowFragment` 코드 preset 경로 | 구현됨 | 기존 flow JSON 스키마를 재사용하는 코드 조립 조각 |
 | `RecorderController` 리뉴얼 1차 | 구현됨 | 옵션 메시지 큐/병합 + EventManager 소유 + 기본 제어 가능 |
 | `RecorderStateObserver` 초안 | 구현됨 | 현재는 EventManager 세션 상태 중심 관찰 |
 | Event Flow Runtime/JSON | 구현됨 | Asset clone + JSON import/export 가능 |
