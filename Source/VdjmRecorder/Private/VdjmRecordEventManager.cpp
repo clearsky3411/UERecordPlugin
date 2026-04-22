@@ -264,7 +264,7 @@ void UVdjmRecordEventManager::TickEventFlow()
 	UWorld* World = GetWorld();
 	if (World == nullptr)
 	{
-		FinishFlow(EVdjmRecordEventResultType::Abort);
+		FinishFlow(EVdjmRecordEventResultType::EAbort);
 		return;
 	}
 
@@ -276,7 +276,7 @@ void UVdjmRecordEventManager::TickEventFlow()
 	UVdjmRecordEventFlowRuntime* FlowRuntime = ActiveFlowRuntime;
 	if (FlowRuntime == nullptr)
 	{
-		FinishFlow(EVdjmRecordEventResultType::Abort);
+		FinishFlow(EVdjmRecordEventResultType::EAbort);
 		return;
 	}
 
@@ -285,7 +285,7 @@ void UVdjmRecordEventManager::TickEventFlow()
 	{
 		if (CurrentFlowIndex < 0 || CurrentFlowIndex >= FlowRuntime->Events.Num())
 		{
-			FinishFlow(EVdjmRecordEventResultType::Success);
+			FinishFlow(EVdjmRecordEventResultType::ESuccess);
 			return;
 		}
 
@@ -299,28 +299,28 @@ void UVdjmRecordEventManager::TickEventFlow()
 		const FVdjmRecordEventResult Result = Event->ExecuteEvent(this, WeakBridgeActor.Get());
 		switch (Result.ResultType)
 		{
-		case EVdjmRecordEventResultType::Success:
+		case EVdjmRecordEventResultType::ESuccess:
 			Event->ResetRuntimeState();
 			++CurrentFlowIndex;
 			break;
-		case EVdjmRecordEventResultType::Failure:
-			FinishFlow(EVdjmRecordEventResultType::Failure);
+		case EVdjmRecordEventResultType::EFailure:
+			FinishFlow(EVdjmRecordEventResultType::EFailure);
 			return;
-		case EVdjmRecordEventResultType::Abort:
-			FinishFlow(EVdjmRecordEventResultType::Abort);
+		case EVdjmRecordEventResultType::EAbort:
+			FinishFlow(EVdjmRecordEventResultType::EAbort);
 			return;
-		case EVdjmRecordEventResultType::Running:
+		case EVdjmRecordEventResultType::ERunning:
 			NextExecutableTime = World->GetTimeSeconds() + FMath::Max(0.0f, Result.WaitSeconds);
 			return;
-		case EVdjmRecordEventResultType::SelectIndex:
+		case EVdjmRecordEventResultType::ESelectIndex:
 			if (FlowRuntime->Events.IsValidIndex(Result.SelectedIndex))
 			{
 				CurrentFlowIndex = Result.SelectedIndex;
 				break;
 			}
-			FinishFlow(EVdjmRecordEventResultType::Failure);
+			FinishFlow(EVdjmRecordEventResultType::EFailure);
 			return;
-		case EVdjmRecordEventResultType::JumpToLabel:
+		case EVdjmRecordEventResultType::EJumpToLabel:
 		{
 			const int32 JumpIndex = FlowRuntime->FindEventIndexByTag(Result.JumpLabel);
 			if (FlowRuntime->Events.IsValidIndex(JumpIndex))
@@ -328,11 +328,11 @@ void UVdjmRecordEventManager::TickEventFlow()
 				CurrentFlowIndex = JumpIndex;
 				break;
 			}
-			FinishFlow(EVdjmRecordEventResultType::Failure);
+			FinishFlow(EVdjmRecordEventResultType::EFailure);
 			return;
 		}
 		default:
-			FinishFlow(EVdjmRecordEventResultType::Failure);
+			FinishFlow(EVdjmRecordEventResultType::EFailure);
 			return;
 		}
 	}

@@ -10,12 +10,12 @@ class UVdjmRecordEventManager;
 UENUM(BlueprintType)
 enum class EVdjmRecordEventResultType : uint8
 {
-	Success,
-	Failure,
-	Running,
-	Abort,
-	SelectIndex,
-	JumpToLabel,
+	ESuccess,
+	EFailure,
+	ERunning,
+	EAbort,
+	ESelectIndex,
+	EJumpToLabel,
 };
 
 USTRUCT(BlueprintType)
@@ -24,7 +24,7 @@ struct FVdjmRecordEventResult
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|EventFlow")
-	EVdjmRecordEventResultType ResultType = EVdjmRecordEventResultType::Success;
+	EVdjmRecordEventResultType ResultType = EVdjmRecordEventResultType::ESuccess;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|EventFlow", meta = (ClampMin = "0"))
 	int32 SelectedIndex = INDEX_NONE;

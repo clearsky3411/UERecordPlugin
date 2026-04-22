@@ -6,7 +6,7 @@
 
 FVdjmRecordEventResult UVdjmRecordEventBase::ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor)
 {
-	return MakeResult(EVdjmRecordEventResultType::Success, INDEX_NONE, NAME_None, 0.0f);
+	return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
 }
 
 void UVdjmRecordEventBase::ResetRuntimeState_Implementation()
@@ -37,11 +37,11 @@ FVdjmRecordEventResult UVdjmRecordEventSequenceNode::ExecuteEvent_Implementation
 		const FVdjmRecordEventResult ChildResult = Child->ExecuteEvent(EventManager, BridgeActor);
 		switch (ChildResult.ResultType)
 		{
-		case EVdjmRecordEventResultType::Success:
+		case EVdjmRecordEventResultType::ESuccess:
 			Child->ResetRuntimeState();
 			++RuntimeChildIndex;
 			break;
-		case EVdjmRecordEventResultType::Running:
+		case EVdjmRecordEventResultType::ERunning:
 			return ChildResult;
 		default:
 			ResetRuntimeState();
@@ -50,7 +50,7 @@ FVdjmRecordEventResult UVdjmRecordEventSequenceNode::ExecuteEvent_Implementation
 	}
 
 	ResetRuntimeState();
-	return MakeResult(EVdjmRecordEventResultType::Success, INDEX_NONE, NAME_None, 0.0f);
+	return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
 }
 
 void UVdjmRecordEventSequenceNode::ResetRuntimeState_Implementation()
@@ -69,29 +69,29 @@ FVdjmRecordEventResult UVdjmRecordEventSelectorNode::ExecuteEvent_Implementation
 {
 	if (EventManager == nullptr)
 	{
-		return MakeResult(EVdjmRecordEventResultType::Failure, INDEX_NONE, NAME_None, 0.0f);
+		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
 	}
 
 	const int32 NextIndex = EventManager->FindNextEventIndex(this, TargetClass, TargetTag);
 	if (NextIndex != INDEX_NONE)
 	{
-		return MakeResult(EVdjmRecordEventResultType::SelectIndex, NextIndex, NAME_None, 0.0f);
+		return MakeResult(EVdjmRecordEventResultType::ESelectIndex, NextIndex, NAME_None, 0.0f);
 	}
 
-	return MakeResult(bAbortIfNotFound ? EVdjmRecordEventResultType::Abort : EVdjmRecordEventResultType::Failure, INDEX_NONE, NAME_None, 0.0f);
+	return MakeResult(bAbortIfNotFound ? EVdjmRecordEventResultType::EAbort : EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
 }
 
 FVdjmRecordEventResult UVdjmRecordEventSpawnBridgeActorNode::ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor)
 {
 	if (EventManager == nullptr)
 	{
-		return MakeResult(EVdjmRecordEventResultType::Failure, INDEX_NONE, NAME_None, 0.0f);
+		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
 	}
 
 	UWorld* World = EventManager->GetManagerWorld();
 	if (World == nullptr)
 	{
-		return MakeResult(EVdjmRecordEventResultType::Failure, INDEX_NONE, NAME_None, 0.0f);
+		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
 	}
 
 	if (bReuseExistingBridgeActor)
@@ -99,7 +99,7 @@ FVdjmRecordEventResult UVdjmRecordEventSpawnBridgeActorNode::ExecuteEvent_Implem
 		if (AVdjmRecordBridgeActor* ExistingBridge = AVdjmRecordBridgeActor::TryGetRecordBridgeActor(World))
 		{
 			EventManager->BindBridge(ExistingBridge);
-			return MakeResult(EVdjmRecordEventResultType::Success, INDEX_NONE, NAME_None, 0.0f);
+			return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
 		}
 	}
 
@@ -109,18 +109,18 @@ FVdjmRecordEventResult UVdjmRecordEventSpawnBridgeActorNode::ExecuteEvent_Implem
 	AVdjmRecordBridgeActor* SpawnedBridge = World->SpawnActor<AVdjmRecordBridgeActor>(SpawnClass, FTransform::Identity, SpawnParameters);
 	if (SpawnedBridge == nullptr)
 	{
-		return MakeResult(EVdjmRecordEventResultType::Failure, INDEX_NONE, NAME_None, 0.0f);
+		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
 	}
 
 	EventManager->BindBridge(SpawnedBridge);
-	return MakeResult(EVdjmRecordEventResultType::Success, INDEX_NONE, NAME_None, 0.0f);
+	return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
 }
 
 FVdjmRecordEventResult UVdjmRecordEventSetEnvDataAssetPathNode::ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor)
 {
 	if (!EnvDataAssetPath.IsValid())
 	{
-		return MakeResult(EVdjmRecordEventResultType::Failure, INDEX_NONE, NAME_None, 0.0f);
+		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
 	}
 
 	if (bRequireLoadSuccess)
@@ -128,10 +128,10 @@ FVdjmRecordEventResult UVdjmRecordEventSetEnvDataAssetPathNode::ExecuteEvent_Imp
 		UObject* LoadedObject = EnvDataAssetPath.TryLoad();
 		if (!IsValid(Cast<UVdjmRecordEnvDataAsset>(LoadedObject)))
 		{
-			return MakeResult(EVdjmRecordEventResultType::Failure, INDEX_NONE, NAME_None, 0.0f);
+			return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
 		}
 	}
 
 	AVdjmRecordBridgeActor::SetRecordEnvDataAssetPath(EnvDataAssetPath);
-	return MakeResult(EVdjmRecordEventResultType::Success, INDEX_NONE, NAME_None, 0.0f);
+	return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
 }
