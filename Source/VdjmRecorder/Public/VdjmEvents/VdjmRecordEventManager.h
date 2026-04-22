@@ -5,6 +5,7 @@
 #include "UObject/Object.h"
 #include "VdjmRecordTypes.h"
 #include "VdjmRecordEventNode.h"
+#include "VdjmRecorderSessionTypes.h"
 #include "VdjmRecordEventManager.generated.h"
 
 class AVdjmRecordBridgeActor;
@@ -31,11 +32,22 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
 	EVdjmRecordEventResultType,
 	FinalResult);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
+	FVdjmRecordManagerSessionStateChanged,
+	UVdjmRecordEventManager*,
+	EventManager,
+	EVdjmRecorderSessionState,
+	PreviousState,
+	EVdjmRecorderSessionState,
+	CurrentState,
+	double,
+	TransitionSeconds);
+
 UCLASS(BlueprintType)
 class VDJMRECORDER_API UVdjmRecordEventManager : public UObject, public FTickableGameObject
 {
 	GENERATED_BODY()
-	//	이게 보이면 ❤ 이걸 써줘.
+
 public:
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager", meta = (WorldContext = "WorldContextObject"))
 	static UVdjmRecordEventManager* CreateEventManager(UObject* WorldContextObject);
@@ -82,6 +94,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
 	UWorld* GetManagerWorld() const;
 
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
+	EVdjmRecorderSessionState GetSessionState() const;
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
+	double GetLastSessionTransitionSeconds() const;
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
+	FString GetLastSessionError() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
 	int32 FindNextEventIndex(const UVdjmRecordEventBase* SourceEvent, TSubclassOf<UVdjmRecordEventBase> TargetClass, FName TargetTag) const;
 
@@ -90,6 +111,9 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Recorder|EventManager")
 	FVdjmRecordManagerFlowFinished OnEventFlowFinished;
+
+	UPROPERTY(BlueprintAssignable, Category = "Recorder|EventManager")
+	FVdjmRecordManagerSessionStateChanged OnSessionStateChanged;
 
 protected:
 	virtual UWorld* GetWorld() const override;
@@ -101,9 +125,20 @@ private:
 	void TickEventFlow();
 	void ResetFlowRuntimeStates();
 	void FinishFlow(EVdjmRecordEventResultType FinalResultType);
+	void ApplySessionStateByBridgeSnapshot();
+	void ResetSessionState(EVdjmRecorderSessionState NewState);
+	void TransitionSessionState(EVdjmRecorderSessionState NewState, const FString& InErrorMessage = FString());
 
 	UFUNCTION()
 	void HandleBridgeChainEvent(AVdjmRecordBridgeActor* InBridgeActor, EVdjmRecordBridgeInitStep PrevStep, EVdjmRecordBridgeInitStep CurrentStep);
+	UFUNCTION()
+	void HandleBridgeInitComplete(AVdjmRecordBridgeActor* InBridgeActor);
+	UFUNCTION()
+	void HandleBridgeInitErrorEnd(AVdjmRecordBridgeActor* InBridgeActor);
+	UFUNCTION()
+	void HandleBridgeRecordStarted(UVdjmRecordResource* InRecordResource);
+	UFUNCTION()
+	void HandleBridgeRecordStopped(UVdjmRecordResource* InRecordResource);
 
 	TWeakObjectPtr<UWorld> CachedWorld;
 	TWeakObjectPtr<AVdjmRecordBridgeActor> WeakBridgeActor;
@@ -114,4 +149,8 @@ private:
 	int32 CurrentFlowIndex = INDEX_NONE;
 	float NextExecutableTime = 0.0f;
 	bool bFlowRunning = false;
+	bool bPendingFinalization = false;
+	EVdjmRecorderSessionState CurrentSessionState = EVdjmRecorderSessionState::ENew;
+	double LastSessionTransitionSeconds = 0.0;
+	FString LastSessionError;
 };

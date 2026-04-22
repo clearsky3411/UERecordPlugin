@@ -1,0 +1,186 @@
+# VdjmRecorder Current Architecture
+
+## 문서 목적
+- 이 문서는 현재 `VdjmRecorder` 플러그인 구조를 나중에 다시 볼 때 빠르게 복기하기 위한 문서다.
+- 특히 `구조`, `실행 흐름`, `플랫폼별 차이`, `의존성`, `의도와 현재 상태`를 함께 적어 둔다.
+- 현재 기준은 `Codex app + local worktree`에서 확인한 코드 상태다.
+
+## 한 줄 요약
+- 현재 구조는 `BridgeActor -> Resolver -> Resource -> Pipeline -> Unit -> Platform Encoder`가 실제 녹화 실행 경로이고, `EventManager/Controller/Observer`는 그 위에 오케스트레이션 레이어로 올라가고 있다.
+
+## 핵심 의도
+- `BridgeActor`는 월드/뷰포트/리소스/파이프라인 초기화와 실제 녹화 시작/정지의 플랫폼 실행체 역할을 한다.
+- `EventManager`는 브릿지를 직접 대체한 최종 녹화 엔진이라기보다, 외부에서 호출할 때 플로우/바인딩/분기를 담당하는 오케스트레이터로 보는 것이 맞다.
+- `Pipeline/Unit` 분리는 플랫폼별 녹화 경로를 같은 개념으로 묶기 위한 추상화다.
+- 이 추상화 덕분에 `Windows WMF`는 `NV12 compute -> readback -> encode` 다단계로 갈 수 있고, `Android`는 `surface submit` 기반 단일 unit 경로로 줄일 수 있다.
+
+## 모듈/공통 의존성
+
+### 모듈 레벨
+- 모듈명: `VdjmRecorder`
+- 주요 공통 의존성: `Core`, `RenderCore`, `RHI`, `Projects`, `CoreUObject`, `Engine`, `Json`, `JsonUtilities`, `AudioMixer`, `Slate`, `SlateCore`, `SlateRHIRenderer`
+- Windows 전용 의존성: `AVCodecsCore`, Media Foundation 라이브러리(`mf`, `mfplat`, `mfreadwrite`, `mfuuid`)
+- Android 전용 의존성: `Launch`, `AndroidRuntimeSettings`, `Vulkan`, `VulkanRHI`, NDK 라이브러리(`mediandk`, `android`, `log`, `EGL`, `GLESv3`, `vulkan`)
+
+### 셰이더 매핑
+- `VdjmRecorder` 모듈 시작 시 플러그인 셰이더 경로를 `/Plugin/VdjmMobileUi/...`로 매핑한다.
+- NV12 변환 셰이더는 `Shaders/VdjmRecordShader.usf` 하나를 사용한다.
+
+## 런타임 구조
+
+### 1. BridgeActor 중심 초기화 체인
+- `AVdjmRecordBridgeActor`는 BeginPlay 이후 초기화 체인을 돈다.
+- 주요 단계:
+  - `EInitializeWorldParts`
+  - `EInitializeCurrentEnvironment`
+  - `ECreateRecordResource`
+  - `EPostResourceInitResolve`
+  - `ECreatePipelines`
+  - `EFinalizeInitialization`
+  - `EComplete`
+- 이 체인 동안 뷰포트/플레이어컨트롤러, 데이터 에셋, Resolver, Resource, Pipeline이 준비된다.
+
+### 2. Resolver/Resource/Pipeline/Unit
+- `UVdjmRecordEnvResolver`
+  - DataAsset preset을 현재 플랫폼/품질/뷰포트 기준으로 해석한다.
+  - 최종 해상도, 프레임레이트, 비트레이트, 출력 경로를 결정한다.
+- `UVdjmRecordResource`
+  - 최종 실행값(`FinalFrameRate`, `FinalBitrate`, `FinalFilePath`)을 보유한다.
+  - 실제 플랫폼별 Resource는 이를 상속한다.
+- `UVdjmRecordUnitPipeline`
+  - Resource를 입력으로 받아 Unit 인스턴스를 만든다.
+  - 플랫폼별 파이프라인이 어떤 Unit을 쓸지 결정한다.
+- `UVdjmRecordUnit`
+  - 실제 프레임 처리/인코딩 단계 단위다.
+
+### 3. Controller/Observer/EventManager
+- `UVdjmRecorderController`
+  - 현재는 `EventManager`를 소유하는 상위 진입점이며, 옵션 적용/녹화 시작/정지는 가능한 한 이 레이어를 통해 들어가게 정리하는 중이다.
+- `UVdjmRecorderStateObserver`
+  - 현재는 `BridgeActor` 직접 감시기가 아니라 `EventManager`가 내보내는 coarse session state 감시기다.
+  - `chainInit`의 세부 스텝은 더 이상 observer가 직접 다루지 않고, 필요 시 `EventManager` 디버그 delegate 쪽에서만 본다.
+- `UVdjmRecordEventManager`
+  - 브릿지 바인딩, FlowRuntime 실행, JSON 플로우 실행, coarse session state 관리까지 담당한다.
+  - 앞으로 UI와 상위 호출은 이쪽으로 점차 모으는 방향이 자연스럽다.
+
+## Event Flow 구조
+
+### 현재 구성
+- 이벤트 관련 파일은 현재 `Source/VdjmRecorder/Public/VdjmEvents`, `Source/VdjmRecorder/Private/VdjmEvents` 폴더로 정리되어 있다.
+- `UVdjmRecordEventManager`
+- `UVdjmRecordEventFlowDataAsset`
+- `UVdjmRecordEventFlowRuntime`
+- `UVdjmRecordEventBase` 및 파생 노드들
+
+### 현재 흐름
+1. `EventManager` 생성
+2. 월드에서 브릿지 자동 탐색/바인딩
+3. Asset 또는 JSON으로부터 `FlowRuntime` 생성
+4. Tick에서 현재 인덱스 이벤트 실행
+5. 결과 타입에 따라 성공/실패/대기/점프/선택 분기 처리
+
+### 현재 해석
+- `EventManager`는 플로우와 분기 실행을 맡는다.
+- 동시에 외부가 보기 쉬운 세션 상태(`ENew/EPreparing/EReady/ERecording/EFinalizing/ETerminated/EFailed`)를 coarse하게 정리한다.
+- 실제 녹화 자체는 여전히 브릿지와 플랫폼 파이프라인이 수행한다.
+- 즉, 지금 구조는 `EventManager가 브릿지 위에서 오케스트레이션을 담당하는 단계`다.
+
+## 플랫폼별 실행 흐름
+
+### Windows / WMF 경로
+1. Resolver가 Windows preset 해석
+2. `UVdjmRecordWMFResource` 생성
+3. Resource가 `TexturePool`을 생성
+4. `UVdjmRecordWMFUnitDefaultPipeline`이 Unit들을 생성
+5. 일반적으로
+   - `UVdjmRecordWMFCSUnit`
+   - `UVdjmRecordWMFEncoderReadBackUnit`
+   순서로 이어진다
+6. Compute Shader가 원본 텍스처를 NV12 레이아웃 텍스처로 변환
+7. ReadBack 후 `FVdjmWindowsEncoderImpl`로 전달
+8. WMF SinkWriter가 `MFVideoFormat_NV12` 입력을 H264로 기록
+
+### Android / Surface 경로
+1. Resolver가 Android preset 해석
+2. `UVdjmRecordAndroidResource` 생성
+3. `UVdjmAndroidRecordPipeline`이 사실상 단일 unit(`UVdjmRecordAndroidUnit`)을 사용
+4. Android unit가 `CreatePlatformVideoEncoder()`로 Android encoder를 만든다
+5. `FVdjmAndroidEncoderImpl`가 `FVdjmAndroidRecordSession`을 구성한다
+6. Session이 Video codec, Audio codec, Muxer, Graphic backend를 초기화한다
+7. Graphic backend는 현재 RHI에 따라
+   - `FVdjmAndroidEncoderBackendVulkan`
+   - `FVdjmAndroidEncoderBackendOpenGL`
+   를 사용한다
+8. 프레임은 CPU readback 없이 codec input surface 쪽으로 직접 제출된다
+
+## NV12 구조를 위해 왜 이렇게 나뉘어 있는가
+- Windows WMF 경로는 `NV12` 입력을 전제로 설계되어 있다.
+- 그래서 `Compute Shader -> NV12 텍스처 -> ReadBack -> WMF Encode` 구조가 필요하다.
+- `Shaders/VdjmRecordShader.usf`는 다음 의도를 가진다:
+  - 상단 영역에 Y plane 저장
+  - 하단 절반 영역에 UV interleaved plane 저장
+  - 결과적으로 `height * 3 / 2` 구조의 NV12 레이아웃을 하나의 텍스처/버퍼처럼 다루게 한다
+- 이 때문에 `Pipeline/Unit` 분리는 단순한 추상화 취향이 아니라, `NV12 전처리 + 인코더 요구 포맷`을 맞추기 위한 구조적 필요에서 나왔다.
+- 반대로 Android는 `MediaCodec input surface` 기반이라 현재는 같은 구조를 강제로 거치지 않는다.
+
+## Pipeline/Unit 구조의 원래 의도
+- 원래 의도는 플랫폼마다 같은 단계 수를 강제하는 것이 아니다.
+- 의도는 다음 둘을 동시에 만족하는 것이다:
+  - 공통 추상화 유지
+  - 플랫폼별 최적 경로 허용
+- 그래서
+  - Windows는 다단계 파이프라인
+  - Android는 단일 혹은 소수 단계 파이프라인
+  으로 자연스럽게 갈 수 있다.
+
+## 플랫폼별 현재 상태 평가
+
+### Android Vulkan
+- 현재 코드 양과 상태 관리가 가장 자세하다.
+- `Session -> Vulkan backend -> swapchain/input surface -> present` 흐름이 구체적으로 구현되어 있다.
+- 현재 Android 경로 중 가장 주력으로 보인다.
+
+### Android OpenGL
+- EGL 공유 컨텍스트 기반 경로가 구현되어 있다.
+- 다만 시작 시점보다 `Running()` 시점의 `EnsureEGLContextReady()`에 많이 의존하고 있어 실기기 재검증이 필요하다.
+- 구현은 존재하지만 Vulkan만큼 강하게 검증되었다고 단정하긴 어렵다.
+
+### Windows WMF
+- 구조 의도는 매우 명확하다.
+- `NV12 compute`, `readback`, `WMF encoder` 조합도 잘 드러난다.
+- 다만 수정 중인 흔적과 방어 코드, 분기 흔적이 많아서 현재는 회귀 위험이 높은 편으로 보는 것이 안전하다.
+- 즉, "구조는 맞는데 재검증이 반드시 필요한 상태"로 기록해 둔다.
+
+## 현재 수정할 때 먼저 봐야 하는 포인트
+
+### 상태/오케스트레이션
+- `VdjmEvents/VdjmRecordEventManager.*`
+- `VdjmEvents/VdjmRecordEventFlowDataAsset.*`
+- `VdjmEvents/VdjmRecordEventFlowRuntime.*`
+- `VdjmEvents/VdjmRecordEventNode.*`
+- `VdjmRecorderController.*`
+- `VdjmRecorderStateObserver.*`
+
+### 플랫폼 공통 구조
+- `VdjmRecorderCore.h/.cpp`
+- `VdjmRecordBridgeActor.h/.cpp`
+- `VdjmRecordTypes.h/.cpp`
+
+### Android 경로
+- `VdjmAndroidCore.h/.cpp`
+- `VdjmRecoderAndroidEncoder.h/.cpp`
+- `VdjmAndroidEncoderBackendVulkan.h/.cpp`
+- `VdjmAndroidEncoderBackendOpenGL.h/.cpp`
+
+### Windows WMF 경로
+- `VdjmWMFCore.h/.cpp`
+- `VdjmRecorderWndEncoder.h`
+- `VdjmRecorderWndEncorder.cpp`
+
+### 셰이더/NV12
+- `VdjmRecordShader.h/.cpp`
+- `Shaders/VdjmRecordShader.usf`
+
+## 다음 문서와의 관계
+- 작업 순서 확인: `Current_Work_Checklist.md`
+- 전체 계획과 장기 설계: `Android_Recording_Audio_GIF_Plan.md`

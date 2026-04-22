@@ -1,17 +1,10 @@
 #include "VdjmRecorderStateObserver.h"
 
-#include "VdjmRecordBridgeActor.h"
-#include "VdjmRecorderCore.h"
+#include "VdjmEvents/VdjmRecordEventManager.h"
 
 UVdjmRecorderStateObserver* UVdjmRecorderStateObserver::CreateObserver(UObject* WorldContextObject)
 {
 	if (WorldContextObject == nullptr)
-	{
-		return nullptr;
-	}
-
-	UWorld* World = WorldContextObject->GetWorld();
-	if (World == nullptr)
 	{
 		return nullptr;
 	}
@@ -22,195 +15,53 @@ UVdjmRecorderStateObserver* UVdjmRecorderStateObserver::CreateObserver(UObject* 
 		return nullptr;
 	}
 
-	Observer->InitializeObserver(WorldContextObject);
-	return Observer;
+	return Observer->InitializeObserver(WorldContextObject) ? Observer : nullptr;
 }
 
 bool UVdjmRecorderStateObserver::InitializeObserver(UObject* WorldContextObject)
 {
-	if (WorldContextObject == nullptr)
-	{
-		return false;
-	}
-
-	CachedWorld = WorldContextObject->GetWorld();
-	if (!CachedWorld.IsValid())
-	{
-		return false;
-	}
-
-	if (AVdjmRecordBridgeActor* BridgeActor = AVdjmRecordBridgeActor::TryGetRecordBridgeActor(CachedWorld.Get()))
-	{
-		return BindBridge(BridgeActor);
-	}
-
-	return true;
+	return WorldContextObject != nullptr;
 }
 
-bool UVdjmRecorderStateObserver::BindBridge(AVdjmRecordBridgeActor* InBridgeActor)
+bool UVdjmRecorderStateObserver::BindEventManager(UVdjmRecordEventManager* InEventManager)
 {
-	if (InBridgeActor == nullptr)
+	if (InEventManager == nullptr)
 	{
 		return false;
 	}
 
-	if (WeakBridgeActor.Get() == InBridgeActor)
+	if (WeakEventManager.Get() == InEventManager)
 	{
 		return true;
 	}
 
-	UnbindBridge();
-	WeakBridgeActor = InBridgeActor;
-	LastInitStep = InBridgeActor->GetCurrentInitStep();
-
-	InBridgeActor->OnInitCompleteEvent.AddDynamic(this, &UVdjmRecorderStateObserver::HandleInitComplete);
-	InBridgeActor->OnInitErrorEndEvent.AddDynamic(this, &UVdjmRecorderStateObserver::HandleInitErrorEnd);
-	InBridgeActor->OnRecordStarted.AddDynamic(this, &UVdjmRecorderStateObserver::HandleRecordStarted);
-	InBridgeActor->OnRecordStopped.AddDynamic(this, &UVdjmRecorderStateObserver::HandleRecordStopped);
-	InBridgeActor->OnChainInitEvent.AddDynamic(this, &UVdjmRecorderStateObserver::HandleChainInitChanged);
-
-	ApplyStateByBridgeSnapshot();
+	UnbindEventManager();
+	WeakEventManager = InEventManager;
+	CurrentState = InEventManager->GetSessionState();
+	LastTransitionSeconds = InEventManager->GetLastSessionTransitionSeconds();
+	LastError = InEventManager->GetLastSessionError();
+	InEventManager->OnSessionStateChanged.AddDynamic(this, &UVdjmRecorderStateObserver::HandleManagerSessionStateChanged);
 	return true;
 }
 
-void UVdjmRecorderStateObserver::UnbindBridge()
+void UVdjmRecorderStateObserver::UnbindEventManager()
 {
-	if (AVdjmRecordBridgeActor* BridgeActor = WeakBridgeActor.Get())
+	if (UVdjmRecordEventManager* EventManager = WeakEventManager.Get())
 	{
-		BridgeActor->OnInitCompleteEvent.RemoveDynamic(this, &UVdjmRecorderStateObserver::HandleInitComplete);
-		BridgeActor->OnInitErrorEndEvent.RemoveDynamic(this, &UVdjmRecorderStateObserver::HandleInitErrorEnd);
-		BridgeActor->OnRecordStarted.RemoveDynamic(this, &UVdjmRecorderStateObserver::HandleRecordStarted);
-		BridgeActor->OnRecordStopped.RemoveDynamic(this, &UVdjmRecorderStateObserver::HandleRecordStopped);
-		BridgeActor->OnChainInitEvent.RemoveDynamic(this, &UVdjmRecorderStateObserver::HandleChainInitChanged);
+		EventManager->OnSessionStateChanged.RemoveDynamic(this, &UVdjmRecorderStateObserver::HandleManagerSessionStateChanged);
 	}
 
-	WeakBridgeActor = nullptr;
+	WeakEventManager = nullptr;
 }
 
-void UVdjmRecorderStateObserver::Tick(float DeltaTime)
+void UVdjmRecorderStateObserver::HandleManagerSessionStateChanged(
+	UVdjmRecordEventManager* InEventManager,
+	EVdjmRecorderSessionState PreviousState,
+	EVdjmRecorderSessionState NewState,
+	double TransitionSeconds)
 {
-	if (!WeakBridgeActor.IsValid())
-	{
-		if (CachedWorld.IsValid())
-		{
-			if (AVdjmRecordBridgeActor* BridgeActor = AVdjmRecordBridgeActor::TryGetRecordBridgeActor(CachedWorld.Get()))
-			{
-				BindBridge(BridgeActor);
-			}
-		}
-		return;
-	}
-
-	ApplyStateByBridgeSnapshot();
-}
-
-TStatId UVdjmRecorderStateObserver::GetStatId() const
-{
-	RETURN_QUICK_DECLARE_CYCLE_STAT(UVdjmRecorderStateObserver, STATGROUP_Tickables);
-}
-
-bool UVdjmRecorderStateObserver::IsTickable() const
-{
-	return !IsTemplate();
-}
-
-UWorld* UVdjmRecorderStateObserver::GetWorld() const
-{
-	return CachedWorld.Get();
-}
-
-void UVdjmRecorderStateObserver::HandleInitComplete(AVdjmRecordBridgeActor* InBridgeActor)
-{
-	TransitionTo(EVdjmRecorderObservedState::EReady);
-}
-
-void UVdjmRecorderStateObserver::HandleInitErrorEnd(AVdjmRecordBridgeActor* InBridgeActor)
-{
-	TransitionTo(EVdjmRecorderObservedState::EError);
-}
-
-void UVdjmRecorderStateObserver::HandleRecordStarted(UVdjmRecordResource* InRecordResource)
-{
-	TransitionTo(EVdjmRecorderObservedState::ERunning);
-}
-
-void UVdjmRecorderStateObserver::HandleRecordStopped(UVdjmRecordResource* InRecordResource)
-{
-	TransitionTo(EVdjmRecorderObservedState::ETerminated);
-}
-
-void UVdjmRecorderStateObserver::HandleChainInitChanged(
-	AVdjmRecordBridgeActor* InBridgeActor,
-	EVdjmRecordBridgeInitStep PrevStep,
-	EVdjmRecordBridgeInitStep CurrentStep)
-{
-	LastInitStep = CurrentStep;
-	if (CurrentStep == EVdjmRecordBridgeInitStep::EInitError ||
-		CurrentStep == EVdjmRecordBridgeInitStep::EInitErrorEnd)
-	{
-		TransitionTo(EVdjmRecorderObservedState::EError);
-		return;
-	}
-
-	if (CurrentStep == EVdjmRecordBridgeInitStep::EComplete)
-	{
-		TransitionTo(EVdjmRecorderObservedState::EReady);
-		return;
-	}
-
-	if (CurrentStep != EVdjmRecordBridgeInitStep::EInitializeStart)
-	{
-		TransitionTo(EVdjmRecorderObservedState::EWaiting);
-	}
-}
-
-void UVdjmRecorderStateObserver::TransitionTo(EVdjmRecorderObservedState NewState)
-{
-	if (CurrentState == NewState)
-	{
-		return;
-	}
-
-	const EVdjmRecorderObservedState PreviousState = CurrentState;
 	CurrentState = NewState;
-	LastTransitionSeconds = FPlatformTime::Seconds();
-	OnObservedStateChanged.Broadcast(PreviousState, CurrentState, LastInitStep, LastTransitionSeconds);
-}
-
-void UVdjmRecorderStateObserver::ApplyStateByBridgeSnapshot()
-{
-	AVdjmRecordBridgeActor* BridgeActor = WeakBridgeActor.Get();
-	if (BridgeActor == nullptr)
-	{
-		return;
-	}
-
-	LastInitStep = BridgeActor->GetCurrentInitStep();
-
-	if (BridgeActor->IsRecording())
-	{
-		TransitionTo(EVdjmRecorderObservedState::ERunning);
-		return;
-	}
-
-	if (LastInitStep == EVdjmRecordBridgeInitStep::EInitError ||
-		LastInitStep == EVdjmRecordBridgeInitStep::EInitErrorEnd)
-	{
-		TransitionTo(EVdjmRecorderObservedState::EError);
-		return;
-	}
-
-	if (LastInitStep == EVdjmRecordBridgeInitStep::EComplete)
-	{
-		TransitionTo(EVdjmRecorderObservedState::EReady);
-		return;
-	}
-
-	if (LastInitStep == EVdjmRecordBridgeInitStep::EInitializeStart)
-	{
-		TransitionTo(EVdjmRecorderObservedState::ENew);
-		return;
-	}
-
-	TransitionTo(EVdjmRecorderObservedState::EWaiting);
+	LastTransitionSeconds = TransitionSeconds;
+	LastError = InEventManager ? InEventManager->GetLastSessionError() : FString();
+	OnObservedStateChanged.Broadcast(PreviousState, CurrentState, LastTransitionSeconds);
 }

@@ -1,8 +1,8 @@
-#include "VdjmRecordEventJsonHelper.h"
+#include "VdjmEvents/VdjmRecordEventJsonHelper.h"
 
 #include "JsonObjectConverter.h"
 #include "UObject/UnrealType.h"
-#include "VdjmRecordEventNode.h"
+#include "VdjmEvents/VdjmRecordEventNode.h"
 
 namespace
 {

@@ -1,4 +1,4 @@
-# Android Recording: Audio + GIF Preview 설계 문서 (Draft v1)
+# Android Recording: Audio + GIF Preview 설계 문서 (Living Doc)
 
 ## 문서 목적
 - 현재 안정화된 Android/Vulkan 녹화 경로를 유지하면서,
@@ -6,6 +6,13 @@
   2) **GIF thumbnail preview 생성**
   을 단계적으로 추가하기 위한 공통 계획 문서.
 - 구현 중 의사결정/진행상황/리스크를 한 곳에서 추적하기 위한 living document.
+
+## 현재 작업 컨텍스트 (2026-04-22)
+- 이 문서는 이제 cloud 메모 용도가 아니라, `Codex app + local worktree` 기준 현재 플러그인 상태를 직접 추적하는 기준 문서로 사용한다.
+- 현재 저장소 범위는 Unreal 플러그인 `VdjmRecorder` 중심이며, 서버리스/API/서비스 페이지는 이 저장소 밖의 후속 단계로 본다.
+- 따라서 문서 우선순위도 `현재 구현된 코드 구조`, `다음 작업 순서`, `완료/미완료 상태`를 먼저 보여주고, 장기 확장 계획은 뒤쪽 참고로 유지한다.
+- `EventManager`는 이미 도입되었지만 아직 `BridgeActor`를 즉시 제거한 상태는 아니며, 현재는 오케스트레이션 레이어로 보는 것이 정확하다.
+- 서버리스와 서비스 페이지는 원래부터 마지막 구현 단계로 간주하며, 현재 문서에서도 최종 단계로 재배치한다.
 
 ---
 
@@ -19,6 +26,7 @@
 - 마이크 입력 캡처
 - VulkanBackend에 추가적인 실시간 후처리(썸네일 생성/디코딩) 로직 탑재
 - iOS/Windows 동시 구현
+- Serverless 업로드/서비스 페이지의 실제 구현
 
 ---
 
@@ -66,22 +74,92 @@
 
 ---
 
-## 실행 계획 v4 (OptionController + StateMachine + 서비스 확장)
+## 현재 구현 상태 (코드 기준)
 
-> 아래 블록은 그대로 복사해서 태스크/이슈 본문에 넣을 수 있는 실행안이다.
+| 항목 | 상태 | 메모 |
+| --- | --- | --- |
+| `EventManager` 분리 | 구현됨 | FlowRuntime/JSON + coarse session state + 브릿지 오케스트레이션 포함 |
+| `RecorderController` 초안 | 구현됨 | 월드에서 브릿지 탐색/기본 제어 가능 |
+| `RecorderStateObserver` 초안 | 구현됨 | 현재는 EventManager 세션 상태 중심 관찰 |
+| Event Flow Runtime/JSON | 구현됨 | Asset clone + JSON import/export 가능 |
+| Android Session + 내부 오디오 | 부분 구현 | MediaCodec + Submix listener + mux start gate 코드 존재 |
+| Android Vulkan backend | 구현 상세도 높음 | 현재 Android 경로 중 가장 상세하게 구현된 편 |
+| Android OpenGL backend | 구현됨, 검증 필요 | EGL 공유 컨텍스트 기반, 실기기 재검증 필요 |
+| Windows WMF 경로 | 구현됨, 회귀 위험 높음 | NV12 compute/readback 구조는 있으나 수정 중 흔적이 많아 재검증 필요 |
+| Pipeline/Unit 추상화 | 구현됨 | Android는 사실상 단일 unit, WMF는 다단계 구조 |
+| UI 연결 | 미구현 | 현재는 Controller/EventManager API까지만 존재 |
+| Thumbnail/GIF 후처리 | 미구현 | 설계만 존재 |
+| Metadata/권한 | 미구현 | 설계만 존재 |
+| Serverless/서비스 페이지 | 미구현 | 최종 단계 |
+
+### 현재 완료된 기반 기능
+- [x] `EventManager` 생성/브릿지 바인딩/플로우 실행
+- [x] `FlowRuntime` 도입 및 JSON 실행 경로 통합
+- [x] `RecorderController` 초안 존재
+- [x] `RecorderStateObserver` 초안 존재
+- [x] `EVdjmRecordEventResultType`를 `E*` 규칙으로 정리
+- [x] 이벤트 관련 파일을 `VdjmEvents` 폴더로 정리
+- [x] `EventManager`에 coarse session state 추가
+- [x] Android `Vulkan/OpenGL` 백엔드 경로 존재
+- [x] WMF `NV12 -> ReadBack -> Encoder` 구조 존재
+
+### 주의 사항
+- `EventManager`는 현재 기준으로 **BridgeActor를 대체하는 최종 녹화 실행체가 아니라**, 외부 진입과 이벤트 오케스트레이션을 담당하는 레이어다.
+- 실제 녹화 시작/정지, 플랫폼 리소스 생성, 파이프라인 실행은 여전히 `BridgeActor -> Resolver -> Resource -> Pipeline` 경로가 중심이다.
+- 따라서 다음 단계는 `BridgeActor 제거`가 아니라, `Observer/Option/UI`가 `BridgeActor` 대신 `EventManager/Controller`를 주 진입점으로 보게 만드는 작업이다.
+
+---
+
+## 현재 기준 큰 단계 계획 (App/Worktree 기준)
+
+> 아래 순서는 현재 저장소 범위와 실제 코드 상태를 반영한 우선순위다.
 
 ### TL;DR
-1. `UOptionController`(UObject) 제작 → UI 연동
-2. StateMachine Observer 제작(Bridge와 분리, 감시 전용)
-3. Thumbnail 추출 파이프라인
-4. Metadata 스키마 + 권한 모델
-5. Serverless Video I/O + 서비스 페이지
+0. `EventManager` 기반은 이미 도입됨 (현재 기반 단계)
+1. `StateMachine Observer` 재정의
+2. `UOptionController` 제작
+3. UI 연결
+4. Thumbnail 추출 파이프라인
+5. Metadata 스키마 + 권한 모델
+6. Serverless Video I/O + 서비스 페이지 (최종 단계)
 
 ### 설계 원칙 (확정)
 - **OptionController는 명령 생성기**: 실제 적용은 Resource에 요청 메시지로 전달
 - **Resource는 단일 적용 지점**: 최종 실행값(`FinalFrameRate/FinalBitrate/FinalFilePath`) 보유
 - **Session은 스냅샷 소비자**: 실행 중 직접 설정 변경 최소화
 - **StateMachine Observer는 Bridge와 분리**: 상태 감시/로그/알림만 담당(제어권 없음)
+- **EventManager는 오케스트레이터**: 외부 호출은 점차 EventManager/Controller로 모으고, BridgeActor는 플랫폼 실행체로 남긴다
+- **UI는 진입점일 뿐**: 비UI 객체는 특정 UI 타입을 몰라야 하며, 월드에서 필요한 객체를 자동 연결하는 구조를 유지한다
+
+### 현재 우선순위 정리
+1. `StateMachine Observer`
+   - `RecorderStateObserver`는 현재 `EventManager` 세션 상태를 감시하도록 재정의되었고, `chainInit` 상세 단계는 일반 observer 대상에서 제외했다.
+2. `UOptionController`
+   - 현재 `RecorderController`의 좁은 옵션 요청 구조를 `OptionController + Resource Apply Layer`로 분리한다.
+3. UI 연결
+   - UI는 Controller/EventManager를 호출하고, 내부 월드 연결은 비UI 계층에서 자동 해결되도록 한다.
+4. Thumbnail
+   - 실제 GIF 생성기 이전에 후처리 요청 인터페이스와 결과 메타 구조를 먼저 정리한다.
+5. Metadata/권한
+   - 업로드 전에도 로컬 산출물 메타와 권한 키 구조를 먼저 정리한다.
+6. Serverless/서비스 페이지
+   - 이 저장소 밖 후속 단계이며, 계약과 상태 모델만 먼저 정리하고 실제 구현은 마지막으로 둔다.
+
+### 현재 작업 체크리스트
+- [x] `EventManager` 기반 도입
+- [x] `FlowRuntime`/JSON 경로 통합
+- [x] `RecorderController` 초안 존재
+- [x] `RecorderStateObserver` 초안 존재
+- [x] `StateMachine Observer`를 EventManager/세션 기준으로 재정의
+- [x] 이벤트 관련 파일을 `VdjmEvents` 폴더로 정리
+- [ ] `UOptionController` 도입
+- [ ] Resource Option Apply Layer 구현
+- [ ] UI 엔트리/호스트 연결
+- [ ] Thumbnail 후처리 인터페이스 정리
+- [ ] Metadata 스키마 v1 정리
+- [ ] 권한 모델 정리
+- [ ] Serverless 계약 정리
+- [ ] 서비스 페이지 연동 설계 정리
 
 ### 컴포넌트 정의
 #### 1) UOptionController (신규 UObject)
@@ -174,6 +252,8 @@
   - 오류 UX(재시도 버튼/로그 링크)
 - 완료 기준
   - E2E: 녹화→업로드→메타/썸네일 생성→서비스 페이지 노출
+
+> 주의: 현재 저장소 기준으로는 Phase 5가 당장 구현 대상이 아니라, **최종 연동 단계**다. 이 문서의 현재 작업 우선순위는 `Observer -> OptionController -> UI -> Thumbnail -> Metadata/권한 -> Serverless/서비스 페이지` 순서로 본다.
 
 ---
 
