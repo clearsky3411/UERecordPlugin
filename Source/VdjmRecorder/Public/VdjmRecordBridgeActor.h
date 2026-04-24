@@ -36,7 +36,9 @@ public:
 	virtual void BeginDestroy() override;
 	virtual void Tick(float DeltaSeconds) override;
 	void PrintLogErrors();
-	
+
+	UFUNCTION(BlueprintCallable)
+	void StartRecordBridgeActor();
 
 	UFUNCTION()
 	void OnBindSlateBackBufferReadyToPresentEvent();
@@ -268,6 +270,9 @@ public:
 	
 protected:
 	virtual void BeginPlay() override;
+
+	void RegisterWorldContextBridgeEntry();
+	void UnregisterWorldContextBridgeEntry();
 	
 	bool CheckChainCount(const FString& errorMsg);
 	void OnTryChainInitNext(EVdjmRecordBridgeInitStep nextStep);
@@ -314,7 +319,6 @@ protected:
 
 	static FSoftObjectPath RecordEnvDataAssetPath;
 	
-
 	UPROPERTY()
 	TObjectPtr<USceneComponent> mRootScene;
 	

@@ -58,6 +58,43 @@ enum class EVdjmRecordContentComplexity : uint8
 	EGameplay,
 	EHighMotion
 };
+UENUM(BlueprintType)
+enum class EVdjmRecordEventResultType : uint8
+{
+	ESuccess,
+	EFailure,
+	ERunning,
+	EAbort,
+	ESelectIndex,
+	EJumpToLabel,
+};
+
+UENUM(BlueprintType)
+enum class EVdjmRecordEventBridgeStartPolicy : uint8
+{
+	EStartImmediately,
+	EWaitForSignal,
+};
+
+UENUM(BlueprintType)
+enum class EVdjmRecordEventSignalScope : uint8
+{
+	ECurrentSession UMETA(DisplayName = "Current Session"),
+	EMainSession UMETA(DisplayName = "Main Session"),
+	EAllActiveSessions UMETA(DisplayName = "All Active Sessions"),
+	EGlobal UMETA(DisplayName = "Global")
+};
+
+UENUM(BlueprintType)
+enum class EVdjmRecordEventObjectOuterPolicy : uint8
+{
+	EBridgeActor,
+	EEventManager,
+	EWorldContextSubsystem,
+	ETransientPackage,
+};
+
+
 //	Common result codes
 namespace VdjmResults
 {

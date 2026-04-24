@@ -3,6 +3,7 @@
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "VdjmEvents/VdjmRecordEventFlowFragment.h"
 #include "VdjmEvents/VdjmRecordEventJsonHelper.h"
 #include "VdjmEvents/VdjmRecordEventNode.h"
 
@@ -20,6 +21,103 @@ UVdjmRecordEventFlowDataAsset* UVdjmRecordEventFlowDataAsset::TryGetEventFlowDat
 
 	UObject* LoadedObject = AssetPath.TryLoad();
 	return Cast<UVdjmRecordEventFlowDataAsset>(LoadedObject);
+}
+
+UVdjmRecordEventFlowDataAsset* UVdjmRecordEventFlowDataAsset::CreateTransientFlowDataAsset(UObject* Outer)
+{
+	UObject* DataAssetOuter = Outer ? Outer : GetTransientPackage();
+	UVdjmRecordEventFlowDataAsset* NewDataAsset = NewObject<UVdjmRecordEventFlowDataAsset>(
+		DataAssetOuter,
+		NAME_None,
+		RF_Transient);
+	if (NewDataAsset != nullptr)
+	{
+		NewDataAsset->InitializeEmpty();
+	}
+
+	return NewDataAsset;
+}
+
+UVdjmRecordEventFlowDataAsset* UVdjmRecordEventFlowDataAsset::CreateTransientFlowDataAssetFromJsonString(
+	UObject* Outer,
+	const FString& InJsonString,
+	FString& OutError)
+{
+	OutError.Reset();
+
+	UVdjmRecordEventFlowDataAsset* NewDataAsset = CreateTransientFlowDataAsset(Outer);
+	if (NewDataAsset == nullptr)
+	{
+		OutError = TEXT("Failed to allocate flow data asset.");
+		return nullptr;
+	}
+
+	if (!NewDataAsset->InitializeFromJsonString(InJsonString, OutError))
+	{
+		return nullptr;
+	}
+
+	return NewDataAsset;
+}
+
+UVdjmRecordEventFlowDataAsset* UVdjmRecordEventFlowDataAsset::CreateTransientFlowDataAssetFromFragment(
+	UObject* Outer,
+	const FVdjmRecordEventFlowFragment& InFragment,
+	FString& OutError)
+{
+	OutError.Reset();
+
+	UVdjmRecordEventFlowDataAsset* NewDataAsset = CreateTransientFlowDataAsset(Outer);
+	if (NewDataAsset == nullptr)
+	{
+		OutError = TEXT("Failed to allocate flow data asset.");
+		return nullptr;
+	}
+
+	if (!NewDataAsset->ImportFlowFromFragment(InFragment, OutError))
+	{
+		return nullptr;
+	}
+
+	return NewDataAsset;
+}
+
+bool UVdjmRecordEventFlowDataAsset::InitializeEmpty()
+{
+	Events.Reset();
+	return true;
+}
+
+bool UVdjmRecordEventFlowDataAsset::InitializeFromJsonString(const FString& InJsonString, FString& OutError)
+{
+	Events.Reset();
+	return ImportFlowFromJsonString(InJsonString, OutError);
+}
+
+bool UVdjmRecordEventFlowDataAsset::ImportFlowFromFragment(const FVdjmRecordEventFlowFragment& InFragment, FString& OutError)
+{
+	OutError.Reset();
+
+	TSharedPtr<FJsonObject> RootJsonObject;
+	if (!InFragment.WriteJsonObject(RootJsonObject, OutError) || !RootJsonObject.IsValid())
+	{
+		if (OutError.IsEmpty())
+		{
+			OutError = TEXT("Failed to serialize flow fragment.");
+		}
+		return false;
+	}
+
+	FString JsonString;
+	const TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer =
+		TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&JsonString);
+	if (!FJsonSerializer::Serialize(RootJsonObject.ToSharedRef(), Writer))
+	{
+		OutError = TEXT("Failed to write flow fragment json string.");
+		return false;
+	}
+
+	return ImportFlowFromJsonString(JsonString, OutError);
 }
 
 bool UVdjmRecordEventFlowDataAsset::ImportFlowFromJsonString(const FString& InJsonString, FString& OutError)

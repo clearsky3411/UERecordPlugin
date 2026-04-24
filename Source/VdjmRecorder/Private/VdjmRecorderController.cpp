@@ -4,6 +4,7 @@
 #include "VdjmEvents/VdjmRecordEventManager.h"
 #include "VdjmRecorderCore.h"
 #include "VdjmRecorderStateObserver.h"
+#include "VdjmRecorderWorldContextSubsystem.h"
 
 UVdjmRecorderController* UVdjmRecorderController::CreateRecorderController(UObject* WorldContextObject)
 {
@@ -31,7 +32,15 @@ UVdjmRecorderController* UVdjmRecorderController::CreateRecorderController(UObje
 
 bool UVdjmRecorderController::InitializeController()
 {
-	if (!EnsureEventManager())
+	if (UVdjmRecorderWorldContextSubsystem* WorldContextSubsystem = UVdjmRecorderWorldContextSubsystem::Get(this))
+	{
+		WorldContextSubsystem->RegisterWeakObjectContext(
+			UVdjmRecorderWorldContextSubsystem::GetRecorderControllerContextKey(),
+			this,
+			StaticClass());
+	}
+
+	if (not EnsureEventManager())
 	{
 		return false;
 	}
@@ -146,8 +155,9 @@ void UVdjmRecorderController::StopRecording()
 
 void UVdjmRecorderController::Tick(float DeltaTime)
 {
-	UE_UNUSED(DeltaTime);
-
+	//UE_UNUSED(DeltaTime);
+	(void)DeltaTime;
+	
 	if (!bHasPendingOptionRequest)
 	{
 		return;
@@ -293,6 +303,18 @@ bool UVdjmRecorderController::ApplyOptionRequestToBridge(const FVdjmRecorderOpti
 	}
 
 	return bridge->RefreshResolvedOptionsFromRequest(OutErrorReason);
+}
+
+void UVdjmRecorderController::ResetOptionHistory()
+{
+	UndoHistory.Reset();
+	RedoHistory.Reset();
+}
+
+void UVdjmRecorderController::StageAppliedRequestForUndo(const FVdjmRecorderOptionRequest& AppliedRequest)
+{
+	//UE_UNUSED(AppliedRequest);
+	//	TODO(20260422): 추후에 추가할 내용임.
 }
 
 void UVdjmRecorderController::ClearPendingOptionRequest()

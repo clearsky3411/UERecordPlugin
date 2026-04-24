@@ -61,7 +61,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Recorder|EventFlow")
 	UVdjmRecordEventFlowDataAsset* GetSourceFlowAsset() const;
 
-	UPROPERTY(Transient, Instanced, BlueprintReadOnly, Category = "Recorder|EventFlow")
+	UPROPERTY(Transient, Instanced, BlueprintReadOnly, Category = "Recorder|EventFlowRuntime")
 	TArray<TObjectPtr<UVdjmRecordEventBase>> Events;
 
 private:

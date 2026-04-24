@@ -1,6 +1,7 @@
 #include "VdjmRecorderStateObserver.h"
 
 #include "VdjmEvents/VdjmRecordEventManager.h"
+#include "VdjmRecorderWorldContextSubsystem.h"
 
 UVdjmRecorderStateObserver* UVdjmRecorderStateObserver::CreateObserver(UObject* WorldContextObject)
 {
@@ -20,6 +21,14 @@ UVdjmRecorderStateObserver* UVdjmRecorderStateObserver::CreateObserver(UObject* 
 
 bool UVdjmRecorderStateObserver::InitializeObserver(UObject* WorldContextObject)
 {
+	if (UVdjmRecorderWorldContextSubsystem* WorldContextSubsystem = UVdjmRecorderWorldContextSubsystem::Get(WorldContextObject))
+	{
+		WorldContextSubsystem->RegisterWeakObjectContext(
+			UVdjmRecorderWorldContextSubsystem::GetStateObserverContextKey(),
+			this,
+			StaticClass());
+	}
+
 	return WorldContextObject != nullptr;
 }
 

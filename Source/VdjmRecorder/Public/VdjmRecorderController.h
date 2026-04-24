@@ -175,6 +175,13 @@ struct VDJMRECORDER_API FVdjmRecorderOptionRequest
 	}
 };
 
+struct FVdjmRecorderOptionHistoryEntry
+{
+public:
+	FVdjmRecorderOptionRequest ForwardRequest;
+	FVdjmRecorderOptionRequest ReverseRequest;
+};
+
 UCLASS(BlueprintType)
 class VDJMRECORDER_API UVdjmRecorderController : public UObject, public FTickableGameObject
 {
@@ -227,6 +234,8 @@ protected:
 
 private:
 	bool ApplyOptionRequestToBridge(const FVdjmRecorderOptionRequest& Request, FString& OutErrorReason);
+	void ResetOptionHistory();
+	void StageAppliedRequestForUndo(const FVdjmRecorderOptionRequest& AppliedRequest);
 	void ClearPendingOptionRequest();
 	bool EnsureEventManager();
 	bool EnsureBridge();
@@ -241,5 +250,8 @@ private:
 	UPROPERTY()
 	TObjectPtr<UVdjmRecorderStateObserver> StateObserver;
 	FVdjmRecorderOptionRequest PendingOptionRequest;
+	TArray<FVdjmRecorderOptionHistoryEntry> UndoHistory;
+	TArray<FVdjmRecorderOptionHistoryEntry> RedoHistory;
+	int32 MaxUndoHistoryDepth = 16;
 	bool bHasPendingOptionRequest = false;
 };

@@ -5,6 +5,7 @@
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "VdjmRecorderCore.h"
+#include "VdjmRecorderWorldContextSubsystem.h"
 
 #include "Kismet/GameplayStatics.h"
 #include "Slate/SceneViewport.h"
@@ -67,6 +68,7 @@ AVdjmRecordBridgeActor::AVdjmRecordBridgeActor(): mTargetViewport(nullptr)
 
 void AVdjmRecordBridgeActor::BeginDestroy()
 {
+	UnregisterWorldContextBridgeEntry();
 	Super::BeginDestroy();
 	if (mRecordPipeline)
 	{
@@ -163,6 +165,11 @@ void AVdjmRecordBridgeActor::PrintLogErrors()
 		}
 	}
 	UE_LOG(LogTemp, Warning, TEXT("StartRecording - Cannot start recording: not startable"));
+}
+
+void AVdjmRecordBridgeActor::StartRecordBridgeActor()
+{
+	OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitializeWorldParts);
 }
 
 void AVdjmRecordBridgeActor::UnBindBackBufferReady(FSlateApplication& slateApp)
@@ -641,7 +648,32 @@ const TCHAR* AVdjmRecordBridgeActor::GetInitStepName(EVdjmRecordBridgeInitStep s
 void AVdjmRecordBridgeActor::BeginPlay()
 {
 	Super::BeginPlay();
-	OnTryChainInitNext(EVdjmRecordBridgeInitStep::EInitializeWorldParts);
+	RegisterWorldContextBridgeEntry();
+}
+
+void AVdjmRecordBridgeActor::RegisterWorldContextBridgeEntry()
+{
+	if (UVdjmRecorderWorldContextSubsystem* WorldContextSubsystem = UVdjmRecorderWorldContextSubsystem::Get(this))
+	{
+		WorldContextSubsystem->RegisterBridgeContext(this);
+	}
+}
+
+void AVdjmRecordBridgeActor::UnregisterWorldContextBridgeEntry()
+{
+	UVdjmRecorderWorldContextSubsystem* WorldContextSubsystem = UVdjmRecorderWorldContextSubsystem::Get(this);
+	if (WorldContextSubsystem == nullptr)
+	{
+		return;
+	}
+
+	UVdjmRecorderBridgeWorldContextEntry* BridgeEntry = WorldContextSubsystem->GetBridgeContextEntry();
+	if (BridgeEntry == nullptr || BridgeEntry->GetBridgeActor() != this)
+	{
+		return;
+	}
+
+	WorldContextSubsystem->UnregisterContext(UVdjmRecorderWorldContextSubsystem::GetBridgeContextKey(), BridgeEntry);
 }
 
 void AVdjmRecordBridgeActor::OnTryChainInitNext(EVdjmRecordBridgeInitStep nextStep)
@@ -977,9 +1009,18 @@ void AVdjmRecordBridgeActor::ChainInit_FinalizeInitialization()
 
 bool AVdjmRecordBridgeActor::DbcValidInitializeComplete() const
 {
+	/*
+	 * 초기화 체인이 모두 완료된 시점에서, 레코드 시작이 가능한 상태인지 체크하는 함수. 초기화 과정에서 필요한 요소들이 모두 유효한지 검증한다.
+	 * 초기화 체인의 마지막 단계에서 이 함수를 호출하여, 모든 요소들이 유효한지 최종적으로 검증한다. 이 함수가 true를 반환해야만 레코드 시작이 가능하다.
+	 */
 	if (mRecordConfigureDataAsset == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mRecordConfigureDataAsset == nullptr"));
+		return false;
+	}
+	if (not mRecordConfigureDataAsset->DbcPlatformPresetValid())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mRecordConfigureDataAsset->DbcPlatformPresetValid() == false"));
 		return false;
 	}
 	
@@ -995,7 +1036,40 @@ bool AVdjmRecordBridgeActor::DbcValidInitializeComplete() const
 		return false;
 	}
 	
-	return IsCompleteChainInit();
+	if (mEnvResolver == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mEnvResolver == nullptr"));
+		return false;
+	}
+	if (not mEnvResolver->DbcIsValidEnvResolverInit())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mEnvResolver->DbcIsValidEnvResolverInit() == false"));
+		return false;
+	}
+	
+	if (mRecordPipeline == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mRecordPipeline == nullptr"));
+		return false;
+	}
+	if (not mRecordPipeline->DbcIsValidPipelineInit())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mRecordPipeline->DbcIsValidPipelineInit() == false"));
+		return false;
+	}
+	
+	if (mRecordResource == nullptr)
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mRecordResource == nullptr"));
+		return false;
+	}
+	if (not mRecordResource->DbcIsValidResourceInit())
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mRecordResource->DbcIsValidResourceInit() == false"));
+		return false;
+	}
+	
+	return true;
 }
 
 bool AVdjmRecordBridgeActor::DbcRecordStartableFull() const

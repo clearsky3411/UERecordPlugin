@@ -3,13 +3,14 @@
 ## 문서 목적
 - 이 문서는 현재 `VdjmRecorder` 플러그인 구조를 나중에 다시 볼 때 빠르게 복기하기 위한 문서다.
 - 특히 `구조`, `실행 흐름`, `플랫폼별 차이`, `의존성`, `의도와 현재 상태`를 함께 적어 둔다.
-- 현재 기준은 `Codex app + local worktree`에서 확인한 코드 상태다.
+- 현재 기준은 local worktree에서 확인한 코드 상태다.
 
 ## 한 줄 요약
-- 현재 구조는 `BridgeActor -> Resolver -> Resource -> Pipeline -> Unit -> Platform Encoder`가 실제 녹화 실행 경로이고, `EventManager/Controller/Observer`는 그 위에 오케스트레이션 레이어로 올라가고 있다.
+- 현재 Android 기준 구조는 `BridgeActor -> Resolver -> Resource -> Pipeline -> Unit -> Platform Encoder`가 실제 녹화 실행 경로이고, `Controller/EventManager/Observer`는 그 위에 오케스트레이션 레이어로 올라가고 있다.
 
 ## 핵심 의도
 - `BridgeActor`는 월드/뷰포트/리소스/파이프라인 초기화와 실제 녹화 시작/정지의 플랫폼 실행체 역할을 한다.
+- `Controller`는 외부 요청과 옵션 변경을 받아 `BridgeActor` 실행 문맥에 안전한 시점으로 전달하는 상위 제어 레이어다.
 - `EventManager`는 브릿지를 직접 대체한 최종 녹화 엔진이라기보다, 외부에서 호출할 때 플로우/바인딩/분기를 담당하는 오케스트레이터로 보는 것이 맞다.
 - `Pipeline/Unit` 분리는 플랫폼별 녹화 경로를 같은 개념으로 묶기 위한 추상화다.
 - 이 추상화 덕분에 `Windows WMF`는 `NV12 compute -> readback -> encode` 다단계로 갈 수 있고, `Android`는 `surface submit` 기반 단일 unit 경로로 줄일 수 있다.
@@ -83,12 +84,28 @@
 3. Asset 또는 JSON으로부터 `FlowRuntime` 생성
 4. Tick에서 현재 인덱스 이벤트 실행
 5. 결과 타입에 따라 성공/실패/대기/점프/선택 분기 처리
+6. 필요하면 UI/Widget에서 `EmitLinkedFlowSignal`, `PauseLinkedEventFlow`, `ResumeLinkedEventFlow`, `StopLinkedEventFlow`로 현재 active flow를 제어한다.
 
 ### 현재 해석
 - `EventManager`는 플로우와 분기 실행을 맡는다.
 - 동시에 외부가 보기 쉬운 세션 상태(`ENew/EPreparing/EReady/ERecording/EFinalizing/ETerminated/EFailed`)를 coarse하게 정리한다.
 - 실제 녹화 자체는 여전히 브릿지와 플랫폼 파이프라인이 수행한다.
 - 즉, 지금 구조는 `EventManager가 브릿지 위에서 오케스트레이션을 담당하는 단계`다.
+- 레벨에서 실제 시동은 `AVdjmRecordEventFlowEntryPoint` 같은 배치형 진입점이 맡을 수 있다.
+
+### Flow 실행 상태
+- 현재 루트 flow는 한 번에 하나만 돈다.
+- 대신 `Sequence` 같은 composite event는 child flow를 가지는 작은 실행 owner로 해석한다.
+- 즉 `실행한다`는 행위 자체가 상태이며, `EventManager` 내부에서 `FlowHandle -> FlowExecutionState`로 관리한다.
+- child에서 `Wait`가 발생하면 parent composite도 `Wait`로 남고, 상위 루트 flow도 자연스럽게 다음 tick까지 멈춘다.
+
+### Runtime Edge Metadata
+- 간선은 `FlowFragment / Json / DataAsset`에 저장되는 핵심 규칙이 아니다.
+- 간선은 오직 runtime 중 `EventManager`가 만드는 메타데이터다.
+- 현재는 흐름별로 `PendingEdgeDirective` 1개와 `LastObservedEdge` 1개만 유지한다.
+- 간선 상태는 `EAdvance / ERepeat / EDiscard`이고, 의미는 각각 `진행 / 반복대기 / 버림`에 가깝다.
+- 간선 종류는 1차로 `ENext / EJump / ESignal / ETerminal`만 둔다.
+- event가 특수한 간선을 원하면 직접 생성하지 않고 `EventManager`에 directive를 요청하고, manager가 result 처리 시 그 요청을 소모한다.
 
 ### Fragment 계층
 - `FVdjmRecordEventFlowFragment`는 코드에서 미리 조립하는 JSON 기반 flow 조각이다.
@@ -100,9 +117,51 @@
 ### 현재 가능한 것
 - fragment를 코드에서 체인해 preset을 만들 수 있다.
 - fragment를 JSON으로 내보내고 바로 runtime으로 만들 수 있다.
+- fragment를 transient `FlowDataAsset`으로도 바로 올릴 수 있다.
 - runtime에 fragment를 append/insert 할 수 있다.
 - tag 기준으로 기존 event를 fragment로 override 할 수 있다.
 - 이 구조는 이후 subgraph, override, 코드 preset 확장에 그대로 이어질 수 있다.
+- 현재 내장 preset helper는 bootstrap/reuse-spawn bridge/set-env/jump/log와 함께 object/actor/widget/context/signal 계열 primitive 조립 경로를 제공한다.
+- `UVdjmRecordEventFlowFragmentWrapper`는 에디터에서 built-in preset을 골라 JSON / transient `FlowDataAsset` / runtime preview를 만들고, 현재 월드에서 flow 시작까지 시험하는 wrapper asset이다.
+
+### Primitive / Composite 방향
+- event는 가능한 한 작게 쪼갠다.
+- event 사이의 임시 객체 전달은 `EventManager`의 runtime object slot을 사용하고, 월드 공유 참조는 `VdjmRecorderWorldContextSubsystem`에 올린다.
+- 현재 primitive 기준은 다음과 같다.
+  - `CreateObject`
+  - `SpawnActor`
+  - `RegisterContextEntry`
+  - `RegisterWidgetContext`
+  - `CreateWidget`
+  - `RemoveWidget`
+  - `WaitForSignal`
+  - `Delay`
+  - `EmitSignal`
+  - `SetEnvDataAssetPath`
+- composite는 `primitive를 자주 같이 쓰는 경우`만 얇게 감싼다.
+  - `SpawnRecordBridgeActorWait`
+  - `CreateObjectAndRegisterContext`
+  - `SpawnActorAndRegisterContext`
+  - `CreateWidgetAndRegisterContext`
+- `SetEnvDataAssetPath`는 아직 world-global 설정이 아니라 recorder-specific primitive로 유지한다.
+
+### Widget -> Flow 제어
+- `UVdjmRecordEventWidgetBase`는 `EventManager`를 직접 들고 있거나, 없으면 `VdjmRecorderWorldContextSubsystem`에서 찾아온다.
+- 위젯 블루프린트는 `EmitLinkedFlowSignal`을 호출해서 flow 안의 `WaitForSignal`을 깨울 수 있다.
+- `CommonWidget` 계열처럼 `UVdjmRecordEventWidgetBase`를 상속하기 어려운 위젯은 `UVdjmRecordEventFlowBlueprintLibrary`를 쓴다.
+- 이 경우 위젯 자신을 `WorldContextObject`로 넘기고 `EmitRecordFlowSignal`, `PauseRecordEventFlow`, `ResumeRecordEventFlow`, `StopRecordEventFlow`를 호출하면 된다.
+- 예: intro widget animation 완료 시 `EmitLinkedFlowSignal("IntroFinished")` 또는 `EmitRecordFlowSignal(self, "IntroFinished")`를 호출하고, flow는 `WaitForSignal(IntroFinished) -> RemoveWidget(IntroWidgetSlot) -> 다음 이벤트` 순서로 진행한다.
+- `PauseLinkedEventFlow`와 `ResumeLinkedEventFlow`는 전체 active flow를 잠시 멈추거나 재개한다. 현재는 루트 flow 하나를 기준으로 한다.
+- `StartLinkedEventFlow`는 위젯에서 새 flow를 시작할 수 있게 열어둔 편의 함수지만, 이미 flow가 실행 중이면 manager 정책에 따라 실패할 수 있다.
+
+### 레벨 시동기
+- `AVdjmRecordEventFlowEntryPoint`는 `AInfo` 기반 레벨 배치형 시동기다.
+- 이 액터는 `FlowDataAsset`, 자동 시작 여부, 시작 지연, 시작 후 초기 signal, pre-start widget, startup context binding 같은 레벨 파라미터를 담는다.
+- 목표는 "이 액터 하나만 레벨에 놓아도 EventManager 생성과 Flow 시작이 붙는 것"이다.
+- 같은 월드에서 실제 flow 시작 owner는 하나만 잡히며, 다른 entry point는 중복 시작을 거절한다.
+- `InitialSignalTags`는 flow 시작 "직후" 발행하는 signal 목록이다. 시작 전 주입이 아니라 `WaitForSignal`, `SpawnRecordBridgeActorWait(StartPolicy=WaitForSignal)` 같은 노드의 첫 문을 여는 용도다.
+- 시작 전에 넣어야 하는 object/widget 참조는 runtime slot이 아니라 `VdjmRecorderWorldContextSubsystem`에 등록하는 방향을 기본으로 한다.
+- pre-start widget은 flow 시작 전에 미리 생성해 화면 어두워짐/로딩 overlay 같은 진입 연출에 쓸 수 있고, 필요하면 world context에도 등록할 수 있다.
 
 ## Option 메시지 구조
 
@@ -125,6 +184,23 @@
 - 처리 로직은 `RecorderController` 안에 둔다.
 - `BridgeActor`는 override 값 저장과 플랫폼 실행 문맥 연결을 담당한다.
 - `Resource`는 최종 실행값을 보유하는 단일 적용 지점 역할을 계속 강화하는 방향이다.
+- undo는 바로 실행하지 않고, 우선 controller 내부 history 골격만 둔 뒤 실제 reverse request 정책이 정리되면 연결하는 방향으로 본다.
+
+## Event TODO
+
+- `UVdjmRecordEventJumpToNextNode`
+  - 기존 selector 의미를 정리한 forward jump node다.
+  - 현재는 다음 class/tag를 찾아 index jump 하는 성격이며, 이후 subgraph 규칙과 함께 direct goto / label jump 정책을 더 좁힐 여지가 있다.
+- 다음 추가 후보 event
+  - `WaitForBridgeInitComplete`
+  - `CreateWidget`
+  - `AddWidgetToViewport`
+  - `RemoveWidget`
+- 목표 샘플 flow
+  - intro widget 표시
+  - bridge actor 생성 또는 재사용
+  - bridge chain init 완료까지 대기
+  - 녹화용 widget attach 및 후속 interaction 연결
 
 ## 플랫폼별 실행 흐름
 
