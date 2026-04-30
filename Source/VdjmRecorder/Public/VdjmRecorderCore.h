@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Tickable.h"
 #include "UObject/Object.h"
 #include "RHIGPUReadback.h"
 #include "ShaderParameterStruct.h"
@@ -22,11 +23,16 @@ class UVdjmRecordUnitPipeline;
 
 class UVdjmRecordPlatform;
 class UVdjmRecordFileSaver;
+class UVdjmRecorderController;
 
 class UVdjmRecordUnit;
 class UVdjmRecordResource;
+class UVdjmRecordMediaManifest;
+class UVdjmRecordMetadataStore;
+class UVdjmRecordArtifact;
 class UVdjmRecordDepreDataAsset;
 class AVdjmRecordBridgeActor;
+class UMediaPlayer;
 class FRHIGPUTextureReadback;
 
 
@@ -412,6 +418,601 @@ DECLARE_MULTICAST_DELEGATE_OneParam(FVdjmRecordCallBackEvent,UVdjmRecordResource
 DECLARE_MULTICAST_DELEGATE_TwoParams(FVdjmRecordResourceReadyForFilePath,UVdjmRecordResource*,const FString& );
 DECLARE_MULTICAST_DELEGATE_TwoParams(FVdjmRecordChangeStatusEvent,UVdjmRecordResource* /*self*/,EVdjmResourceStatus/*Prev*/);
 
+UENUM(BlueprintType)
+enum class EVdjmRecordManifestAuthorityRole : uint8
+{
+	EUndefined UMETA(DisplayName = "Undefined"),
+	EMaster UMETA(DisplayName = "Master"),
+	EDeveloper UMETA(DisplayName = "Developer")
+};
+
+UENUM(BlueprintType)
+enum class EVdjmRecordMediaRegistryEntryStatus : uint8
+{
+	EUnknown UMETA(DisplayName = "Unknown"),
+	EAvailable UMETA(DisplayName = "Available"),
+	EMissingMedia UMETA(DisplayName = "Missing Media"),
+	EMissingMetadata UMETA(DisplayName = "Missing Metadata"),
+	EDeleted UMETA(DisplayName = "Deleted")
+};
+
+UENUM(BlueprintType)
+enum class EVdjmRecordMediaPreviewStatus : uint8
+{
+	EUnknown UMETA(DisplayName = "Unknown"),
+	ENotReady UMETA(DisplayName = "Not Ready"),
+	EReady UMETA(DisplayName = "Ready"),
+	EFailed UMETA(DisplayName = "Failed")
+};
+
+UCLASS(BlueprintType)
+class VDJMRECORDER_API UVdjmRecordMediaManifest : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaManifest")
+	void Clear();
+	bool InitializeFromArtifact(
+		const UVdjmRecordArtifact* artifact,
+		const FString& metadataFilePath,
+		FString& outErrorReason);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaManifest")
+	void SetAuthorityIdentity(
+		EVdjmRecordManifestAuthorityRole authorityRole,
+		const FString& userId,
+		const FString& tokenId,
+		const FString& keyId);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaManifest")
+	void SetPlaybackLocator(
+		const FString& locatorType,
+		const FString& locator,
+		const FString& streamTokenId,
+		int64 expiresUnixTime);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaManifest")
+	void SetPreviewInfo(
+		const FString& thumbnailFilePath,
+		const FString& previewClipFilePath,
+		const FString& previewClipMimeType,
+		double previewStartTimeSec,
+		double previewDurationSec,
+		EVdjmRecordMediaPreviewStatus previewStatus,
+		const FString& previewErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaManifest")
+	void SetMediaPublishResult(
+		EVdjmRecordMediaPublishStatus publishStatus,
+		const FString& publishedContentUri,
+		const FString& publishedDisplayName,
+		const FString& publishedRelativePath,
+		const FString& publishErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaManifest")
+	bool ValidateManifest(FString& outErrorReason) const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString ToString() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString ToJsonString() const;
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaManifest")
+	bool LoadFromJsonString(
+		const FString& manifestJsonString,
+		const FString& fallbackMetadataFilePath,
+		FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaManifest")
+	bool SaveToFile(const FString& metadataFilePath, FString& outErrorReason);
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	bool IsInitializedManifest() const { return mbInitialized; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetRecordId() const { return mRecordId; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	int64 GetCreatedUnixTime() const { return mCreatedUnixTime; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetOutputFilePath() const { return mOutputFilePath; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetMetadataFilePath() const { return mMetadataFilePath; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	int64 GetFileSizeBytes() const { return mFileSizeBytes; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	int32 GetRecordedFrameCount() const { return mRecordedFrameCount; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	EVdjmRecordEnvPlatform GetTargetPlatform() const { return mTargetPlatform; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	int32 GetVideoWidth() const { return mVideoWidth; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	int32 GetVideoHeight() const { return mVideoHeight; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	int32 GetVideoFrameRate() const { return mVideoFrameRate; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	int32 GetVideoBitrate() const { return mVideoBitrate; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetVideoMimeType() const { return mVideoMimeType; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetPlaybackLocatorType() const { return mPlaybackLocatorType; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetPlaybackLocator() const { return mPlaybackLocator; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetThumbnailFilePath() const { return mThumbnailFilePath; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetPreviewClipFilePath() const { return mPreviewClipFilePath; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetPreviewClipMimeType() const { return mPreviewClipMimeType; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	double GetPreviewStartTimeSec() const { return mPreviewStartTimeSec; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	double GetPreviewDurationSec() const { return mPreviewDurationSec; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	double GetPreviewEndTimeSec() const { return mPreviewStartTimeSec + mPreviewDurationSec; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	EVdjmRecordMediaPreviewStatus GetPreviewStatus() const { return mPreviewStatus; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetPreviewErrorReason() const { return mPreviewErrorReason; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	EVdjmRecordManifestAuthorityRole GetAuthorityRole() const { return mAuthorityRole; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetAuthorityUserId() const { return mAuthorityUserId; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetAuthorityTokenId() const { return mAuthorityTokenId; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetAuthorityKeyId() const { return mAuthorityKeyId; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	EVdjmRecordMediaPublishStatus GetMediaPublishStatus() const { return mMediaPublishStatus; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetPublishedContentUri() const { return mPublishedContentUri; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetPublishedDisplayName() const { return mPublishedDisplayName; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetPublishedRelativePath() const { return mPublishedRelativePath; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaManifest")
+	FString GetMediaPublishErrorReason() const { return mMediaPublishErrorReason; }
+
+private:
+	int32 mSchemaVersion = 1;
+	FString mRecordId;
+	int64 mCreatedUnixTime = 0;
+	FString mSourceApp = TEXT("vdjm");
+	FString mOutputFilePath;
+	FString mMetadataFilePath;
+	int64 mFileSizeBytes = -1;
+	int32 mRecordedFrameCount = 0;
+	EVdjmRecordEnvPlatform mTargetPlatform = EVdjmRecordEnvPlatform::EDefault;
+	int32 mVideoWidth = 0;
+	int32 mVideoHeight = 0;
+	int32 mVideoFrameRate = 0;
+	int32 mVideoBitrate = 0;
+	FString mVideoMimeType;
+	FString mPlaybackLocatorType = TEXT("local_path");
+	FString mPlaybackLocator;
+	FString mStreamTokenId;
+	int64 mPlaybackExpiresUnixTime = 0;
+	FString mThumbnailFilePath;
+	FString mPreviewClipFilePath;
+	FString mPreviewClipMimeType = TEXT("video/mp4");
+	FString mPreviewErrorReason;
+	double mPreviewStartTimeSec = 0.0;
+	double mPreviewDurationSec = 3.0;
+	EVdjmRecordMediaPreviewStatus mPreviewStatus = EVdjmRecordMediaPreviewStatus::ENotReady;
+	EVdjmRecordManifestAuthorityRole mAuthorityRole = EVdjmRecordManifestAuthorityRole::EDeveloper;
+	FString mAuthorityUserId;
+	FString mAuthorityTokenId;
+	FString mAuthorityKeyId;
+	FString mVideoSha256;
+	FString mMetadataSha256;
+	FString mSignature;
+	EVdjmRecordMediaPublishStatus mMediaPublishStatus = EVdjmRecordMediaPublishStatus::ENotStarted;
+	FString mPublishedContentUri;
+	FString mPublishedDisplayName;
+	FString mPublishedRelativePath;
+	FString mMediaPublishErrorReason;
+	bool mbRequiresAuth = true;
+	bool mbInitialized = false;
+};
+
+USTRUCT(BlueprintType)
+struct VDJMRECORDER_API FVdjmRecordMediaRegistryEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	FString RecordId;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	FString OutputFilePath;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	FString MetadataFilePath;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	FString PlaybackLocatorType;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	FString PlaybackLocator;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	FString ThumbnailFilePath;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	FString PreviewClipFilePath;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	FString PreviewClipMimeType;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	FString PreviewErrorReason;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	FString PublishedContentUri;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	FString PublishedDisplayName;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	FString PublishedRelativePath;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	FString VideoMimeType;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	FString LastErrorReason;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	int64 CreatedUnixTime = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	int64 FileSizeBytes = -1;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	int32 RecordedFrameCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	int32 VideoWidth = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	int32 VideoHeight = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	int32 VideoFrameRate = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	int32 VideoBitrate = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	double PreviewStartTimeSec = 0.0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	double PreviewDurationSec = 3.0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	EVdjmRecordEnvPlatform TargetPlatform = EVdjmRecordEnvPlatform::EDefault;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	EVdjmRecordMediaPublishStatus MediaPublishStatus = EVdjmRecordMediaPublishStatus::ENotStarted;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	EVdjmRecordMediaRegistryEntryStatus RegistryStatus = EVdjmRecordMediaRegistryEntryStatus::EUnknown;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	EVdjmRecordMediaPreviewStatus PreviewStatus = EVdjmRecordMediaPreviewStatus::ENotReady;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	bool bOutputFileExists = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	bool bMetadataFileExists = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaRegistry")
+	bool bIsDeleted = false;
+};
+
+UCLASS(BlueprintType)
+class VDJMRECORDER_API UVdjmRecordArtifact : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	bool InitializeFromSnapshot(
+		const FVdjmRecordEncoderSnapshot& encoderSnapshot,
+		int32 recordedFrameCount,
+		UVdjmRecorderController* ownerController,
+		FString& outErrorReason);
+	bool ValidateArtifact(FString& outErrorReason);
+	void SetMediaManifest(UVdjmRecordMediaManifest* mediaManifest, bool bMetadataValidated, const FString& validationError);
+	void SetMediaPublishResult(
+		EVdjmRecordMediaPublishStatus publishStatus,
+		const FString& publishedContentUri,
+		const FString& publishErrorReason);
+	void MarkOutputDeleted(const FString& deletionReason);
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact")
+	bool IsInitializedArtifact() const { return mbInitialized; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact")
+	bool IsValidArtifact() const { return mbValidated; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact")
+	bool DoesOutputFileExist() const { return mbFileExists; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact")
+	FString GetOutputFilePath() const { return mOutputFilePath; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact")
+	int64 GetFileSizeBytes() const { return mFileSizeBytes; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact")
+	int32 GetRecordedFrameCount() const { return mRecordedFrameCount; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact")
+	FString GetValidationError() const { return mValidationError; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact")
+	EVdjmRecordEnvPlatform GetTargetPlatform() const { return mEncoderSnapshot.TargetPlatform; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact")
+	int32 GetVideoWidth() const { return mEncoderSnapshot.VideoConfig.VideoWidth; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact")
+	int32 GetVideoHeight() const { return mEncoderSnapshot.VideoConfig.VideoHeight; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact")
+	int32 GetVideoFrameRate() const { return mEncoderSnapshot.VideoConfig.VideoFPS; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact")
+	int32 GetVideoBitrate() const { return mEncoderSnapshot.VideoConfig.VideoBitrate; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact")
+	FString GetVideoMimeType() const { return mEncoderSnapshot.VideoConfig.MimeType; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact")
+	UObject* GetOwnerControllerObject() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact|Metadata")
+	UVdjmRecordMediaManifest* GetMediaManifest() const { return mMediaManifest; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact|Metadata")
+	FString GetMetadataFilePath() const { return mMetadataFilePath; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact|Metadata")
+	bool HasMetadata() const { return mbHasMetadata; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact|Metadata")
+	bool IsMetadataValidated() const { return mbMetadataValidated; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact|Metadata")
+	FString GetMetadataValidationError() const { return mMetadataValidationError; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact|Media")
+	EVdjmRecordMediaPublishStatus GetMediaPublishStatus() const { return mMediaPublishStatus; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact|Media")
+	FString GetPublishedContentUri() const { return mPublishedContentUri; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact|Media")
+	FString GetMediaPublishErrorReason() const { return mMediaPublishErrorReason; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Artifact|Media")
+	bool IsMediaPublished() const { return mMediaPublishStatus == EVdjmRecordMediaPublishStatus::EPublished; }
+
+	const FVdjmRecordEncoderSnapshot& GetEncoderSnapshot() const { return mEncoderSnapshot; }
+
+private:
+	FVdjmRecordEncoderSnapshot mEncoderSnapshot;
+	TWeakObjectPtr<UVdjmRecorderController> mOwnerController;
+	UPROPERTY(Transient)
+	TObjectPtr<UVdjmRecordMediaManifest> mMediaManifest;
+	FString mOutputFilePath;
+	FString mMetadataFilePath;
+	FString mValidationError;
+	FString mMetadataValidationError;
+	FString mPublishedContentUri;
+	FString mMediaPublishErrorReason;
+	int64 mFileSizeBytes = -1;
+	int32 mRecordedFrameCount = 0;
+	double mCreatedAtSeconds = 0.0;
+	EVdjmRecordMediaPublishStatus mMediaPublishStatus = EVdjmRecordMediaPublishStatus::ENotStarted;
+	bool mbInitialized = false;
+	bool mbValidated = false;
+	bool mbFileExists = false;
+	bool mbHasMetadata = false;
+	bool mbMetadataValidated = false;
+};
+
+USTRUCT(BlueprintType)
+struct VDJMRECORDER_API FVdjmRecordMediaPostProcessSnapshot
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|PostProcess")
+	bool bIsPostProcessingMedia = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|PostProcess")
+	int32 ActiveMediaPublishJobCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|PostProcess")
+	int32 CompletedMediaPublishJobCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|PostProcess")
+	EVdjmRecordMediaPublishStatus LastMediaPublishStatus = EVdjmRecordMediaPublishStatus::ENotStarted;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|PostProcess")
+	FString LastPublishedContentUri;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|PostProcess")
+	FString LastErrorReason;
+};
+
+UCLASS(BlueprintType)
+class VDJMRECORDER_API UVdjmRecordMetadataStore : public UObject
+{
+	GENERATED_BODY()
+
+public:
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata", meta = (WorldContext = "worldContextObject"))
+	static UVdjmRecordMetadataStore* FindMetadataStore(UObject* worldContextObject);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata", meta = (WorldContext = "worldContextObject"))
+	static UVdjmRecordMetadataStore* FindOrCreateMetadataStore(UObject* worldContextObject);
+
+	bool InitializeStore(UObject* worldContextObject);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata")
+	void Clear();
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata")
+	void SetAuthorityIdentity(
+		EVdjmRecordManifestAuthorityRole authorityRole,
+		const FString& userId,
+		const FString& tokenId,
+		const FString& keyId);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata")
+	void SetDeleteVideoIfMetadataMissing(bool bDeleteVideoIfMetadataMissing);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata")
+	bool BuildAndSaveManifest(UVdjmRecordArtifact* artifact, FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata|PostProcess")
+	bool EnqueueArtifactMediaPublish(
+		UVdjmRecordArtifact* artifact,
+		UVdjmRecordMediaManifest* mediaManifest,
+		FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata|Registry")
+	bool LoadRegistry(FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata|Registry")
+	bool SaveRegistry(FString& outErrorReason) const;
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata|Registry")
+	bool RefreshRegistryFromDisk(FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata|Registry")
+	bool RegisterManifest(UVdjmRecordMediaManifest* mediaManifest, FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata|Registry")
+	bool LoadManifestFromFile(
+		const FString& metadataFilePath,
+		UVdjmRecordMediaManifest*& outManifest,
+		FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata|Registry")
+	bool LoadManifestFromRegistryEntry(
+		const FVdjmRecordMediaRegistryEntry& registryEntry,
+		UVdjmRecordMediaManifest*& outManifest,
+		FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata|Registry")
+	void ClearRegistry();
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata")
+	UVdjmRecordMediaManifest* GetLastManifest() const { return mLastManifest; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata")
+	bool ShouldDeleteVideoIfMetadataMissing() const { return mbDeleteVideoIfMetadataMissing; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|Registry")
+	TArray<FVdjmRecordMediaRegistryEntry> GetMediaRegistryEntries() const { return mRegistryEntries; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|Registry")
+	int32 GetMediaRegistryEntryCount() const { return mRegistryEntries.Num(); }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|Registry")
+	FString GetRegistryFilePath() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|PostProcess")
+	FVdjmRecordMediaPostProcessSnapshot GetMediaPostProcessSnapshot() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|PostProcess")
+	bool IsPostProcessingMedia() const { return mActiveMediaPublishJobCount > 0; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|PostProcess")
+	int32 GetActiveMediaPublishJobCount() const { return mActiveMediaPublishJobCount; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|PostProcess")
+	EVdjmRecordMediaPublishStatus GetLastMediaPublishStatus() const { return mLastMediaPublishStatus; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|PostProcess")
+	FString GetLastPublishedContentUri() const { return mLastPublishedContentUri; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|PostProcess")
+	FString GetLastMediaPublishErrorReason() const { return mLastMediaPublishErrorReason; }
+
+private:
+	void CompleteArtifactMediaPublishOnGameThread(
+		int32 jobId,
+		UVdjmRecordArtifact* artifact,
+		UVdjmRecordMediaManifest* mediaManifest,
+		EVdjmRecordMediaPublishStatus publishStatus,
+		const FString& publishedContentUri,
+		const FString& publishedDisplayName,
+		const FString& publishedRelativePath,
+		const FString& publishErrorReason);
+	bool BuildRegistryEntryFromManifest(
+		const UVdjmRecordMediaManifest* mediaManifest,
+		FVdjmRecordMediaRegistryEntry& outEntry,
+		FString& outErrorReason) const;
+	bool BuildRegistryEntryFromManifestFile(
+		const FString& metadataFilePath,
+		FVdjmRecordMediaRegistryEntry& outEntry,
+		FString& outErrorReason) const;
+	void RefreshRegistryEntryFileState(FVdjmRecordMediaRegistryEntry& entry) const;
+	bool UpsertRegistryEntry(const FVdjmRecordMediaRegistryEntry& entry);
+	FString GetManifestDirectoryPath() const;
+	FString MakeMetadataFilePathForArtifact(const UVdjmRecordArtifact* artifact) const;
+	bool DeleteVideoFileForMissingMetadata(UVdjmRecordArtifact* artifact, const FString& reason, FString& outErrorReason) const;
+
+	TWeakObjectPtr<UWorld> mCachedWorld;
+	UPROPERTY(Transient)
+	TObjectPtr<UVdjmRecordMediaManifest> mLastManifest;
+	UPROPERTY(Transient)
+	TArray<FVdjmRecordMediaRegistryEntry> mRegistryEntries;
+	EVdjmRecordManifestAuthorityRole mAuthorityRole = EVdjmRecordManifestAuthorityRole::EDeveloper;
+	FString mAuthorityUserId;
+	FString mAuthorityTokenId;
+	FString mAuthorityKeyId;
+	FString mLastPublishedContentUri;
+	FString mLastMediaPublishErrorReason;
+	int32 mNextPostProcessJobId = 1;
+	int32 mActiveMediaPublishJobCount = 0;
+	int32 mCompletedMediaPublishJobCount = 0;
+	EVdjmRecordMediaPublishStatus mLastMediaPublishStatus = EVdjmRecordMediaPublishStatus::ENotStarted;
+	bool mbDeleteVideoIfMetadataMissing = true;
+};
+
+UCLASS(BlueprintType)
+class VDJMRECORDER_API UVdjmRecordMediaPreviewPlayer : public UObject, public FTickableGameObject
+{
+	GENERATED_BODY()
+
+public:
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview", meta = (WorldContext = "worldContextObject"))
+	static UVdjmRecordMediaPreviewPlayer* CreateMediaPreviewPlayer(
+		UObject* worldContextObject,
+		UMediaPlayer* mediaPlayer);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview")
+	bool StartPreviewFromManifest(
+		UMediaPlayer* mediaPlayer,
+		UVdjmRecordMediaManifest* mediaManifest,
+		FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview")
+	bool StartPreviewFromRegistryEntry(
+		UMediaPlayer* mediaPlayer,
+		const FVdjmRecordMediaRegistryEntry& registryEntry,
+		FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview")
+	void StopPreview(bool bCloseMedia);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview")
+	bool RestartPreview(FString& outErrorReason);
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview")
+	bool IsPreviewActive() const { return mbPreviewActive; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview")
+	bool IsPreviewOpened() const { return mbPreviewOpened; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview")
+	FString GetCurrentSource() const { return mCurrentSource; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview")
+	double GetPreviewStartTimeSec() const { return mPreviewStartTimeSec; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview")
+	double GetPreviewEndTimeSec() const { return mPreviewEndTimeSec; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview")
+	FString GetLastErrorReason() const { return mLastErrorReason; }
+
+	virtual void Tick(float deltaTime) override;
+	virtual bool IsTickable() const override;
+	virtual UWorld* GetTickableGameObjectWorld() const override;
+	virtual TStatId GetStatId() const override;
+
+protected:
+	virtual UWorld* GetWorld() const override;
+
+private:
+	UFUNCTION()
+	void HandleMediaOpened(FString openedUrl);
+	UFUNCTION()
+	void HandleMediaOpenFailed(FString failedUrl);
+	UFUNCTION()
+	void HandleMediaEndReached();
+
+	bool StartPreviewInternal(
+		UMediaPlayer* mediaPlayer,
+		const FString& source,
+		const FString& sourceType,
+		double previewStartTimeSec,
+		double previewDurationSec,
+		FString& outErrorReason);
+	bool OpenCurrentSource(FString& outErrorReason);
+	void BindMediaPlayerEvents();
+	void UnbindMediaPlayerEvents();
+	void SeekPreviewStartAndPlay();
+	void ResetPreviewState();
+
+	TWeakObjectPtr<UWorld> mCachedWorld;
+	UPROPERTY(Transient)
+	TObjectPtr<UMediaPlayer> mMediaPlayer;
+	FString mCurrentSource;
+	FString mCurrentSourceType;
+	FString mLastErrorReason;
+	double mPreviewStartTimeSec = 0.0;
+	double mPreviewEndTimeSec = 3.0;
+	bool mbPreviewActive = false;
+	bool mbPreviewOpened = false;
+	bool mbPendingInitialSeek = false;
+};
+
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	
 class UVdjmRecordResource : public UObject
@@ -437,6 +1038,12 @@ public:
 	virtual bool InitializeResource(UVdjmRecordEnvResolver* resolver);
 	bool RefreshResolvedRuntimeConfigFromResolver();
 	bool UpdateFinalFilePathFromResolver();
+	bool BuildEncoderSnapshot(FVdjmRecordEncoderSnapshot& outSnapshot) const;
+	UVdjmRecordArtifact* BuildRecordArtifact(
+		UObject* artifactOuter,
+		UVdjmRecorderController* ownerController,
+		int32 recordedFrameCount,
+		FString& outErrorReason) const;
 	virtual void ResetResource();
 	virtual void ReleaseResources();
 	

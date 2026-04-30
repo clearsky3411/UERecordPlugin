@@ -137,6 +137,7 @@ namespace VdjmRecordEventFlowPresets
 		bool bRequireLoadSuccess = false,
 		EVdjmRecordEventBridgeStartPolicy StartPolicy = EVdjmRecordEventBridgeStartPolicy::EStartImmediately,
 		FName StartSignalTag = NAME_None);
+	VDJMRECORDER_API FVdjmRecordEventNodeFragment MakeStartRecordBridgeActorNode();
 	VDJMRECORDER_API FVdjmRecordEventNodeFragment MakeCreateObjectNode(
 		const FSoftClassPath& ObjectClassPath,
 		FName RuntimeSlotKey,

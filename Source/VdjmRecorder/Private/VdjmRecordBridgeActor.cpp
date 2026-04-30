@@ -4,6 +4,7 @@
 
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
+#include "VdjmRecorderController.h"
 #include "VdjmRecorderCore.h"
 #include "VdjmRecorderWorldContextSubsystem.h"
 
@@ -111,6 +112,10 @@ void AVdjmRecordBridgeActor::PrintLogErrors()
 	if (bIsRecording)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("StartRecording - bIsRecording == true"));
+	}
+	if (mbIsFinalizingRecording)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("StartRecording - mbIsFinalizingRecording == true"));
 	}
 	if (mRecordResource == nullptr)
 	{
@@ -245,6 +250,7 @@ void AVdjmRecordBridgeActor::StartRecording()
 {
 	if(DbcRecordStartable())
 	{
+		mLatestRecordArtifact = nullptr;
 		if (!mEnvResolver->RefreshResolvedOutputPath())
 		{
 			UE_LOG(LogVdjmRecorderCore, Error, TEXT("StartRecording - Failed to refresh resolved output path."));
@@ -313,6 +319,30 @@ void AVdjmRecordBridgeActor::StartRecording()
 	}
 }
 
+void AVdjmRecordBridgeActor::RequestStopRecording()
+{
+	StopRecording();
+}
+
+void AVdjmRecordBridgeActor::SetRecordFinalizing(bool bInIsFinalizingRecording)
+{
+	if (mbIsFinalizingRecording == bInIsFinalizingRecording)
+	{
+		return;
+	}
+
+	mbIsFinalizingRecording = bInIsFinalizingRecording;
+	FVdjmEncoderStatus::DbcGameThreadTask([
+		weakThis = TWeakObjectPtr<AVdjmRecordBridgeActor>(this),
+		bFinalizing = bInIsFinalizingRecording]()
+	{
+		if (weakThis.IsValid())
+		{
+			weakThis->OnRecordFinalizingChanged.Broadcast(weakThis.Get(), bFinalizing);
+		}
+	});
+}
+
 void AVdjmRecordBridgeActor::StopRecording()
 {
 	if (not bIsRecording)
@@ -320,6 +350,7 @@ void AVdjmRecordBridgeActor::StopRecording()
 		return;
 	}
 	bIsRecording = false;
+	SetRecordFinalizing(true);
 	
 	FVdjmEncoderStatus::DbcGameThreadTask([weakThis = TWeakObjectPtr<AVdjmRecordBridgeActor>(this)]()
 	{
@@ -362,9 +393,64 @@ void AVdjmRecordBridgeActor::StopRecordingInternal()
 
 	if (mRecordResource)
 	{
+		UVdjmRecorderController* controller = UVdjmRecorderController::FindRecorderController(this);
+		FString artifactErrorReason;
+		mLatestRecordArtifact = mRecordResource->BuildRecordArtifact(
+			this,
+			controller,
+			mRecordedFrameCount,
+			artifactErrorReason);
+
+		if (IsValid(mLatestRecordArtifact))
+		{
+			if (controller != nullptr)
+			{
+				controller->SetLatestArtifact(mLatestRecordArtifact);
+			}
+
+			if (not mLatestRecordArtifact->IsValidArtifact())
+			{
+				UE_LOG(LogVdjmRecorderCore, Error,
+					TEXT("AVdjmRecordBridgeActor::StopRecordingInternal - Record artifact validation failed. Reason=%s"),
+					*artifactErrorReason);
+				OnRecordError.Broadcast(mRecordResource);
+			}
+			else
+			{
+				UVdjmRecordMetadataStore* metadataStore = controller != nullptr
+					? controller->GetMetadataStore()
+					: nullptr;
+				if (metadataStore == nullptr)
+				{
+					metadataStore = UVdjmRecordMetadataStore::FindOrCreateMetadataStore(this);
+				}
+
+				FString metadataErrorReason;
+				if (metadataStore == nullptr ||
+					not metadataStore->BuildAndSaveManifest(mLatestRecordArtifact, metadataErrorReason))
+				{
+					UE_LOG(LogVdjmRecorderCore, Error,
+						TEXT("AVdjmRecordBridgeActor::StopRecordingInternal - Failed to build media manifest. Reason=%s"),
+						*metadataErrorReason);
+					OnRecordError.Broadcast(mRecordResource);
+				}
+			}
+
+			OnRecordArtifactReady.Broadcast(mLatestRecordArtifact);
+		}
+		else
+		{
+			UE_LOG(LogVdjmRecorderCore, Error,
+				TEXT("AVdjmRecordBridgeActor::StopRecordingInternal - Failed to build record artifact. Reason=%s"),
+				*artifactErrorReason);
+			OnRecordError.Broadcast(mRecordResource);
+		}
+
 		OnRecordStopped.Broadcast(mRecordResource);
 		mRecordResource->ResetResource();
 	}
+
+	SetRecordFinalizing(false);
 }
 
 void AVdjmRecordBridgeActor::OnResourceReadyForPostInit(UVdjmRecordResource* resource)
@@ -498,6 +584,82 @@ void AVdjmRecordBridgeActor::ClearRequestedBitrate()
 	mRequestedBitrate = 0;
 }
 
+void AVdjmRecordBridgeActor::SetRequestedResolution(FIntPoint resolution)
+{
+	mRequestedResolution = FIntPoint(
+		FMath::Max(0, resolution.X),
+		FMath::Max(0, resolution.Y));
+}
+
+void AVdjmRecordBridgeActor::ClearRequestedResolution()
+{
+	mRequestedResolution = FIntPoint::ZeroValue;
+}
+
+void AVdjmRecordBridgeActor::SetRequestedResolutionFitToDisplay(bool fitToDisplay)
+{
+	mbRequestedResolutionFitToDisplay = fitToDisplay;
+	mbHasRequestedResolutionFitToDisplay = true;
+}
+
+void AVdjmRecordBridgeActor::ClearRequestedResolutionFitToDisplay()
+{
+	mbRequestedResolutionFitToDisplay = false;
+	mbHasRequestedResolutionFitToDisplay = false;
+}
+
+void AVdjmRecordBridgeActor::SetRequestedMaxRecordDurationSeconds(float durationSeconds)
+{
+	mRequestedMaxRecordDurationSeconds = FMath::Max(0.0f, durationSeconds);
+}
+
+void AVdjmRecordBridgeActor::ClearRequestedMaxRecordDurationSeconds()
+{
+	mRequestedMaxRecordDurationSeconds = 0.0f;
+}
+
+void AVdjmRecordBridgeActor::SetRequestedKeyframeInterval(int32 keyframeInterval)
+{
+	mRequestedKeyframeInterval = FMath::Max(0, keyframeInterval);
+}
+
+void AVdjmRecordBridgeActor::ClearRequestedKeyframeInterval()
+{
+	mRequestedKeyframeInterval = INDEX_NONE;
+}
+
+void AVdjmRecordBridgeActor::SetRequestedOutputFilePath(const FString& outputFilePath)
+{
+	mRequestedOutputFilePath = outputFilePath.TrimStartAndEnd();
+}
+
+void AVdjmRecordBridgeActor::ClearRequestedOutputFilePath()
+{
+	mRequestedOutputFilePath.Reset();
+}
+
+void AVdjmRecordBridgeActor::SetRequestedSessionId(const FString& sessionId)
+{
+	mRequestedSessionId = sessionId.TrimStartAndEnd();
+}
+
+void AVdjmRecordBridgeActor::ClearRequestedSessionId()
+{
+	mRequestedSessionId.Reset();
+}
+
+void AVdjmRecordBridgeActor::SetRequestedOverwriteExists(bool overwriteExists)
+{
+	mbRequestedOverwriteExists = overwriteExists;
+	mbHasRequestedOverwriteExists = true;
+}
+
+void AVdjmRecordBridgeActor::ClearRequestedOverwriteExists()
+{
+	mbRequestedOverwriteExists = false;
+	mbHasRequestedOverwriteExists = false;
+}
+
 bool AVdjmRecordBridgeActor::RefreshResolvedOptionsFromRequest(FString& OutErrorReason)
 {
 	OutErrorReason.Reset();
@@ -528,7 +690,7 @@ bool AVdjmRecordBridgeActor::RefreshResolvedOptionsFromRequest(FString& OutError
 
 	if (!mEnvResolver->ResolveEnvPlatform(envPreset))
 	{
-		OutErrorReason = TEXT("Resolver failed to apply requested quality tier.");
+		OutErrorReason = TEXT("Resolver failed to apply requested recorder options.");
 		return false;
 	}
 

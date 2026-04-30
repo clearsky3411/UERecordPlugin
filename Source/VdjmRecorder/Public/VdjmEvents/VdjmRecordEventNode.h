@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
 #include "VdjmRecordTypes.h"
+#include "VdjmRecorderController.h"
 #include "VdjmRecordEventNode.generated.h"
 
 /**
@@ -27,6 +28,10 @@
  *   - `UVdjmRecordEventLogNode`
  * - RecorderSpecific & Legacy
  *   - `UVdjmRecordEventSpawnRecordBridgeActorWait`
+ *   - `UVdjmRecordEventStartRecordBridgeActorNode`
+ *   - `UVdjmRecordEventEnsureRecorderControllerNode`
+ *   - `UVdjmRecordEventLoadAppStateNode`
+ *   - `UVdjmRecordEventSubmitRecorderOptionRequestNode`
  *   - `UVdjmRecordEventSetEnvDataAssetPathNode`
  *   - `UVdjmRecordEventSpawnBridgeActorNode` (구형 단순 bridge spawn)
  * - Primitive.Object
@@ -57,6 +62,7 @@ class AVdjmRecordBridgeActor;
 class AActor;
 class UUserWidget;
 class UVdjmRecordEventManager;
+struct FVdjmRecordEventFlowManifest;
 enum class EVdjmRecordBridgeInitStep : uint8;
 
 
@@ -93,10 +99,12 @@ public:
 	void ResetRuntimeState();
 	virtual void ResetRuntimeState_Implementation();
 
+	virtual void CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const;
+
 	UFUNCTION(BlueprintPure, Category = "Recorder|EventFlow")
 	static FVdjmRecordEventResult MakeResult(EVdjmRecordEventResultType InResultType, int32 InSelectedIndex, FName InJumpLabel, float InWaitSeconds);
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Core")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Core", meta = (ToolTip = "이 이벤트 노드 자체를 식별하는 작성/디버그용 태그입니다. RuntimeSlotKey나 SignalTag와 달리 객체 저장/대기 신호에는 직접 쓰이지 않습니다."))
 	FName EventTag = NAME_None;
 };
 
@@ -109,6 +117,7 @@ class VDJMRECORDER_API UVdjmRecordEventSequenceNode : public UVdjmRecordEventBas
 public:
 	virtual FVdjmRecordEventResult ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor) override;
 	virtual void ResetRuntimeState_Implementation() override;
+	virtual void CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const override;
 
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category = "Recorder|EventNode|Composite")
 	TArray<TObjectPtr<UVdjmRecordEventBase>> Children;
@@ -176,8 +185,8 @@ public:
 	TSubclassOf<AVdjmRecordBridgeActor> BridgeActorClass;
 };
 
-/** @brief 브릿지 액터를 준비하고 시작 신호 및 초기화 완료까지 대기하는 브릿지 특화 composite 노드다. */
-UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced, meta = (ToolTip = "브릿지 액터를 준비하고 시작 신호 및 초기화 완료까지 대기하는 노드"))
+/** @brief 브릿지 액터를 준비하고 정책에 따라 시작 또는 초기화 완료 대기까지 수행하는 브릿지 특화 노드다. */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced, meta = (ToolTip = "브릿지 액터를 준비하고 정책에 따라 prepare/start/wait를 수행하는 노드"))
 class VDJMRECORDER_API UVdjmRecordEventSpawnRecordBridgeActorWait : public UVdjmRecordEventBase
 {
 	GENERATED_BODY()
@@ -185,6 +194,7 @@ class VDJMRECORDER_API UVdjmRecordEventSpawnRecordBridgeActorWait : public UVdjm
 public:
 	virtual FVdjmRecordEventResult ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor) override;
 	virtual void ResetRuntimeState_Implementation() override;
+	virtual void CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific")
 	bool bReuseExistingBridgeActor = true;
@@ -204,6 +214,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific")
 	FName StartSignalTag = NAME_None;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific", meta = (ToolTip = "브릿지 시작 신호 또는 init 완료 조건을 기다릴 때의 처리 방식입니다. Running은 기존 tick polling, Passive/Conditional은 flow를 멈추고 manager가 다시 열어줍니다."))
+	EVdjmRecordEventConditionMode ConditionMode = EVdjmRecordEventConditionMode::ERunning;
+
 private:
 	bool ResolveRuntimeBridge(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor*& OutBridgeActor);
 	bool ApplyBridgePreStartSettings(AVdjmRecordBridgeActor* InBridgeActor) const;
@@ -212,6 +225,104 @@ private:
 
 	TWeakObjectPtr<AVdjmRecordBridgeActor> RuntimeBridgeActor;
 	bool bHasIssuedStart = false;
+};
+
+/** @brief 현재 바인드된 브릿지 액터의 초기화 체인을 시작하는 노드다. */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced, meta = (ToolTip = "현재 바인드된 브릿지 액터의 StartRecordBridgeActor를 호출하는 노드"))
+class VDJMRECORDER_API UVdjmRecordEventStartRecordBridgeActorNode : public UVdjmRecordEventBase
+{
+	GENERATED_BODY()
+
+public:
+	virtual FVdjmRecordEventResult ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor) override;
+	virtual void CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const override;
+};
+
+/** @brief RecorderController를 안전하게 생성/조회하고 runtime slot/context에 등록하는 노드다. */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced, meta = (ToolTip = "RecorderController를 FindOrCreate 경로로 보장하고 필요하면 runtime slot과 world context에 등록하는 노드"))
+class VDJMRECORDER_API UVdjmRecordEventEnsureRecorderControllerNode : public UVdjmRecordEventBase
+{
+	GENERATED_BODY()
+
+public:
+	virtual FVdjmRecordEventResult ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor) override;
+	virtual void CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const override;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|Controller", meta = (ToolTip = "현재 flow session 안에서 Controller를 임시로 찾을 이름입니다. None이면 runtime slot에 저장하지 않습니다."))
+	FName RuntimeSlotKey = FName(TEXT("controller"));
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|Controller", meta = (ToolTip = "WorldContextSubsystem에 등록할 전역 조회 키입니다. None이면 표준 RecorderController context key를 자동으로 사용합니다."))
+	FName ContextKey = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|Controller", meta = (ToolTip = "true면 Controller를 RuntimeSlotKey에 저장합니다."))
+	bool bStoreRuntimeSlot = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|Controller", meta = (ToolTip = "true면 Controller를 WorldContextSubsystem에 등록합니다."))
+	bool bRegisterContext = true;
+
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|Controller")
+	FString LastErrorReason;
+};
+
+/** @brief 앱 전역 AppState JSON을 로드하고 runtime slot/context에 등록하는 노드다. */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced, meta = (ToolTip = "앱 전역 AppState JSON을 로드하고 필요하면 media registry TOC를 갱신하는 노드"))
+class VDJMRECORDER_API UVdjmRecordEventLoadAppStateNode : public UVdjmRecordEventBase
+{
+	GENERATED_BODY()
+
+public:
+	virtual FVdjmRecordEventResult ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor) override;
+	virtual void CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const override;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|AppState", meta = (ToolTip = "현재 flow session 안에서 AppStateStore를 임시로 찾을 이름입니다. None이면 runtime slot에 저장하지 않습니다."))
+	FName RuntimeSlotKey = FName(TEXT("app-state"));
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|AppState", meta = (ToolTip = "WorldContextSubsystem에 등록할 전역 조회 키입니다. None이면 표준 AppStateStore context key를 자동으로 사용합니다."))
+	FName ContextKey = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|AppState", meta = (ToolTip = "true면 AppState 파일이 없을 때 기본 JSON을 만들어 저장합니다."))
+	bool bCreateIfMissing = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|AppState", meta = (ToolTip = "true면 MetadataStore registry를 디스크에서 재스캔한 뒤 AppState records_toc에 반영합니다."))
+	bool bRefreshRecordsToc = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|AppState", meta = (ToolTip = "true면 로드/TOC 갱신 후 AppState JSON을 다시 저장합니다."))
+	bool bSaveAfterRefresh = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|AppState", meta = (ToolTip = "true면 AppStateStore를 RuntimeSlotKey에 저장합니다."))
+	bool bStoreRuntimeSlot = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|AppState", meta = (ToolTip = "true면 AppStateStore를 WorldContextSubsystem에 등록합니다."))
+	bool bRegisterContext = true;
+
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|AppState")
+	FString LastErrorReason;
+};
+
+/** @brief RecorderController에 녹화 옵션 변경 요청을 제출하는 노드다. */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced, meta = (ToolTip = "RecorderController에 녹화 옵션 변경 요청을 제출하는 노드"))
+class VDJMRECORDER_API UVdjmRecordEventSubmitRecorderOptionRequestNode : public UVdjmRecordEventBase
+{
+	GENERATED_BODY()
+
+public:
+	virtual FVdjmRecordEventResult ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor) override;
+	virtual void ResetRuntimeState_Implementation() override;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|Option")
+	FVdjmRecorderOptionRequest OptionRequest;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|Option")
+	bool bProcessPendingAfterSubmit = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|Option")
+	bool bSucceedIfQueued = true;
+
+	UPROPERTY(VisibleAnywhere, Transient, BlueprintReadOnly, Category = "Recorder|EventNode|RecorderSpecific|Option")
+	FString LastErrorReason;
+
+private:
+	bool bHasSubmitted = false;
 };
 
 /** @brief 일반 UObject를 생성하고 runtime object slot에 넣는 primitive 노드다. */
@@ -226,7 +337,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Object")
 	TSubclassOf<UObject> ObjectClass;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Object")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Object", meta = (ToolTip = "생성한 객체를 현재 flow session 안에 보관할 임시 이름입니다. 다른 이벤트가 이 이름으로 객체를 가져올 수 있습니다."))
 	FName RuntimeSlotKey = NAME_None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Object")
@@ -248,7 +359,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Object")
 	TSubclassOf<AActor> ActorClass;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Object")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Object", meta = (ToolTip = "스폰한 Actor를 현재 flow session 안에 보관할 임시 이름입니다."))
 	FName RuntimeSlotKey = NAME_None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Object")
@@ -267,7 +378,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Context")
 	FName RuntimeSlotKey = NAME_None;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Context")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Context", meta = (ToolTip = "WorldContextSubsystem에 등록할 전역 조회 키입니다. RuntimeSlotKey와 달리 flow session 밖에서도 찾기 위한 이름입니다."))
 	FName ContextKey = NAME_None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Context")
@@ -286,7 +397,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Context")
 	FName RuntimeSlotKey = NAME_None;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Context")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Context", meta = (ToolTip = "WorldContextSubsystem에 등록할 전역 조회 키입니다."))
 	FName ContextKey = NAME_None;
 };
 
@@ -299,6 +410,7 @@ class VDJMRECORDER_API UVdjmRecordEventCreateWidgetNode : public UVdjmRecordEven
 public:
 	virtual FVdjmRecordEventResult ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor) override;
 	virtual void ResetRuntimeState_Implementation() override;
+	virtual void CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Widget")
 	TSubclassOf<UUserWidget> WidgetClass;
@@ -318,10 +430,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Widget")
 	int32 ZOrder = 0;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Widget")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Widget", meta = (ToolTip = "생성한 위젯을 현재 flow session 안에 보관할 임시 이름입니다. None이면 slot 저장 없이 생성/표시만 합니다."))
 	FName RuntimeSlotKey = NAME_None;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Widget")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|Primitive|Widget", meta = (ToolTip = "위젯 생성 후 즉시 발행할 signal 이름입니다. WaitForSignalNode/EmitSignalNode의 SignalTag와 같은 신호 계층입니다."))
 	FName EmitSignalTag = NAME_None;
 
 private:
@@ -362,9 +474,13 @@ class VDJMRECORDER_API UVdjmRecordEventWaitForSignalNode : public UVdjmRecordEve
 
 public:
 	virtual FVdjmRecordEventResult ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor) override;
+	virtual void CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const override;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|FlowControl")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|FlowControl", meta = (ToolTip = "대기할 신호 이름입니다. EmitSignalNode 또는 다른 노드가 같은 SignalTag를 발행하면 진행됩니다."))
 	FName SignalTag = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|FlowControl", meta = (ToolTip = "signal 조건을 기다릴 때의 처리 방식입니다. Running은 기존 tick polling, Passive는 signal emit 때만 재개, Conditional은 manager가 조건 감시도 함께 수행합니다."))
+	EVdjmRecordEventConditionMode ConditionMode = EVdjmRecordEventConditionMode::ERunning;
 };
 
 /** @brief 상대 시간 기준으로 일정 시간 대기하는 delay 노드다. */
@@ -393,12 +509,13 @@ class VDJMRECORDER_API UVdjmRecordEventEmitSignalNode : public UVdjmRecordEventB
 
 public:
 	virtual FVdjmRecordEventResult ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor) override;
+	virtual void CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const override;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|FlowControl")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|FlowControl", meta = (ToolTip = "발행할 신호 이름입니다. WaitForSignalNode의 SignalTag와 맞춰 사용합니다."))
 	FName SignalTag = NAME_None;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Recorder|EventNode|FlowControl")
-	EVdjmRecordEventSignalScope SignalScope = EVdjmRecordEventSignalScope::ECurrentSession;
+	FVdjmRecordEventSignalRoute SignalRoute;
 };
 
 /** @brief UObject 생성과 컨텍스트 등록을 한 번에 수행하는 composite 노드다. */

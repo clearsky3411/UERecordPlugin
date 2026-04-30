@@ -2,6 +2,7 @@
 
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "VdjmEvents/VdjmRecordEventManager.h"
+#include "VdjmRecorderController.h"
 #include "VdjmRecordEventFlowBlueprintLibrary.generated.h"
 
 class UVdjmRecordEventFlowDataAsset;
@@ -21,8 +22,30 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Recorder|EventFlow", meta = (WorldContext = "worldContextObject"))
 	static UVdjmRecordEventManager* GetRecordEventManager(UObject* worldContextObject);
 
+	UFUNCTION(BlueprintPure, Category = "Recorder|Controller", meta = (WorldContext = "worldContextObject"))
+	static UVdjmRecorderController* FindRecorderController(UObject* worldContextObject);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Controller", meta = (WorldContext = "worldContextObject"))
+	static UVdjmRecorderController* GetOrCreateRecorderController(UObject* worldContextObject);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Controller", meta = (WorldContext = "worldContextObject"))
+	static bool SubmitRecorderOptionRequest(
+		UObject* worldContextObject,
+		const FVdjmRecorderOptionRequest& request,
+		FString& outErrorReason,
+		bool bProcessPendingAfterSubmit = true);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Controller", meta = (WorldContext = "worldContextObject"))
+	static bool ProcessPendingRecorderOptionRequests(UObject* worldContextObject, FString& outErrorReason);
+
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow", meta = (WorldContext = "worldContextObject"))
 	static bool EmitRecordFlowSignal(UObject* worldContextObject, FName signalTag);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow|Debug", meta = (WorldContext = "worldContextObject"))
+	static bool EmitRecordFlowSignalWithDebug(UObject* worldContextObject, FName signalTag, FString& outDebugMessage);
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventFlow|Debug", meta = (WorldContext = "worldContextObject"))
+	static FString GetRecordEventFlowDebugString(UObject* worldContextObject);
 
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow", meta = (WorldContext = "worldContextObject"))
 	static bool RequestPauseRecordEventFlow(UObject* worldContextObject);

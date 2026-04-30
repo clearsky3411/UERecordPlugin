@@ -312,6 +312,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
 	bool IsEventFlowPaused() const;
 
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager|Debug")
+	FString GetEventFlowDebugString() const;
+
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
 	bool EmitFlowSignalToSession(FVdjmRecordFlowSessionHandle SessionHandle, FName InSignalTag);
 
@@ -364,13 +367,16 @@ public:
 	bool EmitFlowSignal(FName InSignalTag);
 
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
-	bool EmitFlowSignalByScope(FName InSignalTag, EVdjmRecordEventSignalScope InSignalScope);
+	bool EmitFlowSignalByRoute(FName InSignalTag, FVdjmRecordEventSignalRoute InSignalRoute);
 
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
 	bool ConsumeFlowSignal(FName InSignalTag);
 
 	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
 	bool HasPendingFlowSignal(FName InSignalTag) const;
+
+	bool RequestCurrentFlowConditionForSignal(FName signalTag, EVdjmRecordEventConditionMode conditionMode);
+	bool RequestCurrentFlowConditionForBridgeInit(EVdjmRecordEventConditionMode conditionMode);
 
 	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
 	FVdjmRecordFlowHandle GetCurrentFlowHandle() const;
@@ -468,6 +474,33 @@ private:
 		}
 	};
 
+	enum class EVdjmRecordFlowConditionKind : uint8
+	{
+		ENone,
+		ESignal,
+		EBridgeInit
+	};
+
+	struct FVdjmRecordFlowConditionState
+	{
+	public:
+		EVdjmRecordFlowConditionKind ConditionKind = EVdjmRecordFlowConditionKind::ENone;
+		EVdjmRecordEventConditionMode ConditionMode = EVdjmRecordEventConditionMode::ERunning;
+		FName SignalTag = NAME_None;
+
+		bool IsActive() const
+		{
+			return ConditionKind != EVdjmRecordFlowConditionKind::ENone;
+		}
+
+		void Reset()
+		{
+			ConditionKind = EVdjmRecordFlowConditionKind::ENone;
+			ConditionMode = EVdjmRecordEventConditionMode::ERunning;
+			SignalTag = NAME_None;
+		}
+	};
+
 	struct FVdjmRecordFlowExecutionState
 	{
 	public:
@@ -479,6 +512,7 @@ private:
 		TMap<const UVdjmRecordEventBase*, FVdjmRecordEventRuntimeHandle> RuntimeEventHandles;
 		FVdjmRecordPendingEdgeDirective PendingEdgeDirective;
 		FVdjmRecordPendingFlowControlRequest PendingFlowControlRequest;
+		FVdjmRecordFlowConditionState ActiveCondition;
 		FVdjmRecordObservedEdge LastObservedEdge;
 		bool bHasObservedEdge = false;
 		bool bPaused = false;
@@ -512,6 +546,7 @@ private:
 	};
 
 	void TickEventFlow();
+	void TickFlowConditions(FVdjmRecordFlowSessionHandle sessionHandle);
 	void TickFlowSession(FVdjmRecordFlowSessionHandle SessionHandle);
 	void ResetFlowRuntimeStates();
 	void FinishFlow(EVdjmRecordEventResultType FinalResultType);
@@ -554,6 +589,15 @@ private:
 	FVdjmRecordObservedEdge ApplyPendingEdgeDirective(
 		const FVdjmRecordObservedEdge& DefaultEdge,
 		FVdjmRecordFlowHandle FlowHandle);
+	void ClearFlowCondition(FVdjmRecordFlowHandle flowHandle);
+	bool DoesSessionHavePendingSignal(const FVdjmRecordFlowSession& flowSession, FName signalTag) const;
+	bool DoesCompiledManifestHaveFutureSignalWaiter(const FVdjmRecordFlowSession& flowSession, FName signalTag) const;
+	bool ResumeFlowConditionsForSignal(FVdjmRecordFlowSession& flowSession, FName signalTag);
+	bool ResumeFlowConditionsForSignal(FName signalTag);
+	bool ResumeFlowConditionsForBridgeInit();
+	bool ResumeFlowFromCompiledSignalManifest(FVdjmRecordFlowSession& flowSession, FName signalTag);
+	bool ResumeFlowFromCompiledSignalManifest(FVdjmRecordFlowSession& flowSession);
+	bool ResumeFlowFromCompiledSignalManifest(FName signalTag);
 	bool RequestFlowControl(EVdjmRecordFlowControlAction Action);
 	bool RequestFlowControl(FVdjmRecordFlowSessionHandle SessionHandle, EVdjmRecordFlowControlAction Action);
 	void ApplyFlowControlRequestToFlowChain(FVdjmRecordFlowHandle FlowHandle, EVdjmRecordFlowControlAction Action);

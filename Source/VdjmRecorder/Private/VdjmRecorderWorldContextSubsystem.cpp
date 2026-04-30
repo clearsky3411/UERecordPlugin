@@ -12,6 +12,9 @@ namespace
 	const FName RECORDER_CONTROLLER_CONTEXT_KEY(TEXT("RecorderController"));
 	const FName STATE_OBSERVER_CONTEXT_KEY(TEXT("StateObserver"));
 	const FName EVENT_FLOW_ENTRY_POINT_CONTEXT_KEY(TEXT("EventFlowEntryPoint"));
+	const FName METADATA_STORE_CONTEXT_KEY(TEXT("MetadataStore"));
+	const FName MEDIA_PREVIEW_MANAGER_CONTEXT_KEY(TEXT("MediaPreviewManager"));
+	const FName APP_STATE_STORE_CONTEXT_KEY(TEXT("AppStateStore"));
 }
 
 void UVdjmRecorderWorldContextEntry::InitializeContextEntry(FName InContextKey)
@@ -187,6 +190,21 @@ FName UVdjmRecorderWorldContextSubsystem::GetEventFlowEntryPointContextKey()
 	return EVENT_FLOW_ENTRY_POINT_CONTEXT_KEY;
 }
 
+FName UVdjmRecorderWorldContextSubsystem::GetMetadataStoreContextKey()
+{
+	return METADATA_STORE_CONTEXT_KEY;
+}
+
+FName UVdjmRecorderWorldContextSubsystem::GetMediaPreviewManagerContextKey()
+{
+	return MEDIA_PREVIEW_MANAGER_CONTEXT_KEY;
+}
+
+FName UVdjmRecorderWorldContextSubsystem::GetAppStateStoreContextKey()
+{
+	return APP_STATE_STORE_CONTEXT_KEY;
+}
+
 UVdjmRecorderWorldContextEntry* UVdjmRecorderWorldContextSubsystem::FindContextEntry(FName InContextKey) const
 {
 	if (InContextKey.IsNone())
@@ -255,6 +273,20 @@ bool UVdjmRecorderWorldContextSubsystem::RegisterWeakObjectContext(
 	return true;
 }
 
+bool UVdjmRecorderWorldContextSubsystem::RegisterStrongObjectContext(
+	FName InContextKey,
+	UObject* InContextObject,
+	UClass* InExpectedClass)
+{
+	if (not RegisterWeakObjectContext(InContextKey, InContextObject, InExpectedClass))
+	{
+		return false;
+	}
+
+	StrongContextObjects.Add(InContextKey, InContextObject);
+	return true;
+}
+
 bool UVdjmRecorderWorldContextSubsystem::RegisterBridgeContext(AVdjmRecordBridgeActor* InBridgeActor)
 {
 	if (InBridgeActor == nullptr)
@@ -302,6 +334,7 @@ bool UVdjmRecorderWorldContextSubsystem::UnregisterContext(FName InContextKey, U
 	}
 
 	ContextEntries.Remove(InContextKey);
+	StrongContextObjects.Remove(InContextKey);
 	return true;
 }
 

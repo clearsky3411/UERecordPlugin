@@ -10,6 +10,214 @@
 namespace
 {
 	constexpr int32 FlowSchemaVersion = 1;
+
+	bool CloneEventArray(
+		const TArray<TObjectPtr<UVdjmRecordEventBase>>& sourceEvents,
+		UObject* outer,
+		TArray<TObjectPtr<UVdjmRecordEventBase>>& outEvents,
+		FString& outError,
+		const FString& contextLabel)
+	{
+		outEvents.Reset();
+		outEvents.Reserve(sourceEvents.Num());
+
+		for (int32 eventIndex = 0; eventIndex < sourceEvents.Num(); ++eventIndex)
+		{
+			const UVdjmRecordEventBase* sourceEventNode = sourceEvents[eventIndex];
+			if (sourceEventNode == nullptr)
+			{
+				outEvents.Add(nullptr);
+				continue;
+			}
+
+			TSharedPtr<FJsonObject> eventJsonObject;
+			if (not VdjmRecordEventJson::SerializeEventNodeToJsonObject(sourceEventNode, eventJsonObject, outError))
+			{
+				outError = FString::Printf(TEXT("%s index %d serialize failed: %s"), *contextLabel, eventIndex, *outError);
+				return false;
+			}
+
+			UVdjmRecordEventBase* newEventNode = nullptr;
+			if (not VdjmRecordEventJson::DeserializeEventNodeFromJsonObject(eventJsonObject, outer, newEventNode, outError))
+			{
+				outError = FString::Printf(TEXT("%s index %d clone failed: %s"), *contextLabel, eventIndex, *outError);
+				return false;
+			}
+
+			outEvents.Add(newEventNode);
+		}
+
+		return true;
+	}
+
+	bool DeserializeEventArrayFromJsonValues(
+		const TArray<TSharedPtr<FJsonValue>>& eventValues,
+		UObject* outer,
+		TArray<TObjectPtr<UVdjmRecordEventBase>>& outEvents,
+		FString& outError,
+		const FString& contextLabel)
+	{
+		outEvents.Reset();
+		outEvents.Reserve(eventValues.Num());
+
+		for (int32 eventIndex = 0; eventIndex < eventValues.Num(); ++eventIndex)
+		{
+			const TSharedPtr<FJsonValue>& eventValue = eventValues[eventIndex];
+			if (not eventValue.IsValid() || eventValue->Type != EJson::Object)
+			{
+				outError = FString::Printf(TEXT("%s index %d has invalid event type."), *contextLabel, eventIndex);
+				return false;
+			}
+
+			UVdjmRecordEventBase* newNode = nullptr;
+			if (not VdjmRecordEventJson::DeserializeEventNodeFromJsonObject(eventValue->AsObject(), outer, newNode, outError))
+			{
+				outError = FString::Printf(TEXT("%s index %d parse failed: %s"), *contextLabel, eventIndex, *outError);
+				return false;
+			}
+
+			outEvents.Add(newNode);
+		}
+
+		return true;
+	}
+
+	bool DeserializeRequiredEventArrayField(
+		const TSharedPtr<FJsonObject>& rootObject,
+		const TCHAR* fieldName,
+		UObject* outer,
+		TArray<TObjectPtr<UVdjmRecordEventBase>>& outEvents,
+		FString& outError,
+		const FString& contextLabel)
+	{
+		const TArray<TSharedPtr<FJsonValue>>* eventValues = nullptr;
+		if (not rootObject->TryGetArrayField(fieldName, eventValues) || eventValues == nullptr)
+		{
+			outError = FString::Printf(TEXT("Missing %s array."), fieldName);
+			return false;
+		}
+
+		return DeserializeEventArrayFromJsonValues(*eventValues, outer, outEvents, outError, contextLabel);
+	}
+
+	bool ValidateUniqueSubgraphTags(const TArray<FVdjmRecordEventSubgraph>& subgraphs, FString& outError)
+	{
+		TSet<FName> seenTags;
+		for (const FVdjmRecordEventSubgraph& subgraph : subgraphs)
+		{
+			if (subgraph.SubgraphTag.IsNone())
+			{
+				continue;
+			}
+
+			if (seenTags.Contains(subgraph.SubgraphTag))
+			{
+				outError = FString::Printf(TEXT("Duplicate subgraph tag: %s"), *subgraph.SubgraphTag.ToString());
+				return false;
+			}
+
+			seenTags.Add(subgraph.SubgraphTag);
+		}
+
+		return true;
+	}
+
+	bool DeserializeSubgraphsFromJsonObject(
+		const TSharedPtr<FJsonObject>& rootObject,
+		UObject* outer,
+		TArray<FVdjmRecordEventSubgraph>& outSubgraphs,
+		FString& outError)
+	{
+		outSubgraphs.Reset();
+
+		const TArray<TSharedPtr<FJsonValue>>* subgraphValues = nullptr;
+		if (not rootObject->TryGetArrayField(TEXT("subgraphs"), subgraphValues) || subgraphValues == nullptr)
+		{
+			return true;
+		}
+
+		outSubgraphs.Reserve(subgraphValues->Num());
+		for (int32 subgraphIndex = 0; subgraphIndex < subgraphValues->Num(); ++subgraphIndex)
+		{
+			const TSharedPtr<FJsonValue>& subgraphValue = (*subgraphValues)[subgraphIndex];
+			if (not subgraphValue.IsValid() || subgraphValue->Type != EJson::Object)
+			{
+				outError = FString::Printf(TEXT("Invalid subgraph type at index %d."), subgraphIndex);
+				return false;
+			}
+
+			const TSharedPtr<FJsonObject> subgraphObject = subgraphValue->AsObject();
+			FString tagString;
+			if (not subgraphObject->TryGetStringField(TEXT("tag"), tagString))
+			{
+				subgraphObject->TryGetStringField(TEXT("SubgraphTag"), tagString);
+			}
+
+			FVdjmRecordEventSubgraph newSubgraph;
+			newSubgraph.SubgraphTag = tagString.IsEmpty() ? NAME_None : FName(*tagString);
+
+			const FString contextLabel = FString::Printf(TEXT("Subgraph '%s' event"), *newSubgraph.SubgraphTag.ToString());
+			if (not DeserializeRequiredEventArrayField(
+				subgraphObject,
+				TEXT("events"),
+				outer,
+				newSubgraph.Events,
+				outError,
+				contextLabel))
+			{
+				outError = FString::Printf(TEXT("Subgraph index %d parse failed: %s"), subgraphIndex, *outError);
+				return false;
+			}
+
+			outSubgraphs.Add(MoveTemp(newSubgraph));
+		}
+
+		return ValidateUniqueSubgraphTags(outSubgraphs, outError);
+	}
+
+	void SerializeEventArrayToJsonValues(
+		const TArray<TObjectPtr<UVdjmRecordEventBase>>& events,
+		TArray<TSharedPtr<FJsonValue>>& outEventValues,
+		const FString& contextLabel)
+	{
+		outEventValues.Reset();
+		outEventValues.Reserve(events.Num());
+
+		for (const UVdjmRecordEventBase* eventNode : events)
+		{
+			TSharedPtr<FJsonObject> eventObject;
+			FString serializeError;
+			if (VdjmRecordEventJson::SerializeEventNodeToJsonObject(eventNode, eventObject, serializeError) && eventObject.IsValid())
+			{
+				outEventValues.Add(MakeShared<FJsonValueObject>(eventObject));
+			}
+			else if (not serializeError.IsEmpty())
+			{
+				UE_LOG(LogTemp, Warning, TEXT("%s - Failed to serialize event node: %s"), *contextLabel, *serializeError);
+			}
+		}
+	}
+
+	void SerializeSubgraphsToJsonValues(
+		const TArray<FVdjmRecordEventSubgraph>& subgraphs,
+		TArray<TSharedPtr<FJsonValue>>& outSubgraphValues)
+	{
+		outSubgraphValues.Reset();
+		outSubgraphValues.Reserve(subgraphs.Num());
+
+		for (const FVdjmRecordEventSubgraph& subgraph : subgraphs)
+		{
+			const TSharedPtr<FJsonObject> subgraphObject = MakeShared<FJsonObject>();
+			subgraphObject->SetStringField(TEXT("tag"), subgraph.SubgraphTag.ToString());
+
+			TArray<TSharedPtr<FJsonValue>> eventValues;
+			const FString contextLabel = FString::Printf(TEXT("Export subgraph '%s'"), *subgraph.SubgraphTag.ToString());
+			SerializeEventArrayToJsonValues(subgraph.Events, eventValues, contextLabel);
+			subgraphObject->SetArrayField(TEXT("events"), eventValues);
+
+			outSubgraphValues.Add(MakeShared<FJsonValueObject>(subgraphObject));
+		}
+	}
 }
 
 UVdjmRecordEventFlowRuntime* UVdjmRecordEventFlowRuntime::CreateFlowRuntimeFromAsset(
@@ -74,6 +282,8 @@ bool UVdjmRecordEventFlowRuntime::InitializeEmpty()
 {
 	SourceFlowAsset = nullptr;
 	Events.Reset();
+	Subgraphs.Reset();
+	CompiledManifest.Reset();
 	return true;
 }
 
@@ -88,38 +298,40 @@ bool UVdjmRecordEventFlowRuntime::InitializeFromAsset(const UVdjmRecordEventFlow
 		return false;
 	}
 
-	TArray<TObjectPtr<UVdjmRecordEventBase>> NewEvents;
-	NewEvents.Reserve(InSourceFlowAsset->Events.Num());
-
-	for (int32 EventIndex = 0; EventIndex < InSourceFlowAsset->Events.Num(); ++EventIndex)
+	TArray<TObjectPtr<UVdjmRecordEventBase>> newEvents;
+	if (not CloneEventArray(InSourceFlowAsset->Events, this, newEvents, OutError, TEXT("Root event")))
 	{
-		const UVdjmRecordEventBase* SourceEventNode = InSourceFlowAsset->Events[EventIndex];
-		if (SourceEventNode == nullptr)
-		{
-			NewEvents.Add(nullptr);
-			continue;
-		}
-
-		TSharedPtr<FJsonObject> EventJsonObject;
-		if (!VdjmRecordEventJson::SerializeEventNodeToJsonObject(SourceEventNode, EventJsonObject, OutError))
-		{
-			OutError = FString::Printf(TEXT("Event index %d serialize failed: %s"), EventIndex, *OutError);
-			return false;
-		}
-
-		UVdjmRecordEventBase* NewEventNode = nullptr;
-		if (!VdjmRecordEventJson::DeserializeEventNodeFromJsonObject(EventJsonObject, this, NewEventNode, OutError))
-		{
-			OutError = FString::Printf(TEXT("Event index %d clone failed: %s"), EventIndex, *OutError);
-			return false;
-		}
-
-		NewEvents.Add(NewEventNode);
+		return false;
 	}
 
-	Events = MoveTemp(NewEvents);
+	TArray<FVdjmRecordEventSubgraph> newSubgraphs;
+	newSubgraphs.Reserve(InSourceFlowAsset->Subgraphs.Num());
+	for (int32 subgraphIndex = 0; subgraphIndex < InSourceFlowAsset->Subgraphs.Num(); ++subgraphIndex)
+	{
+		const FVdjmRecordEventSubgraph& sourceSubgraph = InSourceFlowAsset->Subgraphs[subgraphIndex];
+
+		FVdjmRecordEventSubgraph newSubgraph;
+		newSubgraph.SubgraphTag = sourceSubgraph.SubgraphTag;
+
+		const FString contextLabel = FString::Printf(TEXT("Subgraph '%s' event"), *sourceSubgraph.SubgraphTag.ToString());
+		if (not CloneEventArray(sourceSubgraph.Events, this, newSubgraph.Events, OutError, contextLabel))
+		{
+			OutError = FString::Printf(TEXT("Subgraph index %d clone failed: %s"), subgraphIndex, *OutError);
+			return false;
+		}
+
+		newSubgraphs.Add(MoveTemp(newSubgraph));
+	}
+
+	if (not ValidateUniqueSubgraphTags(newSubgraphs, OutError))
+	{
+		return false;
+	}
+
+	Events = MoveTemp(newEvents);
+	Subgraphs = MoveTemp(newSubgraphs);
 	SourceFlowAsset = const_cast<UVdjmRecordEventFlowDataAsset*>(InSourceFlowAsset);
-	return true;
+	return CompileManifest(OutError);
 }
 
 bool UVdjmRecordEventFlowRuntime::InitializeFromJsonString(const FString& InJsonString, FString& OutError)
@@ -148,37 +360,21 @@ bool UVdjmRecordEventFlowRuntime::ImportFlowFromJsonString(const FString& InJson
 		return false;
 	}
 
-	const TArray<TSharedPtr<FJsonValue>>* EventValues = nullptr;
-	if (!RootObject->TryGetArrayField(TEXT("events"), EventValues) || EventValues == nullptr)
+	TArray<TObjectPtr<UVdjmRecordEventBase>> NewEvents;
+	if (not DeserializeRequiredEventArrayField(RootObject, TEXT("events"), this, NewEvents, OutError, TEXT("Root event")))
 	{
-		OutError = TEXT("Missing events array.");
 		return false;
 	}
 
-	TArray<TObjectPtr<UVdjmRecordEventBase>> NewEvents;
-	NewEvents.Reserve(EventValues->Num());
-
-	for (int32 EventIndex = 0; EventIndex < EventValues->Num(); ++EventIndex)
+	TArray<FVdjmRecordEventSubgraph> newSubgraphs;
+	if (not DeserializeSubgraphsFromJsonObject(RootObject, this, newSubgraphs, OutError))
 	{
-		const TSharedPtr<FJsonValue>& EventValue = (*EventValues)[EventIndex];
-		if (!EventValue.IsValid() || EventValue->Type != EJson::Object)
-		{
-			OutError = FString::Printf(TEXT("Invalid event type at index %d."), EventIndex);
-			return false;
-		}
-
-		UVdjmRecordEventBase* NewNode = nullptr;
-		if (!VdjmRecordEventJson::DeserializeEventNodeFromJsonObject(EventValue->AsObject(), this, NewNode, OutError))
-		{
-			OutError = FString::Printf(TEXT("Event index %d parse failed: %s"), EventIndex, *OutError);
-			return false;
-		}
-
-		NewEvents.Add(NewNode);
+		return false;
 	}
 
 	Events = MoveTemp(NewEvents);
-	return true;
+	Subgraphs = MoveTemp(newSubgraphs);
+	return CompileManifest(OutError);
 }
 
 bool UVdjmRecordEventFlowRuntime::AppendFlowFragment(const FVdjmRecordEventFlowFragment& InFragment, FString& OutError)
@@ -191,7 +387,7 @@ bool UVdjmRecordEventFlowRuntime::AppendFlowFragment(const FVdjmRecordEventFlowF
 
 	SourceFlowAsset = nullptr;
 	Events.Append(MoveTemp(NewEvents));
-	return true;
+	return CompileManifest(OutError);
 }
 
 bool UVdjmRecordEventFlowRuntime::InsertFlowFragment(int32 InsertIndex, const FVdjmRecordEventFlowFragment& InFragment, FString& OutError)
@@ -218,7 +414,7 @@ bool UVdjmRecordEventFlowRuntime::InsertFlowFragment(int32 InsertIndex, const FV
 	{
 		Events.Insert(NewEvents[OffsetIndex], InsertIndex + OffsetIndex);
 	}
-	return true;
+	return CompileManifest(OutError);
 }
 
 bool UVdjmRecordEventFlowRuntime::ReplaceEventByTagFromFragment(FName InTag, const FVdjmRecordEventNodeFragment& InFragment, FString& OutError)
@@ -240,7 +436,7 @@ bool UVdjmRecordEventFlowRuntime::ReplaceEventByTagFromFragment(FName InTag, con
 
 	SourceFlowAsset = nullptr;
 	Events[EventIndex] = NewEventNode;
-	return true;
+	return CompileManifest(OutError);
 }
 
 bool UVdjmRecordEventFlowRuntime::RemoveEventAt(int32 EventIndex)
@@ -252,7 +448,9 @@ bool UVdjmRecordEventFlowRuntime::RemoveEventAt(int32 EventIndex)
 
 	SourceFlowAsset = nullptr;
 	Events.RemoveAt(EventIndex);
-	return true;
+
+	FString compileError;
+	return CompileManifest(compileError);
 }
 
 FString UVdjmRecordEventFlowRuntime::ExportFlowToJsonString(bool bPrettyPrint) const
@@ -266,20 +464,12 @@ FString UVdjmRecordEventFlowRuntime::ExportFlowToJsonString(bool bPrettyPrint) c
 	}
 
 	TArray<TSharedPtr<FJsonValue>> EventValues;
-	for (const UVdjmRecordEventBase* EventNode : Events)
-	{
-		TSharedPtr<FJsonObject> EventObject;
-		FString SerializeError;
-		if (VdjmRecordEventJson::SerializeEventNodeToJsonObject(EventNode, EventObject, SerializeError) && EventObject.IsValid())
-		{
-			EventValues.Add(MakeShared<FJsonValueObject>(EventObject));
-		}
-		else if (!SerializeError.IsEmpty())
-		{
-			UE_LOG(LogTemp, Warning, TEXT("ExportFlowToJsonString - Failed to serialize event node: %s"), *SerializeError);
-		}
-	}
+	SerializeEventArrayToJsonValues(Events, EventValues, TEXT("Export root flow"));
 	RootObject->SetArrayField(TEXT("events"), EventValues);
+
+	TArray<TSharedPtr<FJsonValue>> SubgraphValues;
+	SerializeSubgraphsToJsonValues(Subgraphs, SubgraphValues);
+	RootObject->SetArrayField(TEXT("subgraphs"), SubgraphValues);
 
 	FString OutJson;
 	if (bPrettyPrint)
@@ -316,6 +506,24 @@ int32 UVdjmRecordEventFlowRuntime::FindEventIndexByTag(FName InTag) const
 	return INDEX_NONE;
 }
 
+int32 UVdjmRecordEventFlowRuntime::FindSubgraphIndexByTag(FName subgraphTag) const
+{
+	if (subgraphTag.IsNone())
+	{
+		return INDEX_NONE;
+	}
+
+	for (int32 index = 0; index < Subgraphs.Num(); ++index)
+	{
+		if (Subgraphs[index].SubgraphTag == subgraphTag)
+		{
+			return index;
+		}
+	}
+
+	return INDEX_NONE;
+}
+
 void UVdjmRecordEventFlowRuntime::ResetRuntimeStates()
 {
 	for (UVdjmRecordEventBase* EventNode : Events)
@@ -325,6 +533,36 @@ void UVdjmRecordEventFlowRuntime::ResetRuntimeStates()
 			EventNode->ResetRuntimeState();
 		}
 	}
+
+	for (FVdjmRecordEventSubgraph& subgraph : Subgraphs)
+	{
+		for (UVdjmRecordEventBase* eventNode : subgraph.Events)
+		{
+			if (eventNode != nullptr)
+			{
+				eventNode->ResetRuntimeState();
+			}
+		}
+	}
+}
+
+bool UVdjmRecordEventFlowRuntime::CompileManifest(FString& outError)
+{
+	outError.Reset();
+	CompiledManifest.Reset();
+
+	for (int32 eventIndex = 0; eventIndex < Events.Num(); ++eventIndex)
+	{
+		const UVdjmRecordEventBase* eventNode = Events[eventIndex];
+		if (eventNode == nullptr)
+		{
+			continue;
+		}
+
+		eventNode->CollectFlowManifest(CompiledManifest, eventIndex);
+	}
+
+	return true;
 }
 
 UVdjmRecordEventFlowDataAsset* UVdjmRecordEventFlowRuntime::GetSourceFlowAsset() const

@@ -9,12 +9,14 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVdjmRecordInitErrorEvent,AVdjmRe
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVdjmRecordEvent,UVdjmRecordResource*, recordData);
 DECLARE_MULTICAST_DELEGATE_OneParam(FVdjmRecordInnerEvent,UVdjmRecordResource*);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVdjmRecordArtifactEvent, UVdjmRecordArtifact*, recordArtifact);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmRecordTickEvent,UVdjmRecordResource*, recordResource, float, deltaTime);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FVdjmRecordTickInnerEvent,UVdjmRecordResource*,  float);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVdjmRecordBridgeActorChainInitEvent, AVdjmRecordBridgeActor*, bridgeActor, EVdjmRecordBridgeInitStep, prevInitstep, EVdjmRecordBridgeInitStep, currentInitStep);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmRecordQualityTierChangedEvent, AVdjmRecordBridgeActor*, bridgeActor, EVdjmRecordQualityTiers, newQualityTier);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmRecordFinalizingChangedEvent, AVdjmRecordBridgeActor*, bridgeActor, bool, bIsFinalizingRecording);
 
 UCLASS(Blueprintable)
 class VDJMRECORDER_API AVdjmRecordBridgeActor : public AActor
@@ -50,6 +52,13 @@ public:
 	
 	UFUNCTION(BlueprintCallable)
 	void StopRecording();
+	UFUNCTION(BlueprintCallable)
+	void RequestStopRecording();
+	UFUNCTION(BlueprintPure, Category="Record|State")
+	bool IsFinalizingRecording() const
+	{
+		return mbIsFinalizingRecording;
+	}
 
 	UFUNCTION(BlueprintCallable)
 	FString GetCurrentFileName() const
@@ -109,7 +118,7 @@ public:
 	
 	bool DbcRecordStartable() const
 	{
-		return bValidateInitializeComplete && DbcRecordingPossible() && not bIsRecording;
+		return bValidateInitializeComplete && DbcRecordingPossible() && not bIsRecording && not mbIsFinalizingRecording;
 	}
 
 	bool DbcValidInitializeComplete() const;
@@ -151,6 +160,11 @@ public:
 	{
 		return mRecordResource;
 	}
+	UFUNCTION(BlueprintPure, Category = "Record|Artifact")
+	UVdjmRecordArtifact* GetLatestRecordArtifact() const
+	{
+		return mLatestRecordArtifact;
+	}
 	void BroadcastRecordPrevStart()
 	{
 		OnRecordPrevStart.Broadcast(mRecordResource);
@@ -188,6 +202,9 @@ public:
 	FVdjmRecordInnerEvent OnRecordStoppedInner;
 
 	UPROPERTY(BlueprintAssignable,EditAnywhere)
+	FVdjmRecordArtifactEvent OnRecordArtifactReady;
+
+	UPROPERTY(BlueprintAssignable,EditAnywhere)
 	FVdjmRecordEvent OnRecordError;
 	
 	UPROPERTY(BlueprintAssignable,EditAnywhere)
@@ -195,6 +212,8 @@ public:
 
 	UPROPERTY(BlueprintAssignable,EditAnywhere)
 	FVdjmRecordQualityTierChangedEvent OnRequestedQualityTierChanged;
+	UPROPERTY(BlueprintAssignable,EditAnywhere)
+	FVdjmRecordFinalizingChangedEvent OnRecordFinalizingChanged;
 	
 	FVdjmRecordStartEvent OnRecordStartRetValEvent;
 	
@@ -249,10 +268,112 @@ public:
 		return mRequestedBitrate;
 	}
 
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void SetRequestedResolution(FIntPoint resolution);
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void ClearRequestedResolution();
+
+	UFUNCTION(BlueprintPure, Category="Record|Option")
+	FIntPoint GetRequestedResolution() const
+	{
+		return mRequestedResolution;
+	}
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void SetRequestedResolutionFitToDisplay(bool fitToDisplay);
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void ClearRequestedResolutionFitToDisplay();
+
+	UFUNCTION(BlueprintPure, Category="Record|Option")
+	bool HasRequestedResolutionFitToDisplay() const
+	{
+		return mbHasRequestedResolutionFitToDisplay;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Record|Option")
+	bool GetRequestedResolutionFitToDisplay() const
+	{
+		return mbRequestedResolutionFitToDisplay;
+	}
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void SetRequestedMaxRecordDurationSeconds(float durationSeconds);
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void ClearRequestedMaxRecordDurationSeconds();
+
+	UFUNCTION(BlueprintPure, Category="Record|Option")
+	float GetRequestedMaxRecordDurationSeconds() const
+	{
+		return mRequestedMaxRecordDurationSeconds;
+	}
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void SetRequestedKeyframeInterval(int32 keyframeInterval);
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void ClearRequestedKeyframeInterval();
+
+	UFUNCTION(BlueprintPure, Category="Record|Option")
+	int32 GetRequestedKeyframeInterval() const
+	{
+		return mRequestedKeyframeInterval;
+	}
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void SetRequestedOutputFilePath(const FString& outputFilePath);
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void ClearRequestedOutputFilePath();
+
+	UFUNCTION(BlueprintPure, Category="Record|Option")
+	FString GetRequestedOutputFilePath() const
+	{
+		return mRequestedOutputFilePath;
+	}
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void SetRequestedSessionId(const FString& sessionId);
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void ClearRequestedSessionId();
+
+	UFUNCTION(BlueprintPure, Category="Record|Option")
+	FString GetRequestedSessionId() const
+	{
+		return mRequestedSessionId;
+	}
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void SetRequestedOverwriteExists(bool overwriteExists);
+
+	UFUNCTION(BlueprintCallable, Category="Record|Option")
+	void ClearRequestedOverwriteExists();
+
+	UFUNCTION(BlueprintPure, Category="Record|Option")
+	bool HasRequestedOverwriteExists() const
+	{
+		return mbHasRequestedOverwriteExists;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Record|Option")
+	bool GetRequestedOverwriteExists() const
+	{
+		return mbRequestedOverwriteExists;
+	}
+
 	UFUNCTION(BlueprintPure, Category="Record|State")
 	bool IsRecording() const
 	{
 		return bIsRecording;
+	}
+
+	UFUNCTION(BlueprintPure, Category="Record|State")
+	int32 GetRecordedFrameCount() const
+	{
+		return mRecordedFrameCount;
 	}
 
 	UFUNCTION(BlueprintPure, Category="Record|State")
@@ -283,6 +404,7 @@ protected:
 	void ChainInit_CreateRecordPipeline();
 	void ChainInit_FinalizeInitialization();
 	void UnBindBackBufferReady(FSlateApplication& slateApp);
+	void SetRecordFinalizing(bool bInIsFinalizingRecording);
 	
 	bool BindingRecordPipeline(TSubclassOf<UVdjmRecordUnitPipeline> pipelineClass,UVdjmRecordResource* recordResource);
 	void UnBindingRecordPipeline();
@@ -303,6 +425,8 @@ protected:
 	FVdjmRecordGlobalRules mGlobalRules;
 	UPROPERTY()
 	TObjectPtr<UVdjmRecordResource> mRecordResource;
+	UPROPERTY(Transient)
+	TObjectPtr<UVdjmRecordArtifact> mLatestRecordArtifact;
 	UPROPERTY()
 	TObjectPtr<UVdjmRecordUnitPipeline> mRecordPipeline;
 
@@ -312,6 +436,7 @@ protected:
 	FDelegateHandle mOnResourceTexturePoolInitializedHandle;
 	
 	bool bIsRecording = false;
+	bool mbIsFinalizingRecording = false;
 	bool bValidateInitializeComplete = false;
 
 	UPROPERTY()
@@ -334,6 +459,15 @@ protected:
 	EVdjmRecordQualityTiers mCurrentQualityTier = EVdjmRecordQualityTiers::EUndefined;	//	추후에 옵션을 바꿀 수 있는 인터페이스에 노출될 놈임.
 	int32 mRequestedFrameRate = 0;
 	int32 mRequestedBitrate = 0;
+	FIntPoint mRequestedResolution = FIntPoint::ZeroValue;
+	float mRequestedMaxRecordDurationSeconds = 0.0f;
+	int32 mRequestedKeyframeInterval = INDEX_NONE;
+	FString mRequestedOutputFilePath;
+	FString mRequestedSessionId;
+	bool mbRequestedResolutionFitToDisplay = false;
+	bool mbHasRequestedResolutionFitToDisplay = false;
+	bool mbRequestedOverwriteExists = false;
+	bool mbHasRequestedOverwriteExists = false;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Record|Output", meta=(AllowPrivateAccess="true"))
 	FString mCurrentCustomFileName;
 	UPROPERTY()

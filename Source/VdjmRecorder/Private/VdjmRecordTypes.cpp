@@ -10,6 +10,139 @@
 */
 DEFINE_LOG_CATEGORY(LogVdjmRecorderCore)
 
+bool FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments() const
+{
+	if (VideoConfig.OutputFilePath.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - OutputFilePath is empty."));
+		return false;
+	}
+
+	const FString normalizedPath = FPaths::ConvertRelativePathToFull(VideoConfig.OutputFilePath);
+	const FString directoryPath = FPaths::GetPath(normalizedPath);
+	const FString extension = FPaths::GetExtension(normalizedPath, false);
+
+	if (directoryPath.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - Directory path is empty. Path: %s"), *normalizedPath);
+		return false;
+	}
+
+	if (not IFileManager::Get().DirectoryExists(*directoryPath))
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - Directory does not exist. Directory: %s"), *directoryPath);
+		return false;
+	}
+
+	if (extension.IsEmpty() || not extension.Equals(TEXT("mp4"), ESearchCase::IgnoreCase))
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - Output file extension must be mp4. Path: %s"), *normalizedPath);
+		return false;
+	}
+
+	if (VideoConfig.MimeType.IsEmpty())
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - MimeType is empty."));
+		return false;
+	}
+
+	const FString mimeTypeLower = VideoConfig.MimeType.ToLower();
+	if (mimeTypeLower != TEXT("video/avc") && mimeTypeLower != TEXT("video/mp4"))
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - Unsupported MimeType: %s"), *VideoConfig.MimeType);
+		return false;
+	}
+
+	if (VideoConfig.VideoWidth <= 0 || VideoConfig.VideoHeight <= 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - Invalid resolution. Width=%d Height=%d"), VideoConfig.VideoWidth, VideoConfig.VideoHeight);
+		return false;
+	}
+
+	if ((VideoConfig.VideoWidth % 2) != 0 || (VideoConfig.VideoHeight % 2) != 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - Width and Height must be even. Width=%d Height=%d"), VideoConfig.VideoWidth, VideoConfig.VideoHeight);
+		return false;
+	}
+
+	if (VideoConfig.VideoWidth < 16 || VideoConfig.VideoHeight < 16)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - Resolution is too small. Width=%d Height=%d"), VideoConfig.VideoWidth, VideoConfig.VideoHeight);
+		return false;
+	}
+
+	if (VideoConfig.VideoWidth > 7680 || VideoConfig.VideoHeight > 4320)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - Resolution is too large. Width=%d Height=%d"), VideoConfig.VideoWidth, VideoConfig.VideoHeight);
+		return false;
+	}
+
+	if (VideoConfig.VideoBitrate <= 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - Bitrate must be > 0. Bitrate=%d"), VideoConfig.VideoBitrate);
+		return false;
+	}
+
+	if (VideoConfig.VideoBitrate < 100000)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - Bitrate looks too low. Bitrate=%d"), VideoConfig.VideoBitrate);
+	}
+
+	if (VideoConfig.VideoBitrate > 100000000)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - Bitrate is too high. Bitrate=%d"), VideoConfig.VideoBitrate);
+		return false;
+	}
+
+	if (VideoConfig.VideoFPS <= 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - FrameRate must be > 0. FrameRate=%d"), VideoConfig.VideoFPS);
+		return false;
+	}
+
+	if (VideoConfig.VideoFPS > 120)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - FrameRate is too high. FrameRate=%d"), VideoConfig.VideoFPS);
+		return false;
+	}
+
+	if (VideoConfig.VideoIntervalSec < 0)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - VideoIntervalSec must be >= 0. VideoIntervalSec=%d"), VideoConfig.VideoIntervalSec);
+		return false;
+	}
+
+	if (VideoConfig.VideoIntervalSec == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - VideoIntervalSec is 0. This may create too many keyframes depending on codec behavior."));
+	}
+
+	if (VideoConfig.VideoIntervalSec > 10)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments - VideoIntervalSec is quite high. This may create very long GOPs depending on codec behavior."));
+		return false;
+	}
+
+	return true;
+}
+
+bool FVdjmRecordEncoderSnapshot::IsValidatePlatformEncoderArguments() const
+{
+	if (TargetPlatform == EVdjmRecordEnvPlatform::EAndroid &&
+		VideoConfig.GraphicBackend == EVdjmRecordGraphicBackend::EUnknown)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FVdjmRecordEncoderSnapshot::IsValidatePlatformEncoderArguments - Android GraphicBackend is unknown. Make sure to set it correctly for optimal performance."));
+		return false;
+	}
+
+	return true;
+}
+
+bool FVdjmRecordEncoderSnapshot::IsValidateEncoderArguments() const
+{
+	return IsValidateCommonEncoderArguments() && IsValidatePlatformEncoderArguments();
+}
+
 void UVdjmRecordEventSession::InitializeSession(AActor* InOwnerActor,EVdjmRecordEventSessionCallbackMask InCallbackMask, float InSessionIntervalSeconds)
 {
 	if (!IsValid(InOwnerActor) || !IsValid(InOwnerActor->GetWorld()))

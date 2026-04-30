@@ -3,7 +3,9 @@
 #include "Blueprint/UserWidget.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/GameplayStatics.h"
+#include "VdjmRecordAppState.h"
 #include "VdjmRecordBridgeActor.h"
+#include "VdjmEvents/VdjmRecordEventFlowRuntime.h"
 #include "VdjmEvents/VdjmRecordEventManager.h"
 #include "VdjmEvents/VdjmRecordEventWidgetBase.h"
 #include "VdjmRecorderCore.h"
@@ -77,6 +79,13 @@ namespace
 		UClass* resolvedExpectedClass = expectedClass != nullptr ? expectedClass : contextObject->GetClass();
 		return worldContextSubsystem->RegisterWeakObjectContext(contextKey, contextObject, resolvedExpectedClass);
 	}
+
+	FString GetEventManifestClassName(const UVdjmRecordEventBase* eventNode)
+	{
+		return eventNode != nullptr && eventNode->GetClass() != nullptr
+			? eventNode->GetClass()->GetPathName()
+			: FString();
+	}
 }
 
 FVdjmRecordEventResult UVdjmRecordEventBase::ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor)
@@ -86,6 +95,11 @@ FVdjmRecordEventResult UVdjmRecordEventBase::ExecuteEvent_Implementation(UVdjmRe
 
 void UVdjmRecordEventBase::ResetRuntimeState_Implementation()
 {
+}
+
+void UVdjmRecordEventBase::CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const
+{
+	manifest.AddEventNode(eventIndex, EventTag, GetEventManifestClassName(this));
 }
 
 FVdjmRecordEventResult UVdjmRecordEventBase::MakeResult(EVdjmRecordEventResultType InResultType, int32 InSelectedIndex, FName InJumpLabel, float InWaitSeconds)
@@ -143,6 +157,11 @@ void UVdjmRecordEventSequenceNode::ResetRuntimeState_Implementation()
 			childEvent->ResetRuntimeState();
 		}
 	}
+}
+
+void UVdjmRecordEventSequenceNode::CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const
+{
+	Super::CollectFlowManifest(manifest, eventIndex);
 }
 
 FVdjmRecordEventResult UVdjmRecordEventJumpToNextNode::ExecuteEvent_Implementation(UVdjmRecordEventManager* EventManager, AVdjmRecordBridgeActor* BridgeActor)
@@ -233,6 +252,11 @@ FVdjmRecordEventResult UVdjmRecordEventSpawnRecordBridgeActorWait::ExecuteEvent_
 	}
 
 	const EVdjmRecordBridgeInitStep CurrentInitStep = TargetBridgeActor->GetCurrentInitStep();
+	if (StartPolicy == EVdjmRecordEventBridgeStartPolicy::EPrepareOnly)
+	{
+		return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
+	}
+
 	if (CanTreatAsInitSuccess(TargetBridgeActor))
 	{
 		return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
@@ -263,6 +287,12 @@ FVdjmRecordEventResult UVdjmRecordEventSpawnRecordBridgeActorWait::ExecuteEvent_
 
 			if (not EventManager->ConsumeFlowSignal(StartSignalTag))
 			{
+				if (ConditionMode != EVdjmRecordEventConditionMode::ERunning &&
+					not EventManager->RequestCurrentFlowConditionForSignal(StartSignalTag, ConditionMode))
+				{
+					return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+				}
+
 				return MakeResult(EVdjmRecordEventResultType::ERunning, INDEX_NONE, NAME_None, 0.0f);
 			}
 
@@ -281,6 +311,12 @@ FVdjmRecordEventResult UVdjmRecordEventSpawnRecordBridgeActorWait::ExecuteEvent_
 		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
 	}
 
+	if (ConditionMode != EVdjmRecordEventConditionMode::ERunning &&
+		not EventManager->RequestCurrentFlowConditionForBridgeInit(ConditionMode))
+	{
+		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+	}
+
 	return MakeResult(EVdjmRecordEventResultType::ERunning, INDEX_NONE, NAME_None, 0.0f);
 }
 
@@ -288,6 +324,250 @@ void UVdjmRecordEventSpawnRecordBridgeActorWait::ResetRuntimeState_Implementatio
 {
 	RuntimeBridgeActor.Reset();
 	bHasIssuedStart = false;
+}
+
+void UVdjmRecordEventSpawnRecordBridgeActorWait::CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const
+{
+	Super::CollectFlowManifest(manifest, eventIndex);
+
+	if (StartPolicy == EVdjmRecordEventBridgeStartPolicy::EWaitForSignal)
+	{
+		manifest.AddSignalWaiter(StartSignalTag, eventIndex, EventTag, GetEventManifestClassName(this), true);
+	}
+}
+
+FVdjmRecordEventResult UVdjmRecordEventStartRecordBridgeActorNode::ExecuteEvent_Implementation(
+	UVdjmRecordEventManager* EventManager,
+	AVdjmRecordBridgeActor* BridgeActor)
+{
+	AVdjmRecordBridgeActor* targetBridgeActor = BridgeActor;
+	if (targetBridgeActor == nullptr && EventManager != nullptr)
+	{
+		targetBridgeActor = EventManager->GetBoundBridge();
+	}
+
+	if (targetBridgeActor == nullptr)
+	{
+		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+	}
+
+	const EVdjmRecordBridgeInitStep currentInitStep = targetBridgeActor->GetCurrentInitStep();
+	if (currentInitStep == EVdjmRecordBridgeInitStep::EComplete)
+	{
+		return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
+	}
+
+	if (currentInitStep != EVdjmRecordBridgeInitStep::EInitializeStart)
+	{
+		return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
+	}
+
+	targetBridgeActor->StartRecordBridgeActor();
+	return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
+}
+
+void UVdjmRecordEventStartRecordBridgeActorNode::CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const
+{
+	Super::CollectFlowManifest(manifest, eventIndex);
+}
+
+FVdjmRecordEventResult UVdjmRecordEventEnsureRecorderControllerNode::ExecuteEvent_Implementation(
+	UVdjmRecordEventManager* EventManager,
+	AVdjmRecordBridgeActor* BridgeActor)
+{
+	LastErrorReason.Reset();
+
+	UObject* worldContextObject = EventManager != nullptr ? Cast<UObject>(EventManager) : Cast<UObject>(BridgeActor);
+	if (worldContextObject == nullptr)
+	{
+		LastErrorReason = TEXT("World context object is not available.");
+		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+	}
+
+	UVdjmRecorderController* recorderController = UVdjmRecorderController::FindOrCreateRecorderController(worldContextObject);
+	if (recorderController == nullptr)
+	{
+		LastErrorReason = TEXT("Recorder controller is not available.");
+		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+	}
+
+	if (bStoreRuntimeSlot && not RuntimeSlotKey.IsNone())
+	{
+		if (EventManager == nullptr || not EventManager->SetRuntimeObjectSlot(RuntimeSlotKey, recorderController))
+		{
+			LastErrorReason = TEXT("Failed to store recorder controller in runtime slot.");
+			return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+		}
+	}
+
+	if (bRegisterContext)
+	{
+		const FName resolvedContextKey = ContextKey.IsNone()
+			? UVdjmRecorderWorldContextSubsystem::GetRecorderControllerContextKey()
+			: ContextKey;
+		if (not RegisterContextObject(EventManager, recorderController, resolvedContextKey, UVdjmRecorderController::StaticClass()))
+		{
+			LastErrorReason = TEXT("Failed to register recorder controller context.");
+			return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+		}
+	}
+
+	return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
+}
+
+void UVdjmRecordEventEnsureRecorderControllerNode::CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const
+{
+	Super::CollectFlowManifest(manifest, eventIndex);
+}
+
+FVdjmRecordEventResult UVdjmRecordEventLoadAppStateNode::ExecuteEvent_Implementation(
+	UVdjmRecordEventManager* EventManager,
+	AVdjmRecordBridgeActor* BridgeActor)
+{
+	LastErrorReason.Reset();
+
+	UObject* worldContextObject = EventManager != nullptr ? Cast<UObject>(EventManager) : Cast<UObject>(BridgeActor);
+	if (worldContextObject == nullptr)
+	{
+		LastErrorReason = TEXT("World context object is not available.");
+		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+	}
+
+	UVdjmRecordAppStateStore* appStateStore = UVdjmRecordAppStateStore::FindOrCreateAppStateStore(worldContextObject);
+	if (appStateStore == nullptr)
+	{
+		LastErrorReason = TEXT("AppState store is not available.");
+		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+	}
+
+	if (not appStateStore->LoadAppState(LastErrorReason, bCreateIfMissing))
+	{
+		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+	}
+
+	if (bRefreshRecordsToc)
+	{
+		UVdjmRecordMetadataStore* metadataStore = UVdjmRecordMetadataStore::FindOrCreateMetadataStore(worldContextObject);
+		if (metadataStore == nullptr)
+		{
+			LastErrorReason = TEXT("Metadata store is not available.");
+			return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+		}
+
+		FString registryErrorReason;
+		if (not metadataStore->RefreshRegistryFromDisk(registryErrorReason))
+		{
+			LastErrorReason = registryErrorReason.IsEmpty()
+				? TEXT("Failed to refresh media registry from disk.")
+				: registryErrorReason;
+			return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+		}
+
+		if (not appStateStore->RefreshRecordsTocFromMetadataStore(metadataStore, LastErrorReason))
+		{
+			return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+		}
+	}
+
+	if (bSaveAfterRefresh)
+	{
+		if (not appStateStore->SaveAppState(LastErrorReason))
+		{
+			return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+		}
+	}
+
+	if (bStoreRuntimeSlot && not RuntimeSlotKey.IsNone())
+	{
+		if (EventManager == nullptr || not EventManager->SetRuntimeObjectSlot(RuntimeSlotKey, appStateStore))
+		{
+			LastErrorReason = TEXT("Failed to store AppState store in runtime slot.");
+			return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+		}
+	}
+
+	if (bRegisterContext)
+	{
+		const FName resolvedContextKey = ContextKey.IsNone()
+			? UVdjmRecorderWorldContextSubsystem::GetAppStateStoreContextKey()
+			: ContextKey;
+		if (not RegisterContextObject(EventManager, appStateStore, resolvedContextKey, UVdjmRecordAppStateStore::StaticClass()))
+		{
+			LastErrorReason = TEXT("Failed to register AppState store context.");
+			return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+		}
+	}
+
+	return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
+}
+
+void UVdjmRecordEventLoadAppStateNode::CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const
+{
+	Super::CollectFlowManifest(manifest, eventIndex);
+}
+
+FVdjmRecordEventResult UVdjmRecordEventSubmitRecorderOptionRequestNode::ExecuteEvent_Implementation(
+	UVdjmRecordEventManager* EventManager,
+	AVdjmRecordBridgeActor* BridgeActor)
+{
+	LastErrorReason.Reset();
+
+	UObject* worldContextObject = EventManager != nullptr ? Cast<UObject>(EventManager) : Cast<UObject>(BridgeActor);
+	UVdjmRecorderController* recorderController = UVdjmRecorderController::FindOrCreateRecorderController(worldContextObject);
+	if (recorderController == nullptr)
+	{
+		LastErrorReason = TEXT("Recorder controller is not available.");
+		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+	}
+
+	if (not bHasSubmitted)
+	{
+		if (not recorderController->SubmitOptionRequest(OptionRequest, LastErrorReason))
+		{
+			return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+		}
+
+		bHasSubmitted = true;
+	}
+
+	if (bProcessPendingAfterSubmit)
+	{
+		FString processErrorReason;
+		const bool bProcessResult = recorderController->ProcessPendingOptionRequests(processErrorReason);
+		if (not bProcessResult && not recorderController->HasPendingOptionRequest())
+		{
+			LastErrorReason = processErrorReason.IsEmpty()
+				? TEXT("Failed to process recorder option request.")
+				: processErrorReason;
+			bHasSubmitted = false;
+			return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+		}
+
+		if (not bProcessResult && not processErrorReason.IsEmpty())
+		{
+			LastErrorReason = processErrorReason;
+		}
+	}
+
+	if (recorderController->HasPendingOptionRequest())
+	{
+		if (bSucceedIfQueued)
+		{
+			bHasSubmitted = false;
+			return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
+		}
+
+		return MakeResult(EVdjmRecordEventResultType::ERunning, INDEX_NONE, NAME_None, 0.0f);
+	}
+
+	bHasSubmitted = false;
+	return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
+}
+
+void UVdjmRecordEventSubmitRecorderOptionRequestNode::ResetRuntimeState_Implementation()
+{
+	bHasSubmitted = false;
+	LastErrorReason.Reset();
 }
 
 FVdjmRecordEventResult UVdjmRecordEventCreateObjectNode::ExecuteEvent_Implementation(
@@ -578,6 +858,12 @@ void UVdjmRecordEventCreateWidgetNode::ResetRuntimeState_Implementation()
 	}
 }
 
+void UVdjmRecordEventCreateWidgetNode::CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const
+{
+	Super::CollectFlowManifest(manifest, eventIndex);
+	manifest.AddSignalEmitter(EmitSignalTag, eventIndex, EventTag, GetEventManifestClassName(this));
+}
+
 FVdjmRecordEventResult UVdjmRecordEventRemoveWidgetNode::ExecuteEvent_Implementation(
 	UVdjmRecordEventManager* EventManager,
 	AVdjmRecordBridgeActor* BridgeActor)
@@ -630,10 +916,22 @@ FVdjmRecordEventResult UVdjmRecordEventWaitForSignalNode::ExecuteEvent_Implement
 
 	if (not EventManager->ConsumeFlowSignal(SignalTag))
 	{
+		if (ConditionMode != EVdjmRecordEventConditionMode::ERunning &&
+			not EventManager->RequestCurrentFlowConditionForSignal(SignalTag, ConditionMode))
+		{
+			return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
+		}
+
 		return MakeResult(EVdjmRecordEventResultType::ERunning, INDEX_NONE, NAME_None, 0.0f);
 	}
 
 	return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
+}
+
+void UVdjmRecordEventWaitForSignalNode::CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const
+{
+	Super::CollectFlowManifest(manifest, eventIndex);
+	manifest.AddSignalWaiter(SignalTag, eventIndex, EventTag, GetEventManifestClassName(this));
 }
 
 FVdjmRecordEventResult UVdjmRecordEventDelayNode::ExecuteEvent_Implementation(
@@ -693,12 +991,18 @@ FVdjmRecordEventResult UVdjmRecordEventEmitSignalNode::ExecuteEvent_Implementati
 		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
 	}
 
-	if (not EventManager->EmitFlowSignalByScope(SignalTag, SignalScope))
+	if (not EventManager->EmitFlowSignalByRoute(SignalTag, SignalRoute))
 	{
 		return MakeResult(EVdjmRecordEventResultType::EFailure, INDEX_NONE, NAME_None, 0.0f);
 	}
 
 	return MakeResult(EVdjmRecordEventResultType::ESuccess, INDEX_NONE, NAME_None, 0.0f);
+}
+
+void UVdjmRecordEventEmitSignalNode::CollectFlowManifest(FVdjmRecordEventFlowManifest& manifest, int32 eventIndex) const
+{
+	Super::CollectFlowManifest(manifest, eventIndex);
+	manifest.AddSignalEmitter(SignalTag, eventIndex, EventTag, GetEventManifestClassName(this));
 }
 
 FVdjmRecordEventResult UVdjmRecordEventCreateObjectAndRegisterContextNode::ExecuteEvent_Implementation(

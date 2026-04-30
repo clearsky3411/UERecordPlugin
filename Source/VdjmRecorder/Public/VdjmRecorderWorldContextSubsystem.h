@@ -126,11 +126,21 @@ public:
 	static FName GetEventFlowEntryPointContextKey();
 
 	UFUNCTION(BlueprintPure, Category = "Recorder|WorldContext")
+	static FName GetMetadataStoreContextKey();
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|WorldContext")
+	static FName GetMediaPreviewManagerContextKey();
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|WorldContext")
+	static FName GetAppStateStoreContextKey();
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|WorldContext")
 	UVdjmRecorderWorldContextEntry* FindContextEntry(FName InContextKey) const;
 
 	UVdjmRecorderWorldContextEntry* GetOrCreateContextEntry(FName InContextKey, TSubclassOf<UVdjmRecorderWorldContextEntry> InEntryClass);
 
 	bool RegisterWeakObjectContext(FName InContextKey, UObject* InContextObject, UClass* InExpectedClass = nullptr);
+	bool RegisterStrongObjectContext(FName InContextKey, UObject* InContextObject, UClass* InExpectedClass = nullptr);
 	bool RegisterBridgeContext(AVdjmRecordBridgeActor* InBridgeActor);
 
 	UFUNCTION(BlueprintCallable, Category = "Recorder|WorldContext")
@@ -161,4 +171,7 @@ public:
 private:
 	UPROPERTY(Transient)
 	TMap<FName, TObjectPtr<UVdjmRecorderWorldContextEntry>> ContextEntries;
+
+	UPROPERTY(Transient)
+	TMap<FName, TObjectPtr<UObject>> StrongContextObjects;
 };

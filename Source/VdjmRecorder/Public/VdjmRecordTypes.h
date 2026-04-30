@@ -74,15 +74,55 @@ enum class EVdjmRecordEventBridgeStartPolicy : uint8
 {
 	EStartImmediately,
 	EWaitForSignal,
+	EPrepareOnly,
 };
 
 UENUM(BlueprintType)
-enum class EVdjmRecordEventSignalScope : uint8
+enum class EVdjmRecordEventConditionMode : uint8
 {
-	ECurrentSession UMETA(DisplayName = "Current Session"),
-	EMainSession UMETA(DisplayName = "Main Session"),
-	EAllActiveSessions UMETA(DisplayName = "All Active Sessions"),
-	EGlobal UMETA(DisplayName = "Global")
+	ERunning UMETA(DisplayName="Running Tick", ToolTip="이벤트가 ERunning을 반환하고 매 tick 다시 실행되며 직접 조건을 검사합니다."),
+	EPassive UMETA(DisplayName="Passive", ToolTip="flow를 멈추고 외부 signal/delegate가 깨울 때까지 기다립니다."),
+	EConditional UMETA(DisplayName="Conditional", ToolTip="flow를 멈추되 manager가 조건 감시를 유지하고 조건 만족 시 다시 진행합니다."),
+};
+
+USTRUCT(BlueprintType)
+struct VDJMRECORDER_API FVdjmRecordEventSignalRoute
+{
+	GENERATED_BODY()
+
+public:
+	static constexpr int32 CurrentSession = 0;
+	static constexpr int32 MainSession = 10;
+	static constexpr int32 AllActiveSessions = 20;
+	static constexpr int32 Global = 30;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|EventFlow")
+	int32 Value = CurrentSession;
+
+	bool IsCurrentSession() const
+	{
+		return Value == CurrentSession;
+	}
+
+	bool IsMainSession() const
+	{
+		return Value == MainSession;
+	}
+
+	bool IsAllActiveSessions() const
+	{
+		return Value == AllActiveSessions;
+	}
+
+	bool IsGlobal() const
+	{
+		return Value == Global;
+	}
+
+	operator int32() const
+	{
+		return Value;
+	}
 };
 
 UENUM(BlueprintType)
@@ -163,6 +203,16 @@ enum class EVdjmResourceStatus : uint8
 	ETerminated = 1<<4	UMETA(ToolTip = "Terminated / Stopped"),
 	EError		= 1<<5	UMETA(ToolTip = "Error"),
 	EMax		= 1<<6	UMETA(Hidden)
+};
+
+UENUM(BlueprintType)
+enum class EVdjmRecordMediaPublishStatus : uint8
+{
+	ENotStarted UMETA(DisplayName = "Not Started"),
+	EPublishing UMETA(DisplayName = "Publishing"),
+	EPublished UMETA(DisplayName = "Published"),
+	EFailed UMETA(DisplayName = "Failed"),
+	ESkippedUnsupportedPlatform UMETA(DisplayName = "Skipped Unsupported Platform")
 };
 
 #define VDJM_STATUS_RES_CHANGE(prevStatus,currentStatus) (int32(prevStatus) << 8 | int32(currentStatus))
@@ -401,6 +451,286 @@ namespace VdjmRecordUtils
 	
 	namespace FilePaths
 	{
+		inline bool LooksLikeWindowsDriveAbsoluteAt(const FString& InPath, int32 InIndex)
+		{
+			return InPath.IsValidIndex(InIndex) &&
+				InPath.IsValidIndex(InIndex + 2) &&
+				FChar::IsAlpha(InPath[InIndex]) &&
+				InPath[InIndex + 1] == TEXT(':') &&
+				(InPath[InIndex + 2] == TEXT('/') || InPath[InIndex + 2] == TEXT('\\'));
+		}
+
+		inline void StripEmbeddedWindowsAbsolutePathInline(FString& InOutPath)
+		{
+			FPaths::NormalizeFilename(InOutPath);
+
+			for (int32 index = 1; index + 2 < InOutPath.Len(); ++index)
+			{
+				if ((InOutPath[index - 1] == TEXT('/') || InOutPath[index - 1] == TEXT('\\')) &&
+					LooksLikeWindowsDriveAbsoluteAt(InOutPath, index))
+				{
+					InOutPath.RightChopInline(index, EAllowShrinking::No);
+					FPaths::NormalizeFilename(InOutPath);
+					index = 0;
+				}
+			}
+		}
+
+		inline FString CollapseRepeatedBaseDirectory(const FString& InPath, const FString& InBaseDir)
+		{
+			FString resultPath = InPath;
+			FString baseDir = InBaseDir;
+			FPaths::NormalizeFilename(resultPath);
+			FPaths::NormalizeFilename(baseDir);
+
+			while (baseDir.EndsWith(TEXT("/")))
+			{
+				baseDir.LeftChopInline(1, EAllowShrinking::No);
+			}
+
+			if (resultPath.IsEmpty() || baseDir.IsEmpty())
+			{
+				return resultPath;
+			}
+
+			if (baseDir.StartsWith(TEXT("/")))
+			{
+				const FString baseDirNoLeadingSlash = baseDir.RightChop(1);
+				if (not baseDirNoLeadingSlash.IsEmpty() &&
+					resultPath.StartsWith(baseDirNoLeadingSlash, ESearchCase::IgnoreCase))
+				{
+					resultPath = TEXT("/") + resultPath;
+				}
+			}
+
+			for (int32 guardCount = 0; guardCount < 8; ++guardCount)
+			{
+				FString baseDirNoLeadingSlash = baseDir;
+				if (baseDirNoLeadingSlash.StartsWith(TEXT("/")))
+				{
+					baseDirNoLeadingSlash.RightChopInline(1, EAllowShrinking::No);
+				}
+				while (baseDirNoLeadingSlash.EndsWith(TEXT("/")))
+				{
+					baseDirNoLeadingSlash.LeftChopInline(1, EAllowShrinking::No);
+				}
+
+				const FString duplicatedPrefix = baseDir + TEXT("/") + baseDir;
+				if (resultPath.StartsWith(duplicatedPrefix, ESearchCase::IgnoreCase))
+				{
+					resultPath.RightChopInline(baseDir.Len() + 1, EAllowShrinking::No);
+					continue;
+				}
+
+				if (not baseDirNoLeadingSlash.IsEmpty())
+				{
+					const FString duplicatedPrefixWithoutLeadingSlash = baseDir + TEXT("/") + baseDirNoLeadingSlash;
+					if (resultPath.StartsWith(duplicatedPrefixWithoutLeadingSlash, ESearchCase::IgnoreCase))
+					{
+						const FString suffix = resultPath.RightChop(duplicatedPrefixWithoutLeadingSlash.Len());
+						resultPath = baseDir + suffix;
+						continue;
+					}
+				}
+
+				if (resultPath.StartsWith(baseDir + TEXT("/"), ESearchCase::IgnoreCase))
+				{
+					const int32 secondBaseIndex = resultPath.Find(
+						baseDir,
+						ESearchCase::IgnoreCase,
+						ESearchDir::FromStart,
+						baseDir.Len() + 1);
+
+					if (secondBaseIndex != INDEX_NONE &&
+						resultPath.IsValidIndex(secondBaseIndex - 1) &&
+						resultPath[secondBaseIndex - 1] == TEXT('/'))
+					{
+						resultPath.RightChopInline(secondBaseIndex, EAllowShrinking::No);
+						continue;
+					}
+				}
+
+				break;
+			}
+
+			return resultPath;
+		}
+
+		inline FString RemoveTrailingNumberSuffix(const FString& fileBaseName)
+		{
+			FString baseName = fileBaseName;
+
+			for (;;)
+			{
+				int32 suffixSeparatorIndex = INDEX_NONE;
+				if (not baseName.FindLastChar(TEXT('_'), suffixSeparatorIndex))
+				{
+					break;
+				}
+
+				const FString suffixText = baseName.Mid(suffixSeparatorIndex + 1);
+				if (suffixText.IsEmpty())
+				{
+					break;
+				}
+
+				bool bSuffixIsNumber = true;
+				for (int32 characterIndex = 0; characterIndex < suffixText.Len(); ++characterIndex)
+				{
+					if (not FChar::IsDigit(suffixText[characterIndex]))
+					{
+						bSuffixIsNumber = false;
+						break;
+					}
+				}
+
+				if (not bSuffixIsNumber)
+				{
+					break;
+				}
+
+				baseName.LeftInline(suffixSeparatorIndex, EAllowShrinking::No);
+			}
+
+			return baseName;
+		}
+
+		inline FString BuildNumberedSiblingPath(
+			const FString& safePath,
+			int32 index)
+		{
+			const FString safeDir = FPaths::GetPath(safePath);
+			const FString baseName = RemoveTrailingNumberSuffix(FPaths::GetBaseFilename(safePath, false));
+			const FString extension = FPaths::GetExtension(safePath, true);
+			return FPaths::Combine(
+				safeDir,
+				FString::Printf(TEXT("%s_%d%s"), *baseName, index, *extension));
+		}
+
+		inline FString BuildTimestampedSiblingPath(
+			const FString& safePath,
+			int32 collisionIndex = INDEX_NONE)
+		{
+			const FString safeDir = FPaths::GetPath(safePath);
+			const FString baseName = RemoveTrailingNumberSuffix(FPaths::GetBaseFilename(safePath, false));
+			const FString extension = FPaths::GetExtension(safePath, true);
+			const FDateTime now = FDateTime::Now();
+			const int64 tickTail = now.GetTicks() % 1000000;
+			FString timeSuffix = FString::Printf(
+				TEXT("%04d%02d%02d_%02d%02d%02d_%06lld"),
+				now.GetYear(),
+				now.GetMonth(),
+				now.GetDay(),
+				now.GetHour(),
+				now.GetMinute(),
+				now.GetSecond(),
+				tickTail);
+
+			if (collisionIndex > 0)
+			{
+				timeSuffix += FString::Printf(TEXT("_%d"), collisionIndex);
+			}
+
+			return FPaths::Combine(
+				safeDir,
+				FString::Printf(TEXT("%s_%s%s"), *baseName, *timeSuffix, *extension));
+		}
+
+		inline bool DoesOutputFileExist(const FString& safePath)
+		{
+			return IFileManager::Get().FileSize(*safePath) >= 0 ||
+				IFileManager::Get().FileExists(*safePath);
+		}
+
+		inline bool TryGetNumberedSiblingIndex(
+			const FString& fileBaseName,
+			const FString& rootBaseName,
+			int32& outIndex)
+		{
+			outIndex = INDEX_NONE;
+
+			if (fileBaseName.Equals(rootBaseName, ESearchCase::IgnoreCase))
+			{
+				outIndex = 0;
+				return true;
+			}
+
+			const FString numberedPrefix = rootBaseName + TEXT("_");
+			if (not fileBaseName.StartsWith(numberedPrefix, ESearchCase::IgnoreCase))
+			{
+				return false;
+			}
+
+			const FString suffixText = fileBaseName.Mid(numberedPrefix.Len());
+			if (suffixText.IsEmpty())
+			{
+				return false;
+			}
+
+			for (int32 characterIndex = 0; characterIndex < suffixText.Len(); ++characterIndex)
+			{
+				if (not FChar::IsDigit(suffixText[characterIndex]))
+				{
+					return false;
+				}
+			}
+
+			outIndex = FCString::Atoi(*suffixText);
+			return outIndex >= 0;
+		}
+
+		inline FString BuildNextAvailableSiblingPath(const FString& safePath)
+		{
+			const FString safeDir = FPaths::GetPath(safePath);
+			const FString rootBaseName = RemoveTrailingNumberSuffix(FPaths::GetBaseFilename(safePath, false));
+			const FString extension = FPaths::GetExtension(safePath, true);
+
+			if (safeDir.IsEmpty() || rootBaseName.IsEmpty())
+			{
+				return safePath;
+			}
+
+			int32 maxExistingIndex = INDEX_NONE;
+
+			const FString searchPattern = FPaths::Combine(safeDir, rootBaseName + TEXT("*") + extension);
+			TArray<FString> foundFileNames;
+			IFileManager::Get().FindFiles(foundFileNames, *searchPattern, true, false);
+
+			for (const FString& foundFileName : foundFileNames)
+			{
+				const FString foundBaseName = FPaths::GetBaseFilename(foundFileName, false);
+				int32 foundIndex = INDEX_NONE;
+				if (TryGetNumberedSiblingIndex(foundBaseName, rootBaseName, foundIndex))
+				{
+					maxExistingIndex = FMath::Max(maxExistingIndex, foundIndex);
+				}
+			}
+
+			const FString rootPath = FPaths::Combine(safeDir, rootBaseName + extension);
+			if (DoesOutputFileExist(rootPath))
+			{
+				maxExistingIndex = FMath::Max(maxExistingIndex, 0);
+			}
+
+			if (maxExistingIndex == INDEX_NONE)
+			{
+				return safePath;
+			}
+
+			return BuildNumberedSiblingPath(safePath, maxExistingIndex + 1);
+		}
+
+		inline FString NormalizeCandidateOutputPath(const FString& InPath, const FString& InBaseDir)
+		{
+			FString resultPath = InPath;
+			resultPath.TrimStartAndEndInline();
+			FPaths::NormalizeFilename(resultPath);
+			StripEmbeddedWindowsAbsolutePathInline(resultPath);
+			resultPath = CollapseRepeatedBaseDirectory(resultPath, InBaseDir);
+			StripEmbeddedWindowsAbsolutePathInline(resultPath);
+			return resultPath;
+		}
+
 		inline FString GetPlatformRecordBaseDir(EVdjmRecordEnvPlatform InPlatform)
 		{
 			switch (InPlatform)
@@ -450,6 +780,177 @@ enum class EVdjmRecordBridgeInitStep : uint8
 	ECreatePipelines,
 	EFinalizeInitialization,
 	EComplete,
+};
+
+enum class EVdjmRecordGraphicBackend : uint8
+{
+	EUnknown,
+	EOpenGL,
+	EVulkan
+};
+
+struct VDJMRECORDER_API FVdjmRecordEncoderVideoSnapshot
+{
+	int32 VideoWidth = 0;
+	int32 VideoHeight = 0;
+	int32 VideoBitrate = 0;
+	int32 VideoFPS = 0;
+	int32 VideoIntervalSec = 0;
+	FString MimeType = TEXT("video/avc");
+	FString OutputFilePath = TEXT("");
+	EVdjmRecordGraphicBackend GraphicBackend = EVdjmRecordGraphicBackend::EUnknown;
+
+	FVdjmRecordEncoderVideoSnapshot() = default;
+	FVdjmRecordEncoderVideoSnapshot(int32 width, int32 height, int32 bitrate, int32 fps, const FString& outputFilePath)
+		: VideoWidth(width)
+		, VideoHeight(height)
+		, VideoBitrate(bitrate)
+		, VideoFPS(fps)
+		, VideoIntervalSec(1)
+		, MimeType(TEXT("video/avc"))
+		, OutputFilePath(outputFilePath)
+		, GraphicBackend(EVdjmRecordGraphicBackend::EUnknown)
+	{}
+	FVdjmRecordEncoderVideoSnapshot(const FVdjmRecordEncoderVideoSnapshot& other) = default;
+	FVdjmRecordEncoderVideoSnapshot(FVdjmRecordEncoderVideoSnapshot&& other) noexcept = default;
+	FVdjmRecordEncoderVideoSnapshot& operator=(const FVdjmRecordEncoderVideoSnapshot& other) = default;
+	FVdjmRecordEncoderVideoSnapshot& operator=(FVdjmRecordEncoderVideoSnapshot&& other) noexcept = default;
+
+	void Clear()
+	{
+		VideoWidth = 0;
+		VideoHeight = 0;
+		VideoBitrate = 0;
+		VideoFPS = 0;
+		VideoIntervalSec = 1;
+		MimeType = TEXT("video/avc");
+		OutputFilePath.Empty();
+		GraphicBackend = EVdjmRecordGraphicBackend::EUnknown;
+	}
+
+	bool IsValidateVideoEncoderArguments() const
+	{
+		return VideoWidth > 0
+			&& VideoHeight > 0
+			&& VideoBitrate > 0
+			&& VideoFPS > 0
+			&& not OutputFilePath.IsEmpty()
+			&& not MimeType.IsEmpty()
+			&& VideoIntervalSec >= 0;
+	}
+
+	FString ToString() const
+	{
+		return FString::Printf(
+			TEXT("OutputFilePath: %s, MimeType: %s, Resolution: %dx%d, Bitrate: %d, FPS: %d, I-Frame Interval: %d, GraphicBackend: %d"),
+			*OutputFilePath,
+			*MimeType,
+			VideoWidth,
+			VideoHeight,
+			VideoBitrate,
+			VideoFPS,
+			VideoIntervalSec,
+			static_cast<int32>(GraphicBackend));
+	}
+};
+
+struct VDJMRECORDER_API FVdjmRecordEncoderAudioSnapshot
+{
+	bool bEnableAudio = false;
+	int32 AudioSampleRate = 48000;
+	int32 AudioChannelCount = 2;
+	int32 AudioBitrate = 128000;
+	int32 AudioAacProfile = 2;
+	FString AudioMimeType = TEXT("audio/mp4a-latm");
+	FString AudioSourceId;
+	bool bAudioRequired = false;
+	int32 AudioDriftToleranceMs = 20;
+	int32 AudioFrameDurationMs = 20;
+
+	FVdjmRecordEncoderAudioSnapshot() = default;
+	FVdjmRecordEncoderAudioSnapshot(const FVdjmRecordEncoderAudioSnapshot& other) = default;
+	FVdjmRecordEncoderAudioSnapshot(FVdjmRecordEncoderAudioSnapshot&& other) noexcept = default;
+	FVdjmRecordEncoderAudioSnapshot& operator=(const FVdjmRecordEncoderAudioSnapshot& other) = default;
+	FVdjmRecordEncoderAudioSnapshot& operator=(FVdjmRecordEncoderAudioSnapshot&& other) noexcept = default;
+
+	void Clear()
+	{
+		bEnableAudio = false;
+		AudioSampleRate = 48000;
+		AudioChannelCount = 2;
+		AudioBitrate = 128000;
+		AudioAacProfile = 2;
+		AudioMimeType = TEXT("audio/mp4a-latm");
+		AudioSourceId.Empty();
+		bAudioRequired = false;
+		AudioDriftToleranceMs = 20;
+		AudioFrameDurationMs = 20;
+	}
+
+	bool IsValidateAudioEncoderArguments() const
+	{
+		return not bEnableAudio
+			|| (AudioSampleRate > 0
+				&& AudioChannelCount > 0
+				&& AudioBitrate > 0
+				&& not AudioMimeType.IsEmpty()
+				&& AudioAacProfile > 0
+				&& AudioDriftToleranceMs >= 0
+				&& AudioFrameDurationMs > 0);
+	}
+
+	FString ToString() const
+	{
+		return FString::Printf(
+			TEXT("EnableAudio: %s, SampleRate: %d, ChannelCount: %d, Bitrate: %d, AACProfile: %d, MimeType: %s, AudioSourceId: %s, AudioRequired: %s, DriftToleranceMs: %d, FrameDurationMs: %d"),
+			bEnableAudio ? TEXT("True") : TEXT("False"),
+			AudioSampleRate,
+			AudioChannelCount,
+			AudioBitrate,
+			AudioAacProfile,
+			*AudioMimeType,
+			*AudioSourceId,
+			bAudioRequired ? TEXT("True") : TEXT("False"),
+			AudioDriftToleranceMs,
+			AudioFrameDurationMs);
+	}
+};
+
+struct VDJMRECORDER_API FVdjmRecordEncoderSnapshot
+{
+	EVdjmRecordEnvPlatform TargetPlatform = EVdjmRecordEnvPlatform::EDefault;
+	FVdjmRecordEncoderVideoSnapshot VideoConfig;
+	FVdjmRecordEncoderAudioSnapshot AudioConfig;
+
+	FVdjmRecordEncoderSnapshot() = default;
+	FVdjmRecordEncoderSnapshot(FVdjmRecordEncoderVideoSnapshot videoConfig, FVdjmRecordEncoderAudioSnapshot audioConfig)
+		: VideoConfig(videoConfig)
+		, AudioConfig(audioConfig)
+	{}
+	FVdjmRecordEncoderSnapshot(const FVdjmRecordEncoderSnapshot& other) = default;
+	FVdjmRecordEncoderSnapshot(FVdjmRecordEncoderSnapshot&& other) noexcept = default;
+	FVdjmRecordEncoderSnapshot& operator=(const FVdjmRecordEncoderSnapshot& other) = default;
+	FVdjmRecordEncoderSnapshot& operator=(FVdjmRecordEncoderSnapshot&& other) noexcept = default;
+
+	bool IsValidateCommonEncoderArguments() const;
+	bool IsValidatePlatformEncoderArguments() const;
+	bool IsValidateEncoderArguments() const;
+
+	void Clear()
+	{
+		TargetPlatform = EVdjmRecordEnvPlatform::EDefault;
+		VideoConfig.Clear();
+		AudioConfig.Clear();
+	}
+
+	FString ToString() const
+	{
+		return FString::Printf(
+			TEXT("Encoder Configure - Platform: [%s], Video: [%s], Audio: [%s]"),
+			*StaticEnum<EVdjmRecordEnvPlatform>()->GetValueAsString(TargetPlatform),
+			*VideoConfig.ToString(),
+			*AudioConfig.ToString());
+	}
 };
 
 
@@ -1036,6 +1537,7 @@ namespace VdjmRecordUtils
 				FString candiPath = inRequestedPath;
 				candiPath.TrimStartAndEndInline();
 				FPaths::NormalizeFilename(candiPath);
+				candiPath = FilePaths::NormalizeCandidateOutputPath(candiPath, BaseDir);
 
 				// Android에서 '/storage/...' 대신 'storage/...' 형태(선행 슬래시 누락)가
 				// 들어오거나, BaseDir가 중첩되어 '/.../files/storage/.../files/..' 형태가 되면
@@ -1089,10 +1591,13 @@ namespace VdjmRecordUtils
 						candiPath = FPaths::Combine(BaseDir, candiPath);
 					}
 
+					candiPath = FilePaths::NormalizeCandidateOutputPath(candiPath, BaseDir);
 					const FString Dir = FPaths::GetPath(candiPath);
 					const FString BaseName = FPaths::GetBaseFilename(candiPath, false);
 					candiPath = FPaths::Combine(Dir, BaseName + TEXT(".mp4"));
 				}
+
+				candiPath = FilePaths::NormalizeCandidateOutputPath(candiPath, BaseDir);
 
 				FString safePath;
 				if (!Validations::DbcValidateOutputFilePath(candiPath, safePath, debugOwner))
@@ -1100,25 +1605,59 @@ namespace VdjmRecordUtils
 					return FString();
 				}
 
-				if (!bOverwriteExists && IFileManager::Get().FileExists(*safePath))
+				if (!bOverwriteExists)
 				{
-					const FString safeDir = FPaths::GetPath(safePath);
-					const FString baseName = FPaths::GetBaseFilename(safePath, false);
-
-					const FString UniquePath = FPaths::Combine(
-						safeDir,
-						FString::Printf(TEXT("%s_%lld.mp4"), *baseName, FDateTime::Now().GetTicks()));
-
-					FString uniqueSafePath;
+					const bool bUseTimestampedOutputName = inPlatform == EVdjmRecordEnvPlatform::EAndroid;
+					const FString availablePath = bUseTimestampedOutputName
+						? FilePaths::BuildTimestampedSiblingPath(safePath)
+						: FilePaths::BuildNextAvailableSiblingPath(safePath);
+					FString availableSafePath;
 					if (!Validations::DbcValidateOutputFilePath(
-						UniquePath,
-						uniqueSafePath,
+						availablePath,
+						availableSafePath,
 						debugOwner))
 					{
 						return FString();
 					}
 
-					safePath = MoveTemp(uniqueSafePath);
+					if (FilePaths::DoesOutputFileExist(availableSafePath))
+					{
+						constexpr int32 MAX_NUMBERED_PATH_ATTEMPTS = 999;
+						bool bFoundAvailablePath = false;
+						for (int32 candidateIndex = 1; candidateIndex <= MAX_NUMBERED_PATH_ATTEMPTS; ++candidateIndex)
+						{
+							const FString fallbackPath = bUseTimestampedOutputName
+								? FilePaths::BuildTimestampedSiblingPath(safePath, candidateIndex)
+								: FilePaths::BuildNumberedSiblingPath(safePath, candidateIndex);
+							FString fallbackSafePath;
+							if (!Validations::DbcValidateOutputFilePath(
+								fallbackPath,
+								fallbackSafePath,
+								debugOwner))
+							{
+								return FString();
+							}
+
+							if (!FilePaths::DoesOutputFileExist(fallbackSafePath))
+							{
+								availableSafePath = MoveTemp(fallbackSafePath);
+								bFoundAvailablePath = true;
+								break;
+							}
+						}
+
+						if (not bFoundAvailablePath)
+						{
+							UE_LOG(LogVdjmRecorderCore, Error,
+								TEXT("%s - Failed to find available output path. BasePath=%s MaxAttempts=%d"),
+								debugOwner,
+								*safePath,
+								MAX_NUMBERED_PATH_ATTEMPTS);
+							return FString();
+						}
+					}
+
+					safePath = MoveTemp(availableSafePath);
 				}
 				return safePath;
 			}

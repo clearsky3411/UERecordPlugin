@@ -45,6 +45,70 @@ namespace
 			return MakeFlowStepResult(defaultDisposition, flowControlAction, waitSeconds, bDidExecuteEvent);
 		}
 	}
+
+	const TCHAR* GetFlowControlActionName(EVdjmRecordFlowControlAction flowControlAction)
+	{
+		switch (flowControlAction)
+		{
+		case EVdjmRecordFlowControlAction::EResume:
+			return TEXT("Resume");
+		case EVdjmRecordFlowControlAction::EPause:
+			return TEXT("Pause");
+		case EVdjmRecordFlowControlAction::EStop:
+			return TEXT("Stop");
+		case EVdjmRecordFlowControlAction::EAbort:
+			return TEXT("Abort");
+		case EVdjmRecordFlowControlAction::EFail:
+			return TEXT("Fail");
+		case EVdjmRecordFlowControlAction::ENone:
+		default:
+			return TEXT("None");
+		}
+	}
+
+	FString GetBoolString(bool bValue)
+	{
+		return bValue ? TEXT("true") : TEXT("false");
+	}
+
+	void AppendSignalMap(FString& debugString, const TCHAR* label, const TMap<FName, int32>& signalMap)
+	{
+		debugString += FString::Printf(TEXT("%s="), label);
+		if (signalMap.IsEmpty())
+		{
+			debugString += TEXT("None\n");
+			return;
+		}
+
+		bool bIsFirst = true;
+		for (const TPair<FName, int32>& pair : signalMap)
+		{
+			if (not bIsFirst)
+			{
+				debugString += TEXT(", ");
+			}
+
+			debugString += FString::Printf(TEXT("%s:%d"), *pair.Key.ToString(), pair.Value);
+			bIsFirst = false;
+		}
+		debugString += TEXT("\n");
+	}
+
+	FString GetSessionStateName(EVdjmRecorderSessionState sessionState)
+	{
+		const UEnum* enumObject = StaticEnum<EVdjmRecorderSessionState>();
+		return enumObject != nullptr
+			? enumObject->GetNameStringByValue(static_cast<int64>(sessionState))
+			: FString::FromInt(static_cast<int32>(sessionState));
+	}
+
+	FString GetConditionModeName(EVdjmRecordEventConditionMode conditionMode)
+	{
+		const UEnum* enumObject = StaticEnum<EVdjmRecordEventConditionMode>();
+		return enumObject != nullptr
+			? enumObject->GetNameStringByValue(static_cast<int64>(conditionMode))
+			: FString::FromInt(static_cast<int32>(conditionMode));
+	}
 }
 
 UVdjmRecordEventManager* UVdjmRecordEventManager::CreateEventManager(UObject* WorldContextObject)
@@ -374,6 +438,130 @@ bool UVdjmRecordEventManager::IsEventFlowPaused() const
 	return IsEventFlowRunning() && rootFlowState != nullptr && rootFlowState->bPaused;
 }
 
+FString UVdjmRecordEventManager::GetEventFlowDebugString() const
+{
+	FString debugString;
+
+	const FString worldName = CachedWorld.IsValid() ? CachedWorld->GetPathName() : TEXT("None");
+	const FString bridgeName = WeakBridgeActor.IsValid() ? WeakBridgeActor->GetPathName() : TEXT("None");
+	debugString += FString::Printf(TEXT("EventManager=%s\n"), *GetPathName());
+	debugString += FString::Printf(TEXT("World=%s\n"), *worldName);
+	debugString += FString::Printf(TEXT("Bridge=%s\n"), *bridgeName);
+	debugString += FString::Printf(
+		TEXT("SessionState=%s LastError=%s\n"),
+		*GetSessionStateName(CurrentSessionState),
+		LastSessionError.IsEmpty() ? TEXT("None") : *LastSessionError);
+	debugString += FString::Printf(TEXT("MainSession=%lld FlowSessionCount=%d\n"), MainSessionHandle.Value, FlowSessions.Num());
+
+	debugString += TEXT("ActiveSessionStack=");
+	if (ActiveSessionStack.IsEmpty())
+	{
+		debugString += TEXT("None\n");
+	}
+	else
+	{
+		for (int32 index = 0; index < ActiveSessionStack.Num(); ++index)
+		{
+			if (index > 0)
+			{
+				debugString += TEXT(", ");
+			}
+			debugString += FString::Printf(TEXT("%lld"), ActiveSessionStack[index].Value);
+		}
+		debugString += TEXT("\n");
+	}
+
+	AppendSignalMap(debugString, TEXT("GlobalPendingSignals"), GlobalPendingFlowSignals);
+
+	for (const TPair<FVdjmRecordFlowSessionHandle, FVdjmRecordFlowSession>& sessionPair : FlowSessions)
+	{
+		const FVdjmRecordFlowSession& flowSession = sessionPair.Value;
+		const FVdjmRecordFlowExecutionState* rootFlowState = flowSession.FlowExecutionStates.Find(flowSession.RootFlowHandle);
+		const int32 rootCurrentIndex = rootFlowState != nullptr ? rootFlowState->CurrentIndex : INDEX_NONE;
+		const int32 eventCount = flowSession.ActiveFlowRuntime != nullptr ? flowSession.ActiveFlowRuntime->Events.Num() : 0;
+
+		FString currentEventText = TEXT("None");
+		if (flowSession.ActiveFlowRuntime != nullptr && flowSession.ActiveFlowRuntime->Events.IsValidIndex(rootCurrentIndex))
+		{
+			const UVdjmRecordEventBase* currentEvent = flowSession.ActiveFlowRuntime->Events[rootCurrentIndex];
+			if (currentEvent != nullptr)
+			{
+				currentEventText = FString::Printf(
+					TEXT("%s Tag=%s"),
+					*currentEvent->GetClass()->GetName(),
+					*currentEvent->EventTag.ToString());
+			}
+		}
+
+		debugString += FString::Printf(
+			TEXT("Session=%lld Parent=%lld Running=%s Runtime=%s RootFlow=%lld RootIndex=%d EventCount=%d CurrentEvent=%s\n"),
+			flowSession.SessionHandle.Value,
+			flowSession.ParentSessionHandle.Value,
+			*GetBoolString(flowSession.bFlowRunning),
+			flowSession.ActiveFlowRuntime != nullptr ? *flowSession.ActiveFlowRuntime->GetPathName() : TEXT("None"),
+			flowSession.RootFlowHandle.Value,
+			rootCurrentIndex,
+			eventCount,
+			*currentEventText);
+
+		AppendSignalMap(debugString, TEXT("  SessionPendingSignals"), flowSession.PendingFlowSignals);
+
+		for (const TPair<FVdjmRecordFlowHandle, FVdjmRecordFlowExecutionState>& flowPair : flowSession.FlowExecutionStates)
+		{
+			const FVdjmRecordFlowExecutionState& flowExecutionState = flowPair.Value;
+			const FVdjmRecordFlowConditionState& activeCondition = flowExecutionState.ActiveCondition;
+
+			FString conditionKindText = TEXT("None");
+			switch (activeCondition.ConditionKind)
+			{
+			case EVdjmRecordFlowConditionKind::ESignal:
+				conditionKindText = TEXT("Signal");
+				break;
+			case EVdjmRecordFlowConditionKind::EBridgeInit:
+				conditionKindText = TEXT("BridgeInit");
+				break;
+			case EVdjmRecordFlowConditionKind::ENone:
+			default:
+				break;
+			}
+
+			debugString += FString::Printf(
+				TEXT("  Flow=%lld Parent=%lld CurrentIndex=%d Paused=%s NextTime=%.3f PendingControl=%s ActiveCondition=%s Signal=%s Mode=%s\n"),
+				flowExecutionState.FlowHandle.Value,
+				flowExecutionState.ParentFlowHandle.Value,
+				flowExecutionState.CurrentIndex,
+				*GetBoolString(flowExecutionState.bPaused),
+				flowExecutionState.NextExecutableTime,
+				GetFlowControlActionName(flowExecutionState.PendingFlowControlRequest.Action),
+				*conditionKindText,
+				*activeCondition.SignalTag.ToString(),
+				*GetConditionModeName(activeCondition.ConditionMode));
+		}
+
+		if (flowSession.ActiveFlowRuntime != nullptr)
+		{
+			debugString += FString::Printf(
+				TEXT("  ManifestSignals=%d\n"),
+				flowSession.ActiveFlowRuntime->CompiledManifest.SignalEntries.Num());
+			for (const FVdjmRecordEventSignalManifestEntry& signalEntry : flowSession.ActiveFlowRuntime->CompiledManifest.SignalEntries)
+			{
+				debugString += FString::Printf(
+					TEXT("    Signal=%s Index=%d Waiter=%s Emitter=%s BridgeStart=%s EventTag=%s Class=%s FutureForRoot=%s\n"),
+					*signalEntry.SignalTag.ToString(),
+					signalEntry.EventIndex,
+					*GetBoolString(signalEntry.bWaiter),
+					*GetBoolString(signalEntry.bEmitter),
+					*GetBoolString(signalEntry.bBridgeStartSignal),
+					*signalEntry.EventTag.ToString(),
+					*signalEntry.EventClassName,
+					*GetBoolString(signalEntry.bWaiter && (rootCurrentIndex == INDEX_NONE || signalEntry.EventIndex >= rootCurrentIndex)));
+			}
+		}
+	}
+
+	return debugString;
+}
+
 bool UVdjmRecordEventManager::EmitFlowSignalToSession(FVdjmRecordFlowSessionHandle SessionHandle, FName InSignalTag)
 {
 	if (InSignalTag.IsNone())
@@ -396,6 +584,8 @@ bool UVdjmRecordEventManager::EmitFlowSignalToSession(FVdjmRecordFlowSessionHand
 		flowSession->LastSignalProducerHandles.Add(InSignalTag, executionContext.RuntimeHandle);
 	}
 
+	ResumeFlowConditionsForSignal(*flowSession, InSignalTag);
+	ResumeFlowFromCompiledSignalManifest(*flowSession, InSignalTag);
 	return true;
 }
 
@@ -600,28 +790,32 @@ bool UVdjmRecordEventManager::EmitFlowSignal(FName InSignalTag)
 	}
 
 	FVdjmRecordFlowSession* flowSession = ResolveFlowSessionForGeneralAccess();
-	if (flowSession == nullptr)
+	if (flowSession == nullptr || not flowSession->bFlowRunning || flowSession->ActiveFlowRuntime == nullptr)
 	{
-		return false;
+		int32& signalCount = GlobalPendingFlowSignals.FindOrAdd(InSignalTag);
+		++signalCount;
+		ResumeFlowConditionsForSignal(InSignalTag);
+		ResumeFlowFromCompiledSignalManifest(InSignalTag);
+		return true;
 	}
 
 	return EmitFlowSignalToSession(flowSession->SessionHandle, InSignalTag);
 }
 
-bool UVdjmRecordEventManager::EmitFlowSignalByScope(FName InSignalTag, EVdjmRecordEventSignalScope InSignalScope)
+bool UVdjmRecordEventManager::EmitFlowSignalByRoute(FName InSignalTag, FVdjmRecordEventSignalRoute InSignalRoute)
 {
 	if (InSignalTag.IsNone())
 	{
 		return false;
 	}
 
-	switch (InSignalScope)
+	switch (InSignalRoute.Value)
 	{
-	case EVdjmRecordEventSignalScope::ECurrentSession:
+	case FVdjmRecordEventSignalRoute::CurrentSession:
 		return EmitFlowSignal(InSignalTag);
-	case EVdjmRecordEventSignalScope::EMainSession:
+	case FVdjmRecordEventSignalRoute::MainSession:
 		return EmitFlowSignalToSession(MainSessionHandle, InSignalTag);
-	case EVdjmRecordEventSignalScope::EAllActiveSessions:
+	case FVdjmRecordEventSignalRoute::AllActiveSessions:
 	{
 		bool bEmittedAnySignal = false;
 		for (TPair<FVdjmRecordFlowSessionHandle, FVdjmRecordFlowSession>& pair : FlowSessions)
@@ -633,7 +827,7 @@ bool UVdjmRecordEventManager::EmitFlowSignalByScope(FName InSignalTag, EVdjmReco
 		}
 		return bEmittedAnySignal;
 	}
-	case EVdjmRecordEventSignalScope::EGlobal:
+	case FVdjmRecordEventSignalRoute::Global:
 	{
 		int32& signalCount = GlobalPendingFlowSignals.FindOrAdd(InSignalTag);
 		++signalCount;
@@ -646,6 +840,8 @@ bool UVdjmRecordEventManager::EmitFlowSignalByScope(FName InSignalTag, EVdjmReco
 				GlobalLastSignalProducerHandles.Add(InSignalTag, executionContext.RuntimeHandle);
 			}
 		}
+		ResumeFlowConditionsForSignal(InSignalTag);
+		ResumeFlowFromCompiledSignalManifest(InSignalTag);
 		return true;
 	}
 	default:
@@ -757,6 +953,65 @@ bool UVdjmRecordEventManager::HasPendingFlowSignal(FName InSignalTag) const
 
 	const int32* globalSignalCount = GlobalPendingFlowSignals.Find(InSignalTag);
 	return globalSignalCount != nullptr && *globalSignalCount > 0;
+}
+
+bool UVdjmRecordEventManager::RequestCurrentFlowConditionForSignal(
+	FName signalTag,
+	EVdjmRecordEventConditionMode conditionMode)
+{
+	if (signalTag.IsNone() || conditionMode == EVdjmRecordEventConditionMode::ERunning)
+	{
+		return false;
+	}
+
+	FVdjmRecordFlowSession* flowSession = ResolveFlowSessionForGeneralAccess();
+	if (flowSession == nullptr || not flowSession->bFlowRunning || flowSession->EventExecutionContextStack.Num() <= 0)
+	{
+		return false;
+	}
+
+	const FVdjmRecordEventExecutionContext& executionContext = flowSession->EventExecutionContextStack.Last();
+	FVdjmRecordFlowExecutionState& flowExecutionState = FindOrCreateFlowExecutionState(executionContext.FlowHandle, nullptr);
+	flowExecutionState.ActiveCondition.Reset();
+	flowExecutionState.ActiveCondition.ConditionKind = EVdjmRecordFlowConditionKind::ESignal;
+	flowExecutionState.ActiveCondition.ConditionMode = conditionMode;
+	flowExecutionState.ActiveCondition.SignalTag = signalTag;
+
+	if (RequestFlowControl(flowSession->SessionHandle, EVdjmRecordFlowControlAction::EPause))
+	{
+		return true;
+	}
+
+	flowExecutionState.ActiveCondition.Reset();
+	return false;
+}
+
+bool UVdjmRecordEventManager::RequestCurrentFlowConditionForBridgeInit(EVdjmRecordEventConditionMode conditionMode)
+{
+	if (conditionMode == EVdjmRecordEventConditionMode::ERunning)
+	{
+		return false;
+	}
+
+	FVdjmRecordFlowSession* flowSession = ResolveFlowSessionForGeneralAccess();
+	if (flowSession == nullptr || not flowSession->bFlowRunning || flowSession->EventExecutionContextStack.Num() <= 0)
+	{
+		return false;
+	}
+
+	const FVdjmRecordEventExecutionContext& executionContext = flowSession->EventExecutionContextStack.Last();
+	FVdjmRecordFlowExecutionState& flowExecutionState = FindOrCreateFlowExecutionState(executionContext.FlowHandle, nullptr);
+	flowExecutionState.ActiveCondition.Reset();
+	flowExecutionState.ActiveCondition.ConditionKind = EVdjmRecordFlowConditionKind::EBridgeInit;
+	flowExecutionState.ActiveCondition.ConditionMode = conditionMode;
+
+	if (RequestFlowControl(flowSession->SessionHandle, EVdjmRecordFlowControlAction::EPause))
+	{
+		return true;
+	}
+
+	flowExecutionState.ActiveCondition.Reset();
+	return false;
 }
 
 FVdjmRecordFlowHandle UVdjmRecordEventManager::GetCurrentFlowHandle() const
@@ -1012,6 +1267,11 @@ FVdjmRecordFlowStepResult UVdjmRecordEventManager::ExecuteFlowStep(const FVdjmRe
 	}
 
 	const FVdjmRecordEventResult result = ExecuteEventInFlow(eventNode, stepContext.BridgeActor, stepContext.FlowHandle);
+	if (result.ResultType != EVdjmRecordEventResultType::ERunning)
+	{
+		ClearFlowCondition(stepContext.FlowHandle);
+	}
+
 	switch (result.ResultType)
 	{
 	case EVdjmRecordEventResultType::ESuccess:
@@ -1237,8 +1497,59 @@ void UVdjmRecordEventManager::TickEventFlow()
 
 	for (const FVdjmRecordFlowSessionHandle sessionHandle : runningSessionHandles)
 	{
+		TickFlowConditions(sessionHandle);
 		TickFlowSession(sessionHandle);
 	}
+}
+
+void UVdjmRecordEventManager::TickFlowConditions(FVdjmRecordFlowSessionHandle sessionHandle)
+{
+	FVdjmRecordFlowSession* flowSession = FindFlowSession(sessionHandle);
+	if (flowSession == nullptr || not flowSession->bFlowRunning)
+	{
+		return;
+	}
+
+	bool bShouldResumeSession = false;
+	AVdjmRecordBridgeActor* bridgeActor = WeakBridgeActor.Get();
+	for (TPair<FVdjmRecordFlowHandle, FVdjmRecordFlowExecutionState>& pair : flowSession->FlowExecutionStates)
+	{
+		FVdjmRecordFlowConditionState& activeCondition = pair.Value.ActiveCondition;
+		if (activeCondition.ConditionMode != EVdjmRecordEventConditionMode::EConditional)
+		{
+			continue;
+		}
+
+		switch (activeCondition.ConditionKind)
+		{
+		case EVdjmRecordFlowConditionKind::ESignal:
+			if (DoesSessionHavePendingSignal(*flowSession, activeCondition.SignalTag))
+			{
+				activeCondition.Reset();
+				bShouldResumeSession = true;
+			}
+			break;
+		case EVdjmRecordFlowConditionKind::EBridgeInit:
+			if (bridgeActor == nullptr ||
+				bridgeActor->GetCurrentInitStep() == EVdjmRecordBridgeInitStep::EComplete ||
+				bridgeActor->GetCurrentInitStep() == EVdjmRecordBridgeInitStep::EInitError ||
+				bridgeActor->GetCurrentInitStep() == EVdjmRecordBridgeInitStep::EInitErrorEnd)
+			{
+				activeCondition.Reset();
+				bShouldResumeSession = true;
+			}
+			break;
+		default:
+			break;
+		}
+	}
+
+	if (bShouldResumeSession)
+	{
+		RequestResumeEventFlowSession(sessionHandle);
+	}
+
+	ResumeFlowFromCompiledSignalManifest(*flowSession);
 }
 
 void UVdjmRecordEventManager::TickFlowSession(FVdjmRecordFlowSessionHandle SessionHandle)
@@ -1777,6 +2088,212 @@ FVdjmRecordObservedEdge UVdjmRecordEventManager::ApplyPendingEdgeDirective(
 	return observedEdge;
 }
 
+void UVdjmRecordEventManager::ClearFlowCondition(FVdjmRecordFlowHandle flowHandle)
+{
+	FVdjmRecordFlowExecutionState* flowExecutionState = FindFlowExecutionState(flowHandle);
+	if (flowExecutionState != nullptr)
+	{
+		flowExecutionState->ActiveCondition.Reset();
+	}
+}
+
+bool UVdjmRecordEventManager::DoesSessionHavePendingSignal(
+	const FVdjmRecordFlowSession& flowSession,
+	FName signalTag) const
+{
+	if (signalTag.IsNone())
+	{
+		return false;
+	}
+
+	const int32* sessionSignalCount = flowSession.PendingFlowSignals.Find(signalTag);
+	if (sessionSignalCount != nullptr && *sessionSignalCount > 0)
+	{
+		return true;
+	}
+
+	const int32* globalSignalCount = GlobalPendingFlowSignals.Find(signalTag);
+	return globalSignalCount != nullptr && *globalSignalCount > 0;
+}
+
+bool UVdjmRecordEventManager::DoesCompiledManifestHaveFutureSignalWaiter(
+	const FVdjmRecordFlowSession& flowSession,
+	FName signalTag) const
+{
+	if (signalTag.IsNone() || flowSession.ActiveFlowRuntime == nullptr)
+	{
+		return false;
+	}
+
+	const FVdjmRecordFlowExecutionState* rootFlowState = flowSession.FlowExecutionStates.Find(flowSession.RootFlowHandle);
+	if (rootFlowState == nullptr)
+	{
+		return false;
+	}
+
+	return flowSession.ActiveFlowRuntime->CompiledManifest.HasSignalWaiterAtOrAfterIndex(signalTag, rootFlowState->CurrentIndex);
+}
+
+bool UVdjmRecordEventManager::ResumeFlowConditionsForSignal(
+	FVdjmRecordFlowSession& flowSession,
+	FName signalTag)
+{
+	if (signalTag.IsNone())
+	{
+		return false;
+	}
+
+	bool bShouldResumeSession = false;
+	for (TPair<FVdjmRecordFlowHandle, FVdjmRecordFlowExecutionState>& pair : flowSession.FlowExecutionStates)
+	{
+		FVdjmRecordFlowConditionState& activeCondition = pair.Value.ActiveCondition;
+		if (activeCondition.ConditionKind == EVdjmRecordFlowConditionKind::ESignal &&
+			activeCondition.SignalTag == signalTag)
+		{
+			activeCondition.Reset();
+			bShouldResumeSession = true;
+		}
+	}
+
+	return bShouldResumeSession && RequestResumeEventFlowSession(flowSession.SessionHandle);
+}
+
+bool UVdjmRecordEventManager::ResumeFlowConditionsForSignal(FName signalTag)
+{
+	if (signalTag.IsNone())
+	{
+		return false;
+	}
+
+	bool bResumedAnySession = false;
+	TArray<FVdjmRecordFlowSessionHandle> sessionHandles;
+	for (const TPair<FVdjmRecordFlowSessionHandle, FVdjmRecordFlowSession>& pair : FlowSessions)
+	{
+		sessionHandles.Add(pair.Key);
+	}
+
+	for (const FVdjmRecordFlowSessionHandle sessionHandle : sessionHandles)
+	{
+		if (FVdjmRecordFlowSession* flowSession = FindFlowSession(sessionHandle))
+		{
+			bResumedAnySession |= ResumeFlowConditionsForSignal(*flowSession, signalTag);
+		}
+	}
+
+	return bResumedAnySession;
+}
+
+bool UVdjmRecordEventManager::ResumeFlowConditionsForBridgeInit()
+{
+	bool bResumedAnySession = false;
+	TArray<FVdjmRecordFlowSessionHandle> sessionHandles;
+	for (const TPair<FVdjmRecordFlowSessionHandle, FVdjmRecordFlowSession>& pair : FlowSessions)
+	{
+		sessionHandles.Add(pair.Key);
+	}
+
+	for (const FVdjmRecordFlowSessionHandle sessionHandle : sessionHandles)
+	{
+		FVdjmRecordFlowSession* flowSession = FindFlowSession(sessionHandle);
+		if (flowSession == nullptr)
+		{
+			continue;
+		}
+
+		bool bShouldResumeSession = false;
+		for (TPair<FVdjmRecordFlowHandle, FVdjmRecordFlowExecutionState>& pair : flowSession->FlowExecutionStates)
+		{
+			FVdjmRecordFlowConditionState& activeCondition = pair.Value.ActiveCondition;
+			if (activeCondition.ConditionKind == EVdjmRecordFlowConditionKind::EBridgeInit)
+			{
+				activeCondition.Reset();
+				bShouldResumeSession = true;
+			}
+		}
+
+		if (bShouldResumeSession)
+		{
+			bResumedAnySession |= RequestResumeEventFlowSession(sessionHandle);
+		}
+	}
+
+	return bResumedAnySession;
+}
+
+bool UVdjmRecordEventManager::ResumeFlowFromCompiledSignalManifest(
+	FVdjmRecordFlowSession& flowSession,
+	FName signalTag)
+{
+	if (signalTag.IsNone() ||
+		not flowSession.bFlowRunning ||
+		flowSession.ActiveFlowRuntime == nullptr ||
+		not DoesSessionHavePendingSignal(flowSession, signalTag) ||
+		not DoesCompiledManifestHaveFutureSignalWaiter(flowSession, signalTag))
+	{
+		return false;
+	}
+
+	return RequestResumeEventFlowSession(flowSession.SessionHandle);
+}
+
+bool UVdjmRecordEventManager::ResumeFlowFromCompiledSignalManifest(FVdjmRecordFlowSession& flowSession)
+{
+	if (not flowSession.bFlowRunning || flowSession.ActiveFlowRuntime == nullptr)
+	{
+		return false;
+	}
+
+	TArray<FName> signalTags;
+	for (const TPair<FName, int32>& pair : flowSession.PendingFlowSignals)
+	{
+		if (pair.Value > 0)
+		{
+			signalTags.AddUnique(pair.Key);
+		}
+	}
+
+	for (const TPair<FName, int32>& pair : GlobalPendingFlowSignals)
+	{
+		if (pair.Value > 0)
+		{
+			signalTags.AddUnique(pair.Key);
+		}
+	}
+
+	bool bResumedFlow = false;
+	for (const FName signalTag : signalTags)
+	{
+		bResumedFlow |= ResumeFlowFromCompiledSignalManifest(flowSession, signalTag);
+	}
+
+	return bResumedFlow;
+}
+
+bool UVdjmRecordEventManager::ResumeFlowFromCompiledSignalManifest(FName signalTag)
+{
+	if (signalTag.IsNone())
+	{
+		return false;
+	}
+
+	TArray<FVdjmRecordFlowSessionHandle> sessionHandles;
+	for (const TPair<FVdjmRecordFlowSessionHandle, FVdjmRecordFlowSession>& pair : FlowSessions)
+	{
+		sessionHandles.Add(pair.Key);
+	}
+
+	bool bResumedAnySession = false;
+	for (const FVdjmRecordFlowSessionHandle sessionHandle : sessionHandles)
+	{
+		if (FVdjmRecordFlowSession* flowSession = FindFlowSession(sessionHandle))
+		{
+			bResumedAnySession |= ResumeFlowFromCompiledSignalManifest(*flowSession, signalTag);
+		}
+	}
+
+	return bResumedAnySession;
+}
+
 EVdjmRecordFlowControlAction UVdjmRecordEventManager::ConsumePendingFlowControlRequest(FVdjmRecordFlowHandle FlowHandle)
 {
 	FVdjmRecordFlowExecutionState* flowExecutionState = FindFlowExecutionState(FlowHandle);
@@ -1931,12 +2448,14 @@ void UVdjmRecordEventManager::HandleBridgeInitComplete(AVdjmRecordBridgeActor* I
 {
 	(void)InBridgeActor;
 	ApplySessionStateByBridgeSnapshot();
+	ResumeFlowConditionsForBridgeInit();
 }
 
 void UVdjmRecordEventManager::HandleBridgeInitErrorEnd(AVdjmRecordBridgeActor* InBridgeActor)
 {
 	(void)InBridgeActor;
 	TransitionSessionState(EVdjmRecorderSessionState::EFailed, TEXT("Bridge initialization failed."));
+	ResumeFlowConditionsForBridgeInit();
 }
 
 void UVdjmRecordEventManager::HandleBridgeRecordStarted(UVdjmRecordResource* InRecordResource)

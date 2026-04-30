@@ -1,18 +1,97 @@
 #include "VdjmEvents/VdjmRecordEventFlowBlueprintLibrary.h"
 
+#include "VdjmEvents/VdjmRecordEventFlowEntryPoint.h"
 #include "VdjmEvents/VdjmRecordEventManager.h"
 #include "VdjmRecorderWorldContextSubsystem.h"
 
 UVdjmRecordEventManager* UVdjmRecordEventFlowBlueprintLibrary::GetRecordEventManager(UObject* worldContextObject)
 {
+	if (UVdjmRecordEventManager* directEventManager = Cast<UVdjmRecordEventManager>(worldContextObject))
+	{
+		return directEventManager;
+	}
+
 	const UVdjmRecorderWorldContextSubsystem* worldContextSubsystem = UVdjmRecorderWorldContextSubsystem::Get(worldContextObject);
 	if (worldContextSubsystem == nullptr)
 	{
 		return nullptr;
 	}
 
-	return Cast<UVdjmRecordEventManager>(
-		worldContextSubsystem->FindContextObject(UVdjmRecorderWorldContextSubsystem::GetEventManagerContextKey()));
+	if (UVdjmRecordEventManager* eventManager = Cast<UVdjmRecordEventManager>(
+		worldContextSubsystem->FindContextObject(UVdjmRecorderWorldContextSubsystem::GetEventManagerContextKey())))
+	{
+		return eventManager;
+	}
+
+	if (AVdjmRecordEventFlowEntryPoint* entryPoint = Cast<AVdjmRecordEventFlowEntryPoint>(
+		worldContextSubsystem->FindContextObject(UVdjmRecorderWorldContextSubsystem::GetEventFlowEntryPointContextKey())))
+	{
+		return entryPoint->GetEventManager();
+	}
+
+	return nullptr;
+}
+
+UVdjmRecorderController* UVdjmRecordEventFlowBlueprintLibrary::FindRecorderController(UObject* worldContextObject)
+{
+	return UVdjmRecorderController::FindRecorderController(worldContextObject);
+}
+
+UVdjmRecorderController* UVdjmRecordEventFlowBlueprintLibrary::GetOrCreateRecorderController(UObject* worldContextObject)
+{
+	return UVdjmRecorderController::FindOrCreateRecorderController(worldContextObject);
+}
+
+bool UVdjmRecordEventFlowBlueprintLibrary::SubmitRecorderOptionRequest(
+	UObject* worldContextObject,
+	const FVdjmRecorderOptionRequest& request,
+	FString& outErrorReason,
+	bool bProcessPendingAfterSubmit)
+{
+	outErrorReason.Reset();
+
+	UVdjmRecorderController* recorderController = GetOrCreateRecorderController(worldContextObject);
+	if (recorderController == nullptr)
+	{
+		outErrorReason = TEXT("Recorder controller is not available.");
+		return false;
+	}
+
+	if (not recorderController->SubmitOptionRequest(request, outErrorReason))
+	{
+		return false;
+	}
+
+	if (bProcessPendingAfterSubmit)
+	{
+		FString processErrorReason;
+		const bool bProcessResult = recorderController->ProcessPendingOptionRequests(processErrorReason);
+		if (not bProcessResult && not recorderController->HasPendingOptionRequest())
+		{
+			outErrorReason = processErrorReason.IsEmpty()
+				? TEXT("Failed to process recorder option request.")
+				: processErrorReason;
+			return false;
+		}
+	}
+
+	return true;
+}
+
+bool UVdjmRecordEventFlowBlueprintLibrary::ProcessPendingRecorderOptionRequests(
+	UObject* worldContextObject,
+	FString& outErrorReason)
+{
+	outErrorReason.Reset();
+
+	UVdjmRecorderController* recorderController = GetOrCreateRecorderController(worldContextObject);
+	if (recorderController == nullptr)
+	{
+		outErrorReason = TEXT("Recorder controller is not available.");
+		return false;
+	}
+
+	return recorderController->ProcessPendingOptionRequests(outErrorReason);
 }
 
 bool UVdjmRecordEventFlowBlueprintLibrary::EmitRecordFlowSignal(UObject* worldContextObject, FName signalTag)
@@ -29,6 +108,50 @@ bool UVdjmRecordEventFlowBlueprintLibrary::EmitRecordFlowSignal(UObject* worldCo
 	}
 
 	return eventManager->EmitFlowSignal(signalTag);
+}
+
+bool UVdjmRecordEventFlowBlueprintLibrary::EmitRecordFlowSignalWithDebug(
+	UObject* worldContextObject,
+	FName signalTag,
+	FString& outDebugMessage)
+{
+	outDebugMessage.Reset();
+
+	if (signalTag.IsNone())
+	{
+		outDebugMessage = TEXT("EmitRecordFlowSignalWithDebug failed: signalTag is None.");
+		return false;
+	}
+
+	UVdjmRecordEventManager* eventManager = GetRecordEventManager(worldContextObject);
+	if (eventManager == nullptr)
+	{
+		const FString contextName = worldContextObject != nullptr ? worldContextObject->GetPathName() : TEXT("None");
+		outDebugMessage = FString::Printf(
+			TEXT("EmitRecordFlowSignalWithDebug failed: EventManager was not found. WorldContext=%s"),
+			*contextName);
+		return false;
+	}
+
+	const bool bEmitResult = eventManager->EmitFlowSignal(signalTag);
+	outDebugMessage = FString::Printf(
+		TEXT("EmitRecordFlowSignalWithDebug signal=%s result=%s\n%s"),
+		*signalTag.ToString(),
+		bEmitResult ? TEXT("true") : TEXT("false"),
+		*eventManager->GetEventFlowDebugString());
+	return bEmitResult;
+}
+
+FString UVdjmRecordEventFlowBlueprintLibrary::GetRecordEventFlowDebugString(UObject* worldContextObject)
+{
+	const UVdjmRecordEventManager* eventManager = GetRecordEventManager(worldContextObject);
+	if (eventManager == nullptr)
+	{
+		const FString contextName = worldContextObject != nullptr ? worldContextObject->GetPathName() : TEXT("None");
+		return FString::Printf(TEXT("RecordEventManager=None WorldContext=%s"), *contextName);
+	}
+
+	return eventManager->GetEventFlowDebugString();
 }
 
 bool UVdjmRecordEventFlowBlueprintLibrary::RequestPauseRecordEventFlow(UObject* worldContextObject)

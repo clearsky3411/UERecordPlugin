@@ -395,6 +395,11 @@ namespace VdjmRecordEventFlowPresets
 		return Fragment;
 	}
 
+	FVdjmRecordEventNodeFragment MakeStartRecordBridgeActorNode()
+	{
+		return FVdjmRecordEventNodeFragment::Make<UVdjmRecordEventStartRecordBridgeActorNode>();
+	}
+
 	FVdjmRecordEventNodeFragment MakeCreateObjectNode(
 		const FSoftClassPath& ObjectClassPath,
 		FName RuntimeSlotKey,

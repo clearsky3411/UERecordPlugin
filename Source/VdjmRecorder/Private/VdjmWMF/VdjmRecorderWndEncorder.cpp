@@ -209,7 +209,19 @@ void FVdjmWindowsEncoderImpl::ChangeStatusNewToReady()
 
 void FVdjmWindowsEncoderImpl::InitInternal(const FString& outputFilePath, int32 width, int32 height, int32 bitrate, int32 framerate)
 {
-	mEncoderPropertyData.Initialize(width& ~15, height& ~15, bitrate, framerate,outputFilePath);
+	FString safeOutputFilePath;
+	if (not VdjmRecordUtils::Validations::DbcValidateOutputFilePath(
+		outputFilePath,
+		safeOutputFilePath,
+		TEXT("FVdjmWindowsEncoderImpl::InitInternal")))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error,
+			TEXT("FVdjmWindowsEncoderImpl::InitInternal - Invalid output path. Path=%s"),
+			*outputFilePath);
+		safeOutputFilePath = outputFilePath;
+	}
+
+	mEncoderPropertyData.Initialize(width& ~15, height& ~15, bitrate, framerate,safeOutputFilePath);
 	mStartTimeStamp = -1;
 }
 
