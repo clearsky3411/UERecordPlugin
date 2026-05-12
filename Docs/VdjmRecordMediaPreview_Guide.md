@@ -186,8 +186,10 @@ LoadAppState
 
 ### PreviewManager init 상태 연결
 - Loading UI는 `media-preview-manager` runtime slot 또는 world context의 `MediaPreviewManager`에서 manager를 가져온다.
-- BP에서 직접 사용할 때는 `StartPreviewManagerInit`만 호출하면 actor tick이 자동으로 `AdvancePreviewManagerInitStep`을 이어간다.
-- `AdvancePreviewManagerInitStep`은 수동/동기 wrapper용으로 남아 있지만, 일반 UI 버튼에서는 반복 호출하지 않는다.
+- `StartPreviewManagerInit`는 초기화 작업을 시작만 한다. actor tick이 자동으로 `AdvancePreviewManagerInitStep`을 이어가지는 않는다.
+- EventFlow에서는 `InitializeMediaPreviewManagerNode`가 실행될 때마다 `AdvancePreviewManagerInitStep`을 한 번씩 호출해 `ERunning` 흐름으로 loading UI를 유지한다.
+- BP에서 직접 제어하려면 timer, widget tick, flow tick 같은 명시 호출 경계에서 `AdvancePreviewManagerInitStep`을 반복 호출한다.
+- 즉 loading widget은 delegate/progress를 읽고, 실제 진행 타이밍은 EventFlow 또는 화면 owner가 컨트롤한다.
 - `OnPreviewManagerInitStarted`는 preview init 시작 시 호출된다.
 - `OnPreviewManagerInitStepChanged`는 `EEnsureMetadataStore`, `ERefreshRegistry`, `ECopyRegistryEntries`, `EApplyCarouselWindow`, `EFinalizeInitialization`, `EComplete` 같은 단계 변화 또는 entry copy 진행 때 호출된다.
 - 진행률 UI는 `GetPreviewManagerInitProgress`, `GetPreviewManagerInitProcessedCount`, `GetPreviewManagerInitPendingCount`, `GetCurrentPreviewManagerInitStep`를 읽는다.

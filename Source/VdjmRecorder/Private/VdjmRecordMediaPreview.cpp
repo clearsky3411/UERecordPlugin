@@ -380,6 +380,10 @@ bool AVdjmRecordMediaPreviewManagerActor::StartPreviewManagerInit(
 	return true;
 }
 
+// Advances exactly one preview-registry preparation step.
+// This is intentionally caller-driven: EventFlow/loading UI may decide when to call it and when to
+// read progress delegates. The manager actor does not tick this automatically, and this function
+// must not grow into carousel/card layout, input, swipe, or preview UX ownership.
 EVdjmRecordMediaPreviewInitRunResult AVdjmRecordMediaPreviewManagerActor::AdvancePreviewManagerInitStep(
 	FString& outErrorReason)
 {
