@@ -10,6 +10,10 @@ class UImage;
 class UMediaPlayer;
 class UMediaTexture;
 class UOverlay;
+class UPanelWidget;
+class USafeZone;
+class USizeBox;
+class UVerticalBox;
 class UVdjmRecordMediaPreviewWidget;
 class AVdjmRecordMediaPreviewManagerActor;
 
@@ -564,4 +568,62 @@ protected:
 
 private:
 	TWeakObjectPtr<AVdjmRecordMediaPreviewManagerActor> mPreviewManager;
+};
+
+UCLASS(BlueprintType, Blueprintable)
+class VDJMRECORDER_API UVdjmRecordMediaPreviewScreenWidget : public UUserWidget
+{
+	GENERATED_BODY()
+
+public:
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview|Screen|Legacy")
+	bool RefreshPreviewScreen(FString& outErrorReason)
+	{
+		outErrorReason.Reset();
+		if (CarouselWidget == nullptr)
+		{
+			outErrorReason = TEXT("Legacy CarouselWidget is invalid.");
+			return false;
+		}
+
+		return CarouselWidget->RefreshCarousel(outErrorReason);
+	}
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Screen|Legacy")
+	UVdjmRecordMediaPreviewCarouselWidget* GetCarouselWidget() const { return CarouselWidget; }
+
+protected:
+	// Legacy compatibility shim only.
+	// Existing VdjmUiLobbyCarouselScreen assets serialize this native parent and
+	// fail to load their WidgetTree when the class is missing. Keep this class
+	// small so migration can happen asset-by-asset in the new VdjmWidgets path.
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Recorder|MediaPreview|Screen|Legacy")
+	TObjectPtr<USafeZone> SafeZone_Root;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Recorder|MediaPreview|Screen|Legacy")
+	TObjectPtr<UOverlay> Overlay_Root;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Recorder|MediaPreview|Screen|Legacy")
+	TObjectPtr<UVerticalBox> VerticalBox_Main;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Recorder|MediaPreview|Screen|Legacy")
+	TObjectPtr<UPanelWidget> HeaderArea;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Recorder|MediaPreview|Screen|Legacy")
+	TObjectPtr<USizeBox> SizeBox_CarouselArea;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Recorder|MediaPreview|Screen|Legacy")
+	TObjectPtr<UOverlay> Overlay_CarouselArea;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Recorder|MediaPreview|Screen|Legacy")
+	TObjectPtr<UPanelWidget> FixedBackLayer;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Recorder|MediaPreview|Screen|Legacy")
+	TObjectPtr<UPanelWidget> FixedFrontLayer;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Recorder|MediaPreview|Screen|Legacy")
+	TObjectPtr<UPanelWidget> FooterArea;
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Recorder|MediaPreview|Screen|Legacy")
+	TObjectPtr<UVdjmRecordMediaPreviewCarouselWidget> CarouselWidget;
 };
