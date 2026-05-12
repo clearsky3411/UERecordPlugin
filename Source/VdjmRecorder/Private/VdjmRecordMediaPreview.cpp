@@ -276,6 +276,340 @@ bool AVdjmRecordMediaPreviewManagerActor::RefreshPreviewStoreFromDisk(FString& o
 	return true;
 }
 
+bool AVdjmRecordMediaPreviewManagerActor::GetMediaPreviewManagerInitStatus(
+	UObject* worldContextObject,
+	FVdjmRecordMediaPreviewInitStatus& outStatus)
+{
+	outStatus = FVdjmRecordMediaPreviewInitStatus();
+	AVdjmRecordMediaPreviewManagerActor* previewManager = FindMediaPreviewManagerActor(worldContextObject);
+	if (previewManager == nullptr)
+	{
+		return false;
+	}
+
+	outStatus = previewManager->GetPreviewManagerInitStatus();
+	return true;
+}
+
+bool AVdjmRecordMediaPreviewManagerActor::InitializePreviewManagerFromDisk(
+	bool bForceRefresh,
+	FString& outErrorReason)
+{
+	FVdjmRecordMediaPreviewInitRequest initRequest;
+	initRequest.bForceRefresh = bForceRefresh;
+	initRequest.bApplyCarouselWindowAfterInit = true;
+	initRequest.bSucceedWithEmptyRegistry = true;
+	initRequest.SlotCount = SlotCount;
+	initRequest.ActiveSlotIndex = ActiveSlotIndex;
+	initRequest.InitialCenterSourceIndex = mCenterSourceIndex;
+	initRequest.bAutoStartCenterPreview = bAutoStartCenterPreview;
+
+	if (not StartPreviewManagerInit(initRequest, outErrorReason))
+	{
+		return false;
+	}
+
+	for (int32 guardIndex = 0; guardIndex < 1024; ++guardIndex)
+	{
+		const EVdjmRecordMediaPreviewInitRunResult runResult = AdvancePreviewManagerInitStep(outErrorReason);
+		if (runResult == EVdjmRecordMediaPreviewInitRunResult::ESucceeded)
+		{
+			return true;
+		}
+
+		if (runResult == EVdjmRecordMediaPreviewInitRunResult::EFailed)
+		{
+			return false;
+		}
+	}
+
+	outErrorReason = TEXT("Preview manager init exceeded the synchronous guard limit.");
+	FailPreviewManagerInit(outErrorReason);
+	return false;
+}
+
+bool AVdjmRecordMediaPreviewManagerActor::StartPreviewManagerInit(
+	const FVdjmRecordMediaPreviewInitRequest& initRequest,
+	FString& outErrorReason)
+{
+	outErrorReason.Reset();
+
+	if (mbPreviewManagerInitRunning)
+	{
+		outErrorReason = TEXT("Preview manager init is already running.");
+		return false;
+	}
+
+	if (mbPreviewManagerInitialized && not initRequest.bForceRefresh)
+	{
+		mLastPreviewManagerErrorReason.Reset();
+		SetPreviewManagerInitStep(
+			EVdjmRecordMediaPreviewInitStep::EComplete,
+			TEXT("Preview manager is already initialized."));
+		OnPreviewManagerInitFinished.Broadcast(true, FString());
+		return true;
+	}
+
+	mPreviewInitRequest = initRequest;
+	mPreviewInitRequest.SlotCount = FMath::Clamp(mPreviewInitRequest.SlotCount, 1, 32);
+	mPreviewInitRequest.ActiveSlotIndex = FMath::Clamp(
+		mPreviewInitRequest.ActiveSlotIndex,
+		0,
+		mPreviewInitRequest.SlotCount - 1);
+	mPreviewInitRequest.MaxManifestFilesPerStep = FMath::Max(1, mPreviewInitRequest.MaxManifestFilesPerStep);
+	mPreviewInitRequest.MaxRegistryEntryStateChecksPerStep =
+		FMath::Max(1, mPreviewInitRequest.MaxRegistryEntryStateChecksPerStep);
+	mPreviewInitRequest.MaxRegistryEntriesPerStep = FMath::Max(1, mPreviewInitRequest.MaxRegistryEntriesPerStep);
+
+	SlotCount = mPreviewInitRequest.SlotCount;
+	ActiveSlotIndex = mPreviewInitRequest.ActiveSlotIndex;
+	bAutoStartCenterPreview = mPreviewInitRequest.bAutoStartCenterPreview;
+	mPreviewInitRegistryEntries.Reset();
+	mRegistryCopyCursor = 0;
+	mPreviewInitPendingWorkCount = 0;
+	mPreviewInitProcessedWorkCount = 0;
+	mLastPreviewManagerErrorReason.Reset();
+	mbPreviewManagerInitialized = false;
+	mbPreviewManagerInitRunning = true;
+	mbPreviewInitRegistryScanStarted = false;
+
+	OnPreviewManagerInitStarted.Broadcast();
+	SetPreviewManagerInitStep(
+		EVdjmRecordMediaPreviewInitStep::EInitializeStart,
+		TEXT("Preview manager init started."));
+	return true;
+}
+
+EVdjmRecordMediaPreviewInitRunResult AVdjmRecordMediaPreviewManagerActor::AdvancePreviewManagerInitStep(
+	FString& outErrorReason)
+{
+	outErrorReason.Reset();
+
+	if (not mbPreviewManagerInitRunning)
+	{
+		return mbPreviewManagerInitialized
+			? EVdjmRecordMediaPreviewInitRunResult::ESucceeded
+			: EVdjmRecordMediaPreviewInitRunResult::EFailed;
+	}
+
+	switch (mCurrentPreviewManagerInitStep)
+	{
+	case EVdjmRecordMediaPreviewInitStep::EInitializeStart:
+		SetPreviewManagerInitStep(
+			EVdjmRecordMediaPreviewInitStep::EEnsureMetadataStore,
+			TEXT("Ensuring metadata store."));
+		return EVdjmRecordMediaPreviewInitRunResult::ERunning;
+
+	case EVdjmRecordMediaPreviewInitStep::EEnsureMetadataStore:
+		mMetadataStore = UVdjmRecordMetadataStore::FindOrCreateMetadataStore(this);
+		if (not IsValid(mMetadataStore))
+		{
+			outErrorReason = TEXT("Metadata store is invalid.");
+			return FailPreviewManagerInit(outErrorReason);
+		}
+
+		SetPreviewManagerInitStep(
+			EVdjmRecordMediaPreviewInitStep::ERefreshRegistry,
+			TEXT("Refreshing media registry from disk."));
+		return EVdjmRecordMediaPreviewInitRunResult::ERunning;
+
+	case EVdjmRecordMediaPreviewInitStep::ERefreshRegistry:
+		if (not IsValid(mMetadataStore))
+		{
+			outErrorReason = TEXT("Metadata store is invalid.");
+			return FailPreviewManagerInit(outErrorReason);
+		}
+
+		if (not mbPreviewInitRegistryScanStarted)
+		{
+			FVdjmRecordMetadataRegistryScanRequest scanRequest;
+			scanRequest.MaxManifestFilesPerStep = mPreviewInitRequest.MaxManifestFilesPerStep;
+			scanRequest.MaxRegistryEntriesPerStep = mPreviewInitRequest.MaxRegistryEntryStateChecksPerStep;
+			scanRequest.bSaveRegistryOnComplete = true;
+			if (not mMetadataStore->StartRegistryScanFromDisk(scanRequest, outErrorReason))
+			{
+				return FailPreviewManagerInit(outErrorReason);
+			}
+
+			mbPreviewInitRegistryScanStarted = true;
+			mPreviewInitPendingWorkCount = mMetadataStore->GetRegistryScanPendingCount();
+			mPreviewInitProcessedWorkCount = mMetadataStore->GetRegistryScanProcessedCount();
+			return EVdjmRecordMediaPreviewInitRunResult::ERunning;
+		}
+
+		{
+			const EVdjmRecordMetadataRegistryScanRunResult registryScanRunResult =
+				mMetadataStore->AdvanceRegistryScanFromDisk(outErrorReason);
+			mPreviewInitPendingWorkCount = mMetadataStore->GetRegistryScanPendingCount();
+			mPreviewInitProcessedWorkCount = mMetadataStore->GetRegistryScanProcessedCount();
+			if (registryScanRunResult == EVdjmRecordMetadataRegistryScanRunResult::ERunning)
+			{
+				return EVdjmRecordMediaPreviewInitRunResult::ERunning;
+			}
+
+			if (registryScanRunResult == EVdjmRecordMetadataRegistryScanRunResult::EFailed)
+			{
+				return FailPreviewManagerInit(outErrorReason);
+			}
+		}
+
+		mPreviewInitRegistryEntries = mMetadataStore->GetMediaRegistryEntries();
+		mRegistryCopyCursor = 0;
+		mPreviewInitPendingWorkCount = mPreviewInitRegistryEntries.Num();
+		mPreviewInitProcessedWorkCount = 0;
+		SetPreviewManagerInitStep(
+			EVdjmRecordMediaPreviewInitStep::ECopyRegistryEntries,
+			TEXT("Copying registry entries."));
+		return EVdjmRecordMediaPreviewInitRunResult::ERunning;
+
+	case EVdjmRecordMediaPreviewInitStep::ECopyRegistryEntries:
+		if (mRegistryCopyCursor == 0)
+		{
+			mRegistryEntries.Reset();
+		}
+
+		{
+			const int32 copyEndIndex = FMath::Min(
+				mPreviewInitRegistryEntries.Num(),
+				mRegistryCopyCursor + mPreviewInitRequest.MaxRegistryEntriesPerStep);
+			for (; mRegistryCopyCursor < copyEndIndex; ++mRegistryCopyCursor)
+			{
+				mRegistryEntries.Add(mPreviewInitRegistryEntries[mRegistryCopyCursor]);
+			}
+		}
+
+		mPreviewInitProcessedWorkCount = mRegistryCopyCursor;
+		mPreviewInitPendingWorkCount = FMath::Max(0, mPreviewInitRegistryEntries.Num() - mRegistryCopyCursor);
+		if (mRegistryCopyCursor < mPreviewInitRegistryEntries.Num())
+		{
+			return EVdjmRecordMediaPreviewInitRunResult::ERunning;
+		}
+
+		OnPreviewRegistryChanged.Broadcast();
+		SetPreviewManagerInitStep(
+			EVdjmRecordMediaPreviewInitStep::EApplyCarouselWindow,
+			TEXT("Applying carousel window."));
+		return EVdjmRecordMediaPreviewInitRunResult::ERunning;
+
+	case EVdjmRecordMediaPreviewInitStep::EApplyCarouselWindow:
+		if (mRegistryEntries.Num() <= 0)
+		{
+			EnsureSlotCount(mPreviewInitRequest.SlotCount);
+			for (UVdjmRecordMediaPreviewSlot* previewSlot : mPreviewSlots)
+			{
+				if (previewSlot != nullptr)
+				{
+					previewSlot->ClearSlot();
+				}
+			}
+
+			StopAllPreviews(true);
+			mCenterSourceIndex = INDEX_NONE;
+			if (not mPreviewInitRequest.bSucceedWithEmptyRegistry)
+			{
+				outErrorReason = TEXT("Media registry is empty.");
+				return FailPreviewManagerInit(outErrorReason);
+			}
+		}
+		else if (mPreviewInitRequest.bApplyCarouselWindowAfterInit)
+		{
+			const int32 centerSourceIndex = mPreviewInitRequest.InitialCenterSourceIndex != INDEX_NONE
+				? mPreviewInitRequest.InitialCenterSourceIndex
+				: (mCenterSourceIndex != INDEX_NONE ? mCenterSourceIndex : 0);
+			if (not ApplyCarouselWindow(
+				centerSourceIndex,
+				mPreviewInitRequest.SlotCount,
+				mPreviewInitRequest.ActiveSlotIndex))
+			{
+				outErrorReason = TEXT("Failed to apply preview carousel window.");
+				return FailPreviewManagerInit(outErrorReason);
+			}
+		}
+
+		SetPreviewManagerInitStep(
+			EVdjmRecordMediaPreviewInitStep::EFinalizeInitialization,
+			TEXT("Finalizing preview manager init."));
+		return EVdjmRecordMediaPreviewInitRunResult::ERunning;
+
+	case EVdjmRecordMediaPreviewInitStep::EFinalizeInitialization:
+		mbPreviewManagerInitRunning = false;
+		mbPreviewManagerInitialized = true;
+		mPreviewInitRegistryEntries.Reset();
+		mPreviewInitPendingWorkCount = 0;
+		SetPreviewManagerInitStep(
+			EVdjmRecordMediaPreviewInitStep::EComplete,
+			TEXT("Preview manager init complete."));
+		OnPreviewManagerInitFinished.Broadcast(true, FString());
+		return EVdjmRecordMediaPreviewInitRunResult::ESucceeded;
+
+	case EVdjmRecordMediaPreviewInitStep::EComplete:
+		mbPreviewManagerInitRunning = false;
+		mbPreviewManagerInitialized = true;
+		return EVdjmRecordMediaPreviewInitRunResult::ESucceeded;
+
+	case EVdjmRecordMediaPreviewInitStep::EInitError:
+	case EVdjmRecordMediaPreviewInitStep::EInitErrorEnd:
+	default:
+		mbPreviewManagerInitRunning = false;
+		mbPreviewManagerInitialized = false;
+		outErrorReason = mLastPreviewManagerErrorReason;
+		return EVdjmRecordMediaPreviewInitRunResult::EFailed;
+	}
+}
+
+float AVdjmRecordMediaPreviewManagerActor::GetPreviewManagerInitProgress() const
+{
+	if (mbPreviewManagerInitialized || mCurrentPreviewManagerInitStep == EVdjmRecordMediaPreviewInitStep::EComplete)
+	{
+		return 1.0f;
+	}
+
+	if (mCurrentPreviewManagerInitStep == EVdjmRecordMediaPreviewInitStep::ERefreshRegistry && IsValid(mMetadataStore))
+	{
+		return FMath::Clamp(mMetadataStore->GetRegistryScanProgress(), 0.0f, 1.0f);
+	}
+
+	if (mCurrentPreviewManagerInitStep == EVdjmRecordMediaPreviewInitStep::ECopyRegistryEntries &&
+		mPreviewInitRegistryEntries.Num() > 0)
+	{
+		return FMath::Clamp(
+			static_cast<float>(mRegistryCopyCursor) / static_cast<float>(mPreviewInitRegistryEntries.Num()),
+			0.0f,
+			1.0f);
+	}
+
+	switch (mCurrentPreviewManagerInitStep)
+	{
+	case EVdjmRecordMediaPreviewInitStep::EInitializeStart:
+		return 0.0f;
+	case EVdjmRecordMediaPreviewInitStep::EEnsureMetadataStore:
+		return 0.12f;
+	case EVdjmRecordMediaPreviewInitStep::ERefreshRegistry:
+		return 0.35f;
+	case EVdjmRecordMediaPreviewInitStep::ECopyRegistryEntries:
+		return 0.62f;
+	case EVdjmRecordMediaPreviewInitStep::EApplyCarouselWindow:
+		return 0.82f;
+	case EVdjmRecordMediaPreviewInitStep::EFinalizeInitialization:
+		return 0.94f;
+	default:
+		return 0.0f;
+	}
+}
+
+FVdjmRecordMediaPreviewInitStatus AVdjmRecordMediaPreviewManagerActor::GetPreviewManagerInitStatus() const
+{
+	FVdjmRecordMediaPreviewInitStatus status;
+	status.CurrentStep = mCurrentPreviewManagerInitStep;
+	status.Progress = GetPreviewManagerInitProgress();
+	status.PendingCount = mPreviewInitPendingWorkCount;
+	status.ProcessedCount = mPreviewInitProcessedWorkCount;
+	status.LastErrorReason = mLastPreviewManagerErrorReason;
+	status.bInitialized = mbPreviewManagerInitialized;
+	status.bRunning = mbPreviewManagerInitRunning;
+	return status;
+}
+
 bool AVdjmRecordMediaPreviewManagerActor::ApplyCarouselWindow(
 	int32 centerSourceIndex,
 	int32 slotCount,
@@ -848,6 +1182,28 @@ void AVdjmRecordMediaPreviewManagerActor::CompactWidgetRefs()
 			mPreviewWidgets.RemoveAt(widgetIndex);
 		}
 	}
+}
+
+void AVdjmRecordMediaPreviewManagerActor::SetPreviewManagerInitStep(
+	EVdjmRecordMediaPreviewInitStep initStep,
+	const FString& message)
+{
+	mCurrentPreviewManagerInitStep = initStep;
+	OnPreviewManagerInitStepChanged.Broadcast(initStep, message);
+}
+
+EVdjmRecordMediaPreviewInitRunResult AVdjmRecordMediaPreviewManagerActor::FailPreviewManagerInit(
+	const FString& errorReason)
+{
+	mLastPreviewManagerErrorReason = errorReason;
+	mbPreviewManagerInitRunning = false;
+	mbPreviewManagerInitialized = false;
+	mPreviewInitRegistryEntries.Reset();
+	mPreviewInitPendingWorkCount = 0;
+	SetPreviewManagerInitStep(EVdjmRecordMediaPreviewInitStep::EInitError, mLastPreviewManagerErrorReason);
+	SetPreviewManagerInitStep(EVdjmRecordMediaPreviewInitStep::EInitErrorEnd, mLastPreviewManagerErrorReason);
+	OnPreviewManagerInitFinished.Broadcast(false, mLastPreviewManagerErrorReason);
+	return EVdjmRecordMediaPreviewInitRunResult::EFailed;
 }
 
 bool UVdjmRecordMediaPreviewWidget::SetRegistryEntry(

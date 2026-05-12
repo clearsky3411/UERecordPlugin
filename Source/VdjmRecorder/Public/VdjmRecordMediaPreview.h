@@ -44,6 +44,91 @@ enum class EVdjmRecordMediaPreviewInputEvent : uint8
 	EStateChanged UMETA(DisplayName = "State Changed")
 };
 
+UENUM(BlueprintType)
+enum class EVdjmRecordMediaPreviewInitStep : uint8
+{
+	EInitErrorEnd UMETA(DisplayName = "Init Error End"),
+	EInitError UMETA(DisplayName = "Init Error"),
+	EInitializeStart UMETA(DisplayName = "Initialize Start"),
+	EEnsureMetadataStore UMETA(DisplayName = "Ensure Metadata Store"),
+	ERefreshRegistry UMETA(DisplayName = "Refresh Registry"),
+	ECopyRegistryEntries UMETA(DisplayName = "Copy Registry Entries"),
+	EApplyCarouselWindow UMETA(DisplayName = "Apply Carousel Window"),
+	EFinalizeInitialization UMETA(DisplayName = "Finalize Initialization"),
+	EComplete UMETA(DisplayName = "Complete")
+};
+
+UENUM(BlueprintType)
+enum class EVdjmRecordMediaPreviewInitRunResult : uint8
+{
+	ERunning UMETA(DisplayName = "Running"),
+	ESucceeded UMETA(DisplayName = "Succeeded"),
+	EFailed UMETA(DisplayName = "Failed")
+};
+
+USTRUCT(BlueprintType)
+struct VDJMRECORDER_API FVdjmRecordMediaPreviewInitRequest
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Init")
+	bool bForceRefresh = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Init")
+	bool bApplyCarouselWindowAfterInit = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Init")
+	bool bSucceedWithEmptyRegistry = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Init", meta = (ClampMin = "1", ClampMax = "32"))
+	int32 SlotCount = 5;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Init", meta = (ClampMin = "0", ClampMax = "31"))
+	int32 ActiveSlotIndex = 2;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Init")
+	int32 InitialCenterSourceIndex = INDEX_NONE;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Init")
+	bool bAutoStartCenterPreview = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Init", meta = (ClampMin = "1"))
+	int32 MaxManifestFilesPerStep = 8;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Init", meta = (ClampMin = "1"))
+	int32 MaxRegistryEntryStateChecksPerStep = 64;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Init", meta = (ClampMin = "1"))
+	int32 MaxRegistryEntriesPerStep = 32;
+};
+
+USTRUCT(BlueprintType)
+struct VDJMRECORDER_API FVdjmRecordMediaPreviewInitStatus
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaPreview|Init")
+	EVdjmRecordMediaPreviewInitStep CurrentStep = EVdjmRecordMediaPreviewInitStep::EInitializeStart;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaPreview|Init")
+	float Progress = 0.0f;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaPreview|Init")
+	int32 PendingCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaPreview|Init")
+	int32 ProcessedCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaPreview|Init")
+	FString LastErrorReason;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaPreview|Init")
+	bool bInitialized = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|MediaPreview|Init")
+	bool bRunning = false;
+};
+
 UCLASS(BlueprintType)
 class VDJMRECORDER_API UVdjmRecordMediaPreviewSlot : public UObject
 {
@@ -143,6 +228,7 @@ struct VDJMRECORDER_API FVdjmRecordMediaPreviewNotifyPayload
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVdjmRecordMediaPreviewNotifyDelegate, const FVdjmRecordMediaPreviewNotifyPayload&, Payload);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FVdjmRecordMediaPreviewSimpleDelegate);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmRecordMediaPreviewStoreRefreshDelegate, bool, bSuccess, const FString&, ErrorReason);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmRecordMediaPreviewInitStepDelegate, EVdjmRecordMediaPreviewInitStep, InitStep, const FString&, Message);
 
 UCLASS(BlueprintType, Blueprintable)
 class VDJMRECORDER_API AVdjmRecordMediaPreviewManagerActor : public AActor
@@ -159,6 +245,14 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview|Store")
 	bool RefreshPreviewStoreFromDisk(FString& outErrorReason);
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Init", meta = (WorldContext = "worldContextObject"))
+	static bool GetMediaPreviewManagerInitStatus(UObject* worldContextObject, FVdjmRecordMediaPreviewInitStatus& outStatus);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview|Init")
+	bool InitializePreviewManagerFromDisk(bool bForceRefresh, FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview|Init")
+	bool StartPreviewManagerInit(const FVdjmRecordMediaPreviewInitRequest& initRequest, FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview|Init")
+	EVdjmRecordMediaPreviewInitRunResult AdvancePreviewManagerInitStep(FString& outErrorReason);
 	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview|Carousel")
 	bool ApplyCarouselWindow(int32 centerSourceIndex, int32 slotCount, int32 activeSlotIndex);
 	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview|Carousel")
@@ -188,6 +282,22 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Store")
 	TArray<FVdjmRecordMediaRegistryEntry> GetPreviewRegistryEntries() const { return mRegistryEntries; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Init")
+	bool IsPreviewManagerInitialized() const { return mbPreviewManagerInitialized; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Init")
+	bool IsPreviewManagerInitRunning() const { return mbPreviewManagerInitRunning; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Init")
+	EVdjmRecordMediaPreviewInitStep GetCurrentPreviewManagerInitStep() const { return mCurrentPreviewManagerInitStep; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Init")
+	float GetPreviewManagerInitProgress() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Init")
+	int32 GetPreviewManagerInitPendingCount() const { return mPreviewInitPendingWorkCount; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Init")
+	int32 GetPreviewManagerInitProcessedCount() const { return mPreviewInitProcessedWorkCount; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Init")
+	FString GetLastPreviewManagerErrorReason() const { return mLastPreviewManagerErrorReason; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Init")
+	FVdjmRecordMediaPreviewInitStatus GetPreviewManagerInitStatus() const;
 	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Slot")
 	TArray<UVdjmRecordMediaPreviewSlot*> GetPreviewSlots() const;
 	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Slot")
@@ -224,6 +334,15 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Recorder|MediaPreview|Event")
 	FVdjmRecordMediaPreviewSimpleDelegate OnPreviewRegistryChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "Recorder|MediaPreview|Event")
+	FVdjmRecordMediaPreviewSimpleDelegate OnPreviewManagerInitStarted;
+
+	UPROPERTY(BlueprintAssignable, Category = "Recorder|MediaPreview|Event")
+	FVdjmRecordMediaPreviewInitStepDelegate OnPreviewManagerInitStepChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "Recorder|MediaPreview|Event")
+	FVdjmRecordMediaPreviewStoreRefreshDelegate OnPreviewManagerInitFinished;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Config")
 	bool bAutoRefreshStoreOnBeginPlay = false;
@@ -268,6 +387,8 @@ private:
 		EVdjmRecordMediaPreviewInputEvent inputEventType);
 	bool AssignEntryToSlot(int32 slotIndex, int32 sourceRegistryIndex);
 	void CompactWidgetRefs();
+	void SetPreviewManagerInitStep(EVdjmRecordMediaPreviewInitStep initStep, const FString& message);
+	EVdjmRecordMediaPreviewInitRunResult FailPreviewManagerInit(const FString& errorReason);
 
 	UPROPERTY(Transient)
 	TObjectPtr<UVdjmRecordMetadataStore> mMetadataStore;
@@ -281,9 +402,21 @@ private:
 	UPROPERTY(Transient)
 	TArray<FVdjmRecordMediaRegistryEntry> mRegistryEntries;
 
+	UPROPERTY(Transient)
+	TArray<FVdjmRecordMediaRegistryEntry> mPreviewInitRegistryEntries;
+
+	FVdjmRecordMediaPreviewInitRequest mPreviewInitRequest;
+	FString mLastPreviewManagerErrorReason;
+	EVdjmRecordMediaPreviewInitStep mCurrentPreviewManagerInitStep = EVdjmRecordMediaPreviewInitStep::EInitializeStart;
 	int32 mCenterSourceIndex = INDEX_NONE;
 	int32 mPreviewingSlotIndex = INDEX_NONE;
 	int32 mLastPreviewIndex = INDEX_NONE;
+	int32 mRegistryCopyCursor = 0;
+	int32 mPreviewInitPendingWorkCount = 0;
+	int32 mPreviewInitProcessedWorkCount = 0;
+	bool mbPreviewManagerInitialized = false;
+	bool mbPreviewManagerInitRunning = false;
+	bool mbPreviewInitRegistryScanStarted = false;
 };
 
 UCLASS(BlueprintType, Blueprintable)
