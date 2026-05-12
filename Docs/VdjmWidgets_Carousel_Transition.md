@@ -6,6 +6,26 @@
 
 `PreviewManager` 초기화, loading widget, EventFlow 진행 방식은 기존 구조를 유지한다. 새 carousel 작업은 card 생성, card 상태, layout, input, swipe, active/visible/hidden/empty 표시 정책에만 집중한다.
 
+## 지금 해야 할 일
+
+아래 순서대로 한다. 이 목록은 새 작업자가 이어받을 때 가장 먼저 봐야 하는 실행 체크리스트다.
+
+- `VdjmWidgets` runtime module을 추가한다.
+- `UVdjmWidgetMediaCardWidget`을 만든다.
+- Card 상태를 `Empty`, `Waiting`, `Visible`, `Active`, `Hidden`, `Error`로 고정한다.
+- Card public API를 만든다: source bind, state change, active preview start/stop, visible thumbnail/first-frame, hidden release, empty placeholder.
+- `UVdjmWidgetMediaCarouselWidget`을 만든다.
+- Carousel이 source provider, card pool, layout policy, state policy, input controller, motion controller를 소유하게 한다.
+- Carousel refresh는 현재 source snapshot을 읽고 card/window/state/layout만 다시 적용한다.
+- Carousel refresh는 preview manager init/loading을 시작하거나 변경하지 않는다.
+- Line layout부터 만든다. curve, fancy depth, inertia swipe는 line layout이 안정된 뒤 붙인다.
+- Empty/single/pair/window/overflow 상태를 먼저 정확히 만든다.
+- Swipe는 input controller와 motion controller에서만 다룬다.
+- Active card는 하나만 loop preview한다.
+- Visible card는 재생하지 않고 첫 프레임/thumbnail만 보여준다.
+- Hidden card는 media resource를 멈추고 숨긴다.
+- 완료 후 BP 사용법을 이 문서의 `완성 후 사용법` 섹션에 실제 함수/BindWidget 이름으로 갱신한다.
+
 ## 왜 다시 만드는가
 
 기존 legacy carousel 실험에서 확인된 문제는 다음과 같다.
