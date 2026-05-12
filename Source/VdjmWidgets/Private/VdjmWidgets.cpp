@@ -2,6 +2,8 @@
 
 #define LOCTEXT_NAMESPACE "FVdjmWidgetsModule"
 
+DEFINE_LOG_CATEGORY(LogVdjmWidgets)
+
 void FVdjmWidgetsModule::StartupModule()
 {
 }
