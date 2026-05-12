@@ -48,6 +48,8 @@ public:
 	void StopPreview(bool bReleaseMediaResources);
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card")
 	void ReleaseMediaResources();
+	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card|Debug")
+	void DumpDebugCardState(const FString& reason) const;
 
 	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
 	FVdjmWidgetMediaCardSource GetCardSource() const { return mCardSource; }
@@ -95,6 +97,9 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "VdjmWidgets|Media|Card")
 	TObjectPtr<UWidget> ErrorLayer;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VdjmWidgets|Media|Card|Debug")
+	bool bDebugTraceState = true;
 
 private:
 	UPROPERTY(Transient)

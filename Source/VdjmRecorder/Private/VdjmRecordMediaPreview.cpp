@@ -1511,6 +1511,179 @@ void UVdjmRecordMediaPreviewWidget::ApplyInputButtonStyle()
 	InputButton->SetColorAndOpacity(FLinearColor(1.0f, 1.0f, 1.0f, 0.0f));
 }
 
+bool UVdjmRecordMediaPreviewProbeWidget::RefreshAndOpenLatestPreview(FString& outErrorReason)
+{
+	outErrorReason.Reset();
+	AVdjmRecordMediaPreviewManagerActor* previewManager =
+		AVdjmRecordMediaPreviewManagerActor::FindOrSpawnMediaPreviewManagerActor(this);
+	if (previewManager == nullptr)
+	{
+		outErrorReason = TEXT("Preview manager is invalid.");
+		return false;
+	}
+
+	if (not previewManager->RefreshPreviewStoreFromDisk(outErrorReason))
+	{
+		return false;
+	}
+
+	const TArray<FVdjmRecordMediaRegistryEntry> registryEntries = previewManager->GetPreviewRegistryEntries();
+	if (registryEntries.Num() <= 0)
+	{
+		outErrorReason = TEXT("Preview registry is empty.");
+		return false;
+	}
+
+	return OpenPreviewFromRegistryEntry(registryEntries.Last(), outErrorReason);
+}
+
+bool UVdjmRecordMediaPreviewProbeWidget::RefreshAndOpenPreviewAtIndex(
+	int32 registryEntryIndex,
+	FString& outErrorReason)
+{
+	outErrorReason.Reset();
+	AVdjmRecordMediaPreviewManagerActor* previewManager =
+		AVdjmRecordMediaPreviewManagerActor::FindOrSpawnMediaPreviewManagerActor(this);
+	if (previewManager == nullptr)
+	{
+		outErrorReason = TEXT("Preview manager is invalid.");
+		return false;
+	}
+
+	if (not previewManager->RefreshPreviewStoreFromDisk(outErrorReason))
+	{
+		return false;
+	}
+
+	const TArray<FVdjmRecordMediaRegistryEntry> registryEntries = previewManager->GetPreviewRegistryEntries();
+	if (not registryEntries.IsValidIndex(registryEntryIndex))
+	{
+		outErrorReason = FString::Printf(TEXT("Preview registry index is invalid. Index=%d Count=%d"), registryEntryIndex, registryEntries.Num());
+		return false;
+	}
+
+	return OpenPreviewFromRegistryEntry(registryEntries[registryEntryIndex], outErrorReason);
+}
+
+bool UVdjmRecordMediaPreviewProbeWidget::OpenPreviewFromRegistryEntry(
+	const FVdjmRecordMediaRegistryEntry& registryEntry,
+	FString& outErrorReason)
+{
+	outErrorReason.Reset();
+	EnsureProbeMediaObjects();
+	ApplyProbeMediaTextureBrush();
+
+	if (mProbeMediaPlayer == nullptr)
+	{
+		outErrorReason = TEXT("Probe media player is invalid.");
+		return false;
+	}
+
+	const FString previewSource = GetPreviewSourceFromRegistryEntry(registryEntry);
+	if (previewSource.IsEmpty())
+	{
+		outErrorReason = TEXT("Preview source is empty.");
+		return false;
+	}
+
+	StopProbePreview(true);
+	EnsureProbeMediaObjects();
+	ApplyProbeMediaTextureBrush();
+	mProbeMediaPlayer->SetLooping(bLoopPreview);
+
+	const bool bOpened = previewSource.StartsWith(TEXT("content://")) || previewSource.Contains(TEXT("://"))
+		? mProbeMediaPlayer->OpenUrl(previewSource)
+		: mProbeMediaPlayer->OpenFile(previewSource);
+	if (not bOpened)
+	{
+		outErrorReason = FString::Printf(TEXT("Failed to open preview source. Source=%s"), *previewSource);
+		return false;
+	}
+
+	if (bPlayOnOpen)
+	{
+		mProbeMediaPlayer->Play();
+	}
+	return true;
+}
+
+void UVdjmRecordMediaPreviewProbeWidget::StopProbePreview(bool bCloseMedia)
+{
+	if (mProbeMediaPlayer == nullptr)
+	{
+		return;
+	}
+
+	if (bCloseMedia)
+	{
+		mProbeMediaPlayer->Close();
+	}
+	else
+	{
+		mProbeMediaPlayer->Pause();
+	}
+}
+
+void UVdjmRecordMediaPreviewProbeWidget::NativeConstruct()
+{
+	Super::NativeConstruct();
+	EnsureProbeMediaObjects();
+	ApplyProbeMediaTextureBrush();
+
+	if (bAutoOpenOnConstruct)
+	{
+		FString errorReason;
+		if (bUseLatestRegistryEntry || RegistryEntryIndex == INDEX_NONE)
+		{
+			RefreshAndOpenLatestPreview(errorReason);
+		}
+		else
+		{
+			RefreshAndOpenPreviewAtIndex(RegistryEntryIndex, errorReason);
+		}
+	}
+}
+
+void UVdjmRecordMediaPreviewProbeWidget::NativeDestruct()
+{
+	StopProbePreview(true);
+	Super::NativeDestruct();
+}
+
+void UVdjmRecordMediaPreviewProbeWidget::EnsureProbeMediaObjects()
+{
+	if (mProbeMediaPlayer == nullptr)
+	{
+		mProbeMediaPlayer = NewObject<UMediaPlayer>(this);
+	}
+
+	if (mProbeMediaTexture == nullptr)
+	{
+		mProbeMediaTexture = NewObject<UMediaTexture>(this);
+		mProbeMediaTexture->AutoClear = true;
+		mProbeMediaTexture->ClearColor = FLinearColor::Black;
+	}
+
+	if (mProbeMediaTexture != nullptr && mProbeMediaPlayer != nullptr)
+	{
+		mProbeMediaTexture->SetMediaPlayer(mProbeMediaPlayer);
+		mProbeMediaTexture->UpdateResource();
+	}
+}
+
+void UVdjmRecordMediaPreviewProbeWidget::ApplyProbeMediaTextureBrush()
+{
+	if (PreviewImage == nullptr || mProbeMediaTexture == nullptr)
+	{
+		return;
+	}
+
+	FSlateBrush mediaBrush;
+	mediaBrush.SetResourceObject(mProbeMediaTexture);
+	mediaBrush.ImageSize = FVector2D(512.0f, 512.0f);
+	PreviewImage->SetBrush(mediaBrush);
+}
+
 bool UVdjmRecordMediaPreviewCarouselWidget::RefreshCarousel(FString& outErrorReason)
 {
 	outErrorReason.Reset();

@@ -526,6 +526,59 @@ private:
 };
 
 UCLASS(BlueprintType, Blueprintable)
+class VDJMRECORDER_API UVdjmRecordMediaPreviewProbeWidget : public UUserWidget
+{
+	GENERATED_BODY()
+
+public:
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview|Probe")
+	bool RefreshAndOpenLatestPreview(FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview|Probe")
+	bool RefreshAndOpenPreviewAtIndex(int32 registryEntryIndex, FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview|Probe")
+	bool OpenPreviewFromRegistryEntry(const FVdjmRecordMediaRegistryEntry& registryEntry, FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview|Probe")
+	void StopProbePreview(bool bCloseMedia);
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Probe")
+	UMediaPlayer* GetProbeMediaPlayer() const { return mProbeMediaPlayer; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Probe")
+	UMediaTexture* GetProbeMediaTexture() const { return mProbeMediaTexture; }
+
+protected:
+	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
+
+	void EnsureProbeMediaObjects();
+	void ApplyProbeMediaTextureBrush();
+
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Recorder|MediaPreview|Probe")
+	TObjectPtr<UImage> PreviewImage;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Probe")
+	bool bAutoOpenOnConstruct = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Probe")
+	bool bUseLatestRegistryEntry = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Probe")
+	bool bLoopPreview = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Probe")
+	bool bPlayOnOpen = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|MediaPreview|Probe")
+	int32 RegistryEntryIndex = INDEX_NONE;
+
+private:
+	UPROPERTY(Transient)
+	TObjectPtr<UMediaPlayer> mProbeMediaPlayer;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMediaTexture> mProbeMediaTexture;
+};
+
+UCLASS(BlueprintType, Blueprintable)
 class VDJMRECORDER_API UVdjmRecordMediaPreviewCarouselWidget : public UUserWidget
 {
 	GENERATED_BODY()

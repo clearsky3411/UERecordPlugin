@@ -59,6 +59,9 @@ struct VDJMWIDGETS_API FVdjmWidgetMediaCarouselLayoutOptions
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VdjmWidgets|Media|Carousel", meta = (ClampMin = "1", ClampMax = "32"))
 	int32 VisibleCardCount = 3;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VdjmWidgets|Media|Carousel", meta = (ClampMin = "-1", ClampMax = "31"))
+	int32 ActiveSlotIndex = INDEX_NONE;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VdjmWidgets|Media|Carousel")
 	bool bLoop = false;
 
@@ -130,4 +133,5 @@ struct VDJMWIDGETS_API FVdjmWidgetMediaCarouselInputPayload
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmWidgetMediaCarouselRefreshDelegate, bool, bSuccess, const FString&, ErrorReason);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmWidgetMediaCarouselActiveSourceChangedDelegate, int32, PreviousSourceIndex, int32, NewSourceIndex);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmWidgetMediaCardStateDelegate, EVdjmWidgetMediaCardState, PreviousState, EVdjmWidgetMediaCardState, NewState);

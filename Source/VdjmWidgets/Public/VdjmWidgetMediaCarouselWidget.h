@@ -184,6 +184,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
 	bool SetActiveSourceIndex(int32 activeSourceIndex, bool bRefreshLayout);
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
+	bool SlideNext();
+	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
+	bool SlidePrevious();
+	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
 	void SetPreviewManager(AVdjmRecordMediaPreviewManagerActor* previewManager);
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel|Debug")
 	void DumpDebugCarouselState(const FString& reason) const;
@@ -200,6 +204,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "VdjmWidgets|Media|Carousel")
 	FVdjmWidgetMediaCarouselRefreshDelegate OnCarouselRefreshFinished;
 
+	UPROPERTY(BlueprintAssignable, Category = "VdjmWidgets|Media|Carousel")
+	FVdjmWidgetMediaCarouselActiveSourceChangedDelegate OnActiveSourceChanged;
+
 protected:
 	virtual void NativeConstruct() override;
 	virtual FReply NativeOnMouseButtonDown(const FGeometry& inGeometry, const FPointerEvent& inMouseEvent) override;
@@ -212,10 +219,17 @@ protected:
 	bool EnsureControllers();
 	bool RebuildVisibleCards(FString& outErrorReason);
 	bool ApplyLayoutSlots(const TArray<FVdjmWidgetMediaCarouselSlot>& layoutSlots, FString& outErrorReason);
+	void ApplySlotTransforms(const TArray<FVdjmWidgetMediaCarouselSlot>& layoutSlots);
+	void ApplyHostChildOrder(const TArray<FVdjmWidgetMediaCarouselSlot>& layoutSlots);
 	FVector2D GetCarouselViewSize() const;
+	FVector2D GetLayoutDirection() const;
+	float GetLayoutSpacing() const;
+	int32 ResolveActiveSourceIndex(int32 activeSourceIndex) const;
+	bool ApplyResolvedActiveSourceIndex(int32 activeSourceIndex, bool bRefreshLayout);
 	void BeginDebugPointerTrace(const FGeometry& inGeometry, const FPointerEvent& pointerEvent, const TCHAR* inputType);
 	void UpdateDebugPointerTrace(const FGeometry& inGeometry, const FPointerEvent& pointerEvent, const TCHAR* inputType);
 	void EndDebugPointerTrace(const FGeometry& inGeometry, const FPointerEvent& pointerEvent, const TCHAR* inputType);
+	bool CommitDebugSwipe(const FVector2D& totalDelta, double elapsedSeconds);
 	FReply BuildDebugInputReply() const;
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "VdjmWidgets|Media|Carousel")
@@ -288,10 +302,14 @@ private:
 	UPROPERTY(Transient)
 	TArray<FVdjmWidgetMediaCardSource> mSourceSnapshot;
 
+	UPROPERTY(Transient)
+	TArray<FVdjmWidgetMediaCarouselSlot> mLayoutSlots;
+
 	FVector2D mDebugPointerStartScreenPosition = FVector2D::ZeroVector;
 	FVector2D mDebugPointerLastScreenPosition = FVector2D::ZeroVector;
 	double mDebugPointerStartSeconds = 0.0;
 	double mDebugPointerLastMoveLogSeconds = 0.0;
+	float mTransientSlotOffset = 0.0f;
 	EVdjmWidgetMediaCarouselLayoutState mLayoutState = EVdjmWidgetMediaCarouselLayoutState::EEmpty;
 	int32 mActiveSourceIndex = INDEX_NONE;
 	int32 mDebugPointerMoveCount = 0;

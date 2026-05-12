@@ -1,6 +1,8 @@
 #include "VdjmWidgetMediaCardWidget.h"
 
+#include "Components/PanelWidget.h"
 #include "Components/Widget.h"
+#include "VdjmWidgets.h"
 
 namespace
 {
@@ -10,6 +12,40 @@ namespace
 		{
 			widget->SetVisibility(visibility);
 		}
+	}
+
+	const TCHAR* GetVisibilityString(ESlateVisibility visibility)
+	{
+		switch (visibility)
+		{
+		case ESlateVisibility::Visible:
+			return TEXT("Visible");
+		case ESlateVisibility::Collapsed:
+			return TEXT("Collapsed");
+		case ESlateVisibility::Hidden:
+			return TEXT("Hidden");
+		case ESlateVisibility::HitTestInvisible:
+			return TEXT("HitTestInvisible");
+		case ESlateVisibility::SelfHitTestInvisible:
+			return TEXT("SelfHitTestInvisible");
+		default:
+			return TEXT("Unknown");
+		}
+	}
+
+	template <typename EnumType>
+	FString GetEnumValueString(EnumType value)
+	{
+		const UEnum* enumObject = StaticEnum<EnumType>();
+		return enumObject != nullptr
+			? enumObject->GetValueAsString(value)
+			: FString::FromInt(static_cast<int32>(value));
+	}
+
+	int32 GetOptionalPanelChildCount(const UWidget* widget)
+	{
+		const UPanelWidget* panelWidget = Cast<UPanelWidget>(widget);
+		return panelWidget != nullptr ? panelWidget->GetChildrenCount() : INDEX_NONE;
 	}
 }
 
@@ -57,6 +93,10 @@ bool UVdjmWidgetMediaCardWidget::SetCardState(EVdjmWidgetMediaCardState newState
 
 	BP_OnCardStateChanged(previousState, newState);
 	OnCardStateChanged.Broadcast(previousState, newState);
+	if (bDebugTraceState)
+	{
+		DumpDebugCardState(TEXT("SetCardState"));
+	}
 	return true;
 }
 
@@ -149,4 +189,40 @@ void UVdjmWidgetMediaCardWidget::StopPreview(bool bReleaseMediaResources)
 
 void UVdjmWidgetMediaCardWidget::ReleaseMediaResources()
 {
+}
+
+void UVdjmWidgetMediaCardWidget::DumpDebugCardState(const FString& reason) const
+{
+	UE_LOG(
+		LogVdjmWidgets,
+		Log,
+		TEXT("VdjmCard State Reason=%s Widget=%s State=%s Visibility=%s SourceIndex=%d Valid=%s RecordId=%s"),
+		*reason,
+		*GetNameSafe(this),
+		*GetEnumValueString(mCardState),
+		GetVisibilityString(GetVisibility()),
+		mCardSource.SourceRegistryIndex,
+		mCardSource.bValid ? TEXT("true") : TEXT("false"),
+		*mCardSource.RegistryEntry.RecordId);
+
+	UE_LOG(
+		LogVdjmWidgets,
+		Log,
+		TEXT("VdjmCard Layers Widget=%s Empty=%s/%s/%d Waiting=%s/%s/%d Visible=%s/%s/%d Active=%s/%s/%d Error=%s/%s/%d"),
+		*GetNameSafe(this),
+		EmptyLayer != nullptr ? TEXT("Valid") : TEXT("None"),
+		EmptyLayer != nullptr ? GetVisibilityString(EmptyLayer->GetVisibility()) : TEXT("None"),
+		GetOptionalPanelChildCount(EmptyLayer),
+		WaitingLayer != nullptr ? TEXT("Valid") : TEXT("None"),
+		WaitingLayer != nullptr ? GetVisibilityString(WaitingLayer->GetVisibility()) : TEXT("None"),
+		GetOptionalPanelChildCount(WaitingLayer),
+		VisibleLayer != nullptr ? TEXT("Valid") : TEXT("None"),
+		VisibleLayer != nullptr ? GetVisibilityString(VisibleLayer->GetVisibility()) : TEXT("None"),
+		GetOptionalPanelChildCount(VisibleLayer),
+		ActiveLayer != nullptr ? TEXT("Valid") : TEXT("None"),
+		ActiveLayer != nullptr ? GetVisibilityString(ActiveLayer->GetVisibility()) : TEXT("None"),
+		GetOptionalPanelChildCount(ActiveLayer),
+		ErrorLayer != nullptr ? TEXT("Valid") : TEXT("None"),
+		ErrorLayer != nullptr ? GetVisibilityString(ErrorLayer->GetVisibility()) : TEXT("None"),
+		GetOptionalPanelChildCount(ErrorLayer));
 }
