@@ -1967,6 +1967,7 @@ void UVdjmRecordMetadataStore::Clear()
 {
 	mLastManifest = nullptr;
 	mRegistryEntries.Reset();
+	ResetRegistryScanRuntimeState();
 	mAuthorityRole = EVdjmRecordManifestAuthorityRole::EDeveloper;
 	mAuthorityUserId.Reset();
 	mAuthorityTokenId.Reset();
@@ -2115,18 +2116,55 @@ bool UVdjmRecordMetadataStore::RefreshRegistryFromDisk(FString& outErrorReason)
 {
 	outErrorReason.Reset();
 
+	FVdjmRecordMetadataRegistryScanRequest scanRequest;
+	if (not StartRegistryScanFromDisk(scanRequest, outErrorReason))
+	{
+		return false;
+	}
+
+	while (true)
+	{
+		const EVdjmRecordMetadataRegistryScanRunResult runResult = AdvanceRegistryScanFromDisk(outErrorReason);
+		if (runResult == EVdjmRecordMetadataRegistryScanRunResult::ESucceeded)
+		{
+			return true;
+		}
+
+		if (runResult == EVdjmRecordMetadataRegistryScanRunResult::EFailed)
+		{
+			return false;
+		}
+	}
+}
+
+bool UVdjmRecordMetadataStore::StartRegistryScanFromDisk(
+	const FVdjmRecordMetadataRegistryScanRequest& scanRequest,
+	FString& outErrorReason)
+{
+	outErrorReason.Reset();
+
+	if (mbRegistryScanRunning)
+	{
+		return true;
+	}
+
+	ResetRegistryScanRuntimeState();
+	mRegistryScanRequest = scanRequest;
+	mRegistryScanRequest.MaxManifestFilesPerStep = FMath::Max(1, mRegistryScanRequest.MaxManifestFilesPerStep);
+	mRegistryScanRequest.MaxRegistryEntriesPerStep = FMath::Max(1, mRegistryScanRequest.MaxRegistryEntriesPerStep);
+
 	FString loadErrorReason;
 	if (not LoadRegistry(loadErrorReason))
 	{
 		UE_LOG(LogVdjmRecorderCore, Warning,
-			TEXT("UVdjmRecordMetadataStore::RefreshRegistryFromDisk - Existing registry load failed. Reason=%s"),
+			TEXT("UVdjmRecordMetadataStore::StartRegistryScanFromDisk - Existing registry load failed. Reason=%s"),
 			*loadErrorReason);
 	}
 
 	const FString manifestDirectoryPath = GetManifestDirectoryPath();
 	if (manifestDirectoryPath.IsEmpty())
 	{
-		outErrorReason = TEXT("Manifest directory path is empty.");
+		FailRegistryScan(TEXT("Manifest directory path is empty."), outErrorReason);
 		return false;
 	}
 
@@ -2135,10 +2173,49 @@ bool UVdjmRecordMetadataStore::RefreshRegistryFromDisk(FString& outErrorReason)
 		TArray<FString> manifestFileNames;
 		const FString searchPattern = FPaths::Combine(manifestDirectoryPath, TEXT("*.vdjm.json"));
 		IFileManager::Get().FindFiles(manifestFileNames, *searchPattern, true, false);
+		manifestFileNames.Sort();
 
+		mPendingRegistryScanManifestFilePaths.Reserve(manifestFileNames.Num());
 		for (const FString& manifestFileName : manifestFileNames)
 		{
-			const FString metadataFilePath = FPaths::Combine(manifestDirectoryPath, manifestFileName);
+			mPendingRegistryScanManifestFilePaths.Add(FPaths::Combine(manifestDirectoryPath, manifestFileName));
+		}
+	}
+
+	mRegistryScanTotalManifestFileCount = mPendingRegistryScanManifestFilePaths.Num();
+	mCurrentRegistryScanStep = EVdjmRecordMetadataRegistryScanStep::ERegisterManifestFiles;
+	mbRegistryScanRunning = true;
+	return true;
+}
+
+EVdjmRecordMetadataRegistryScanRunResult UVdjmRecordMetadataStore::AdvanceRegistryScanFromDisk(
+	FString& outErrorReason)
+{
+	outErrorReason.Reset();
+
+	if (not mbRegistryScanRunning)
+	{
+		if (mCurrentRegistryScanStep == EVdjmRecordMetadataRegistryScanStep::EComplete)
+		{
+			return EVdjmRecordMetadataRegistryScanRunResult::ESucceeded;
+		}
+
+		outErrorReason = mLastRegistryScanErrorReason.IsEmpty()
+			? TEXT("Registry scan has not started.")
+			: mLastRegistryScanErrorReason;
+		return EVdjmRecordMetadataRegistryScanRunResult::EFailed;
+	}
+
+	switch (mCurrentRegistryScanStep)
+	{
+	case EVdjmRecordMetadataRegistryScanStep::ERegisterManifestFiles:
+	{
+		const int32 processEndIndex = FMath::Min(
+			mRegistryScanManifestCursor + mRegistryScanRequest.MaxManifestFilesPerStep,
+			mPendingRegistryScanManifestFilePaths.Num());
+		for (; mRegistryScanManifestCursor < processEndIndex; ++mRegistryScanManifestCursor)
+		{
+			const FString& metadataFilePath = mPendingRegistryScanManifestFilePaths[mRegistryScanManifestCursor];
 			FVdjmRecordMediaRegistryEntry entry;
 			FString entryErrorReason;
 			if (BuildRegistryEntryFromManifestFile(metadataFilePath, entry, entryErrorReason))
@@ -2148,19 +2225,121 @@ bool UVdjmRecordMetadataStore::RefreshRegistryFromDisk(FString& outErrorReason)
 			else
 			{
 				UE_LOG(LogVdjmRecorderCore, Warning,
-					TEXT("UVdjmRecordMetadataStore::RefreshRegistryFromDisk - Failed to register manifest file. Path=%s Reason=%s"),
+					TEXT("UVdjmRecordMetadataStore::AdvanceRegistryScanFromDisk - Failed to register manifest file. Path=%s Reason=%s"),
 					*metadataFilePath,
 					*entryErrorReason);
 			}
+			++mRegistryScanProcessedManifestFileCount;
 		}
+
+		if (mRegistryScanManifestCursor < mPendingRegistryScanManifestFilePaths.Num())
+		{
+			return EVdjmRecordMetadataRegistryScanRunResult::ERunning;
+		}
+
+		mRegistryScanTotalEntryStateCount = mRegistryEntries.Num();
+		mRegistryScanProcessedEntryStateCount = 0;
+		mRegistryScanEntryStateCursor = 0;
+		mCurrentRegistryScanStep = EVdjmRecordMetadataRegistryScanStep::ERefreshRegistryEntries;
+		return EVdjmRecordMetadataRegistryScanRunResult::ERunning;
 	}
 
-	for (FVdjmRecordMediaRegistryEntry& entry : mRegistryEntries)
+	case EVdjmRecordMetadataRegistryScanStep::ERefreshRegistryEntries:
 	{
-		RefreshRegistryEntryFileState(entry);
+		const int32 processEndIndex = FMath::Min(
+			mRegistryScanEntryStateCursor + mRegistryScanRequest.MaxRegistryEntriesPerStep,
+			mRegistryEntries.Num());
+		for (; mRegistryScanEntryStateCursor < processEndIndex; ++mRegistryScanEntryStateCursor)
+		{
+			RefreshRegistryEntryFileState(mRegistryEntries[mRegistryScanEntryStateCursor]);
+			++mRegistryScanProcessedEntryStateCount;
+		}
+
+		if (mRegistryScanEntryStateCursor < mRegistryEntries.Num())
+		{
+			return EVdjmRecordMetadataRegistryScanRunResult::ERunning;
+		}
+
+		mCurrentRegistryScanStep = mRegistryScanRequest.bSaveRegistryOnComplete
+			? EVdjmRecordMetadataRegistryScanStep::ESaveRegistry
+			: EVdjmRecordMetadataRegistryScanStep::EComplete;
+		return EVdjmRecordMetadataRegistryScanRunResult::ERunning;
 	}
 
-	return SaveRegistry(outErrorReason);
+	case EVdjmRecordMetadataRegistryScanStep::ESaveRegistry:
+		if (not SaveRegistry(outErrorReason))
+		{
+			return FailRegistryScan(outErrorReason, outErrorReason);
+		}
+
+		CompleteRegistryScan();
+		return EVdjmRecordMetadataRegistryScanRunResult::ESucceeded;
+
+	case EVdjmRecordMetadataRegistryScanStep::EComplete:
+		CompleteRegistryScan();
+		return EVdjmRecordMetadataRegistryScanRunResult::ESucceeded;
+
+	case EVdjmRecordMetadataRegistryScanStep::EFailed:
+	default:
+		return FailRegistryScan(
+			mLastRegistryScanErrorReason.IsEmpty()
+				? TEXT("Registry scan failed.")
+				: mLastRegistryScanErrorReason,
+			outErrorReason);
+	}
+}
+
+float UVdjmRecordMetadataStore::GetRegistryScanProgress() const
+{
+	switch (mCurrentRegistryScanStep)
+	{
+	case EVdjmRecordMetadataRegistryScanStep::ERegisterManifestFiles:
+	{
+		const float manifestAlpha = mRegistryScanTotalManifestFileCount > 0
+			? static_cast<float>(mRegistryScanProcessedManifestFileCount) / static_cast<float>(mRegistryScanTotalManifestFileCount)
+			: 1.0f;
+		return FMath::Lerp(0.05f, 0.72f, FMath::Clamp(manifestAlpha, 0.0f, 1.0f));
+	}
+
+	case EVdjmRecordMetadataRegistryScanStep::ERefreshRegistryEntries:
+	{
+		const float entryAlpha = mRegistryScanTotalEntryStateCount > 0
+			? static_cast<float>(mRegistryScanProcessedEntryStateCount) / static_cast<float>(mRegistryScanTotalEntryStateCount)
+			: 1.0f;
+		return FMath::Lerp(0.72f, 0.94f, FMath::Clamp(entryAlpha, 0.0f, 1.0f));
+	}
+
+	case EVdjmRecordMetadataRegistryScanStep::ESaveRegistry:
+		return 0.96f;
+
+	case EVdjmRecordMetadataRegistryScanStep::EComplete:
+		return 1.0f;
+
+	case EVdjmRecordMetadataRegistryScanStep::EFailed:
+	case EVdjmRecordMetadataRegistryScanStep::ENone:
+	default:
+		return 0.0f;
+	}
+}
+
+int32 UVdjmRecordMetadataStore::GetRegistryScanPendingCount() const
+{
+	return FMath::Max(0, GetRegistryScanTotalCount() - GetRegistryScanProcessedCount());
+}
+
+int32 UVdjmRecordMetadataStore::GetRegistryScanProcessedCount() const
+{
+	return mRegistryScanProcessedManifestFileCount + mRegistryScanProcessedEntryStateCount;
+}
+
+int32 UVdjmRecordMetadataStore::GetRegistryScanTotalCount() const
+{
+	if (mCurrentRegistryScanStep == EVdjmRecordMetadataRegistryScanStep::ERegisterManifestFiles)
+	{
+		return mRegistryScanTotalManifestFileCount;
+	}
+
+	return mRegistryScanTotalManifestFileCount + mRegistryScanTotalEntryStateCount;
 }
 
 bool UVdjmRecordMetadataStore::RegisterManifest(UVdjmRecordMediaManifest* mediaManifest, FString& outErrorReason)
@@ -2525,6 +2704,42 @@ void UVdjmRecordMetadataStore::CompleteArtifactMediaPublishOnGameThread(
 	}
 }
 
+void UVdjmRecordMetadataStore::ResetRegistryScanRuntimeState()
+{
+	mPendingRegistryScanManifestFilePaths.Reset();
+	mRegistryScanRequest = FVdjmRecordMetadataRegistryScanRequest();
+	mCurrentRegistryScanStep = EVdjmRecordMetadataRegistryScanStep::ENone;
+	mLastRegistryScanErrorReason.Reset();
+	mRegistryScanManifestCursor = 0;
+	mRegistryScanEntryStateCursor = 0;
+	mRegistryScanTotalManifestFileCount = 0;
+	mRegistryScanProcessedManifestFileCount = 0;
+	mRegistryScanTotalEntryStateCount = 0;
+	mRegistryScanProcessedEntryStateCount = 0;
+	mbRegistryScanRunning = false;
+}
+
+EVdjmRecordMetadataRegistryScanRunResult UVdjmRecordMetadataStore::FailRegistryScan(
+	const FString& errorReason,
+	FString& outErrorReason)
+{
+	mLastRegistryScanErrorReason = errorReason.IsEmpty()
+		? TEXT("Registry scan failed.")
+		: errorReason;
+	outErrorReason = mLastRegistryScanErrorReason;
+	mCurrentRegistryScanStep = EVdjmRecordMetadataRegistryScanStep::EFailed;
+	mbRegistryScanRunning = false;
+	return EVdjmRecordMetadataRegistryScanRunResult::EFailed;
+}
+
+void UVdjmRecordMetadataStore::CompleteRegistryScan()
+{
+	mPendingRegistryScanManifestFilePaths.Reset();
+	mCurrentRegistryScanStep = EVdjmRecordMetadataRegistryScanStep::EComplete;
+	mLastRegistryScanErrorReason.Reset();
+	mbRegistryScanRunning = false;
+}
+
 bool UVdjmRecordMetadataStore::BuildRegistryEntryFromManifest(
 	const UVdjmRecordMediaManifest* mediaManifest,
 	FVdjmRecordMediaRegistryEntry& outEntry,
@@ -2818,6 +3033,7 @@ void UVdjmRecordMediaPreviewPlayer::StopPreview(bool bCloseMedia)
 	mbPreviewActive = false;
 	mbPreviewOpened = false;
 	mbPendingInitialSeek = false;
+	mbPendingPlayAfterSeek = false;
 	UnbindMediaPlayerEvents();
 
 	if (IsValid(mMediaPlayer))
@@ -2862,9 +3078,16 @@ void UVdjmRecordMediaPreviewPlayer::Tick(float deltaTime)
 		return;
 	}
 
-	if (mbPendingInitialSeek && mMediaPlayer->IsReady())
+	if ((mbPendingInitialSeek || mbPendingPlayAfterSeek) && mMediaPlayer->IsReady())
 	{
-		SeekPreviewStartAndPlay();
+		if (mbPendingInitialSeek)
+		{
+			SeekPreviewStartAndPlay();
+		}
+		else
+		{
+			TryPlayPreview();
+		}
 		return;
 	}
 
@@ -2918,6 +3141,7 @@ void UVdjmRecordMediaPreviewPlayer::HandleMediaOpenFailed(FString failedUrl)
 	mbPreviewActive = false;
 	mbPreviewOpened = false;
 	mbPendingInitialSeek = false;
+	mbPendingPlayAfterSeek = false;
 }
 
 void UVdjmRecordMediaPreviewPlayer::HandleMediaEndReached()
@@ -2925,6 +3149,14 @@ void UVdjmRecordMediaPreviewPlayer::HandleMediaEndReached()
 	if (mbPreviewActive)
 	{
 		SeekPreviewStartAndPlay();
+	}
+}
+
+void UVdjmRecordMediaPreviewPlayer::HandleMediaSeekCompleted()
+{
+	if (mbPreviewActive)
+	{
+		TryPlayPreview();
 	}
 }
 
@@ -2972,6 +3204,7 @@ bool UVdjmRecordMediaPreviewPlayer::StartPreviewInternal(
 	mbPreviewActive = true;
 	mbPreviewOpened = false;
 	mbPendingInitialSeek = true;
+	mbPendingPlayAfterSeek = false;
 
 	BindMediaPlayerEvents();
 	return OpenCurrentSource(outErrorReason);
@@ -3024,9 +3257,11 @@ void UVdjmRecordMediaPreviewPlayer::BindMediaPlayerEvents()
 	mMediaPlayer->OnMediaOpened.RemoveDynamic(this, &UVdjmRecordMediaPreviewPlayer::HandleMediaOpened);
 	mMediaPlayer->OnMediaOpenFailed.RemoveDynamic(this, &UVdjmRecordMediaPreviewPlayer::HandleMediaOpenFailed);
 	mMediaPlayer->OnEndReached.RemoveDynamic(this, &UVdjmRecordMediaPreviewPlayer::HandleMediaEndReached);
+	mMediaPlayer->OnSeekCompleted.RemoveDynamic(this, &UVdjmRecordMediaPreviewPlayer::HandleMediaSeekCompleted);
 	mMediaPlayer->OnMediaOpened.AddDynamic(this, &UVdjmRecordMediaPreviewPlayer::HandleMediaOpened);
 	mMediaPlayer->OnMediaOpenFailed.AddDynamic(this, &UVdjmRecordMediaPreviewPlayer::HandleMediaOpenFailed);
 	mMediaPlayer->OnEndReached.AddDynamic(this, &UVdjmRecordMediaPreviewPlayer::HandleMediaEndReached);
+	mMediaPlayer->OnSeekCompleted.AddDynamic(this, &UVdjmRecordMediaPreviewPlayer::HandleMediaSeekCompleted);
 }
 
 void UVdjmRecordMediaPreviewPlayer::UnbindMediaPlayerEvents()
@@ -3039,6 +3274,7 @@ void UVdjmRecordMediaPreviewPlayer::UnbindMediaPlayerEvents()
 	mMediaPlayer->OnMediaOpened.RemoveDynamic(this, &UVdjmRecordMediaPreviewPlayer::HandleMediaOpened);
 	mMediaPlayer->OnMediaOpenFailed.RemoveDynamic(this, &UVdjmRecordMediaPreviewPlayer::HandleMediaOpenFailed);
 	mMediaPlayer->OnEndReached.RemoveDynamic(this, &UVdjmRecordMediaPreviewPlayer::HandleMediaEndReached);
+	mMediaPlayer->OnSeekCompleted.RemoveDynamic(this, &UVdjmRecordMediaPreviewPlayer::HandleMediaSeekCompleted);
 }
 
 void UVdjmRecordMediaPreviewPlayer::SeekPreviewStartAndPlay()
@@ -3048,15 +3284,52 @@ void UVdjmRecordMediaPreviewPlayer::SeekPreviewStartAndPlay()
 		return;
 	}
 
-	const FTimespan startTime = FTimespan::FromSeconds(mPreviewStartTimeSec);
-	if (mMediaPlayer->SupportsSeeking())
+	if (not mbPreviewActive || mMediaPlayer->IsClosed() || mMediaPlayer->IsPreparing() || not mMediaPlayer->IsReady())
 	{
-		mMediaPlayer->Seek(startTime);
+		mbPendingInitialSeek = true;
+		return;
 	}
 
-	mMediaPlayer->Play();
-	mbPreviewOpened = true;
-	mbPendingInitialSeek = false;
+	const FTimespan startTime = FTimespan::FromSeconds(mPreviewStartTimeSec);
+	const double currentTimeSec = mMediaPlayer->GetTime().GetTotalSeconds();
+	if (mMediaPlayer->SupportsSeeking() && FMath::Abs(currentTimeSec - mPreviewStartTimeSec) > 0.05)
+	{
+		if (mMediaPlayer->Seek(startTime))
+		{
+			mbPendingInitialSeek = false;
+			mbPendingPlayAfterSeek = true;
+			return;
+		}
+	}
+
+	TryPlayPreview();
+}
+
+bool UVdjmRecordMediaPreviewPlayer::TryPlayPreview()
+{
+	if (not mbPreviewActive || not IsValid(mMediaPlayer))
+	{
+		return false;
+	}
+
+	if (mMediaPlayer->IsClosed() || mMediaPlayer->IsPreparing() || not mMediaPlayer->IsReady())
+	{
+		mbPendingPlayAfterSeek = true;
+		return false;
+	}
+
+	const bool bPlayResult = mMediaPlayer->Play();
+	if (bPlayResult)
+	{
+		mbPreviewOpened = true;
+		mbPendingInitialSeek = false;
+		mbPendingPlayAfterSeek = false;
+	}
+	else
+	{
+		mbPendingPlayAfterSeek = true;
+	}
+	return bPlayResult;
 }
 
 void UVdjmRecordMediaPreviewPlayer::ResetPreviewState()

@@ -332,6 +332,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Recorder|AppState", meta = (WorldContext = "worldContextObject"))
 	static UVdjmRecordAppStateStore* FindOrCreateAppStateStore(UObject* worldContextObject);
 
+	UFUNCTION(BlueprintCallable, Category = "Recorder|AppState", meta = (WorldContext = "worldContextObject"))
+	static bool RefreshAppStateFromRuntime(
+		UObject* worldContextObject,
+		UVdjmRecordAppStateStore*& outAppStateStore,
+		FString& outErrorReason,
+		bool bLoadBeforeRefresh = true,
+		bool bCreateIfMissing = true,
+		bool bRefreshRecordsToc = true,
+		bool bSaveAfterRefresh = true);
+
 	bool InitializeStore(UObject* worldContextObject);
 
 	UFUNCTION(BlueprintCallable, Category = "Recorder|AppState")

@@ -18,12 +18,16 @@ namespace
 			TEXT("Vdjm Record EventFlow Quick Guide%s%s")
 			TEXT("Session: 독립 실행 영역입니다. Signal, RuntimeSlot, pause/stop/fail 요청은 Session 단위로 분리됩니다.%s")
 			TEXT("Flow: Session 안에서 실행되는 이벤트 배열의 런타임 진행 상태입니다. Sequence 같은 composite는 같은 Session 안에 child flow 상태를 만들 수 있습니다.%s")
+			TEXT("Subgraph: DataAsset 안에 이름 붙여 저장한 재사용 flow template입니다. StartSubgraphSession 또는 Branch rule이 새 Session으로 실행합니다.%s")
+			TEXT("Branch: RegisterSubgraphSignalBranchNode가 manager에 SignalTag -> BranchCases 규칙을 등록합니다. Main flow가 끝나도 남고, BranchCases는 0번부터 if/else-if/else처럼 검사합니다.%s")
 			TEXT("EventTag: 이벤트 노드 자체를 식별하는 작성/디버그용 태그입니다. 객체 저장이나 signal 대기에는 직접 쓰이지 않습니다.%s")
 			TEXT("RuntimeSlotKey: 현재 Session 안에서 임시 객체를 저장/조회하는 이름입니다. 위젯, Controller, Actor 같은 런타임 참조를 넘길 때 씁니다.%s")
 			TEXT("ContextKey: WorldContextSubsystem에 등록되는 전역 조회 키입니다. flow 밖의 UI/Actor/Blueprint가 객체를 찾을 때 씁니다.%s")
 			TEXT("SignalTag: Wait/Emit 노드가 주고받는 신호 이름입니다. 같은 Session 또는 SignalRoute 규칙에 따라 전달됩니다.%s")
 			TEXT("Controller: UVdjmRecordEventEnsureRecorderControllerNode 또는 SubmitRecorderOptionRequestNode를 통해 생성/조회하는 것이 안전합니다.%s")
 			TEXT("RefreshEventSummary 버튼을 누르면 현재 Root events와 Subgraphs의 노드 목록/주요 tag/key 상태를 다시 요약합니다."),
+			LINE_TERMINATOR,
+			LINE_TERMINATOR,
 			LINE_TERMINATOR,
 			LINE_TERMINATOR,
 			LINE_TERMINATOR,
@@ -95,6 +99,8 @@ namespace
 		static const FName SignalTagName(TEXT("SignalTag"));
 		static const FName EmitSignalTagName(TEXT("EmitSignalTag"));
 		static const FName StartSignalTagName(TEXT("StartSignalTag"));
+		static const FName BranchTagName(TEXT("BranchTag"));
+		static const FName SubgraphTagName(TEXT("SubgraphTag"));
 		static const FName WidgetClassName(TEXT("WidgetClass"));
 		static const FName ObjectClassName(TEXT("ObjectClass"));
 		static const FName ActorClassName(TEXT("ActorClass"));
@@ -106,6 +112,8 @@ namespace
 		AppendPropertyTextIfSet(eventNode, SignalTagName, parts);
 		AppendPropertyTextIfSet(eventNode, EmitSignalTagName, parts);
 		AppendPropertyTextIfSet(eventNode, StartSignalTagName, parts);
+		AppendPropertyTextIfSet(eventNode, BranchTagName, parts);
+		AppendPropertyTextIfSet(eventNode, SubgraphTagName, parts);
 		AppendPropertyTextIfSet(eventNode, WidgetClassName, parts);
 		AppendPropertyTextIfSet(eventNode, ObjectClassName, parts);
 		AppendPropertyTextIfSet(eventNode, ActorClassName, parts);

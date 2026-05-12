@@ -41,6 +41,40 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow", meta = (WorldContext = "worldContextObject"))
 	static bool EmitRecordFlowSignal(UObject* worldContextObject, FName signalTag);
 
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow|Signal", meta = (WorldContext = "worldContextObject"))
+	static bool BindRecordFlowSignal(
+		UObject* worldContextObject,
+		UObject* listenerObject,
+		FName signalTag,
+		const FVdjmRecordFlowSignalCallback& callback);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow|Signal", meta = (WorldContext = "worldContextObject"))
+	static bool UnbindRecordFlowSignal(
+		UObject* worldContextObject,
+		UObject* listenerObject,
+		FName signalTag);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow|Signal", meta = (WorldContext = "worldContextObject"))
+	static int32 UnbindRecordFlowSignalsForObject(UObject* worldContextObject, UObject* listenerObject);
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventFlow|Signal")
+	static FVdjmRecordEventSignalRoute MakeCurrentSessionSignalRoute();
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventFlow|Signal")
+	static FVdjmRecordEventSignalRoute MakeMainSessionSignalRoute();
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventFlow|Signal")
+	static FVdjmRecordEventSignalRoute MakeAllActiveSessionsSignalRoute();
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventFlow|Signal")
+	static FVdjmRecordEventSignalRoute MakeGlobalSignalRoute();
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow", meta = (WorldContext = "worldContextObject"))
+	static bool EmitRecordFlowSignalByRoute(
+		UObject* worldContextObject,
+		FName signalTag,
+		FVdjmRecordEventSignalRoute signalRoute);
+
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow|Debug", meta = (WorldContext = "worldContextObject"))
 	static bool EmitRecordFlowSignalWithDebug(UObject* worldContextObject, FName signalTag, FString& outDebugMessage);
 
@@ -77,6 +111,34 @@ public:
 		UVdjmRecordEventFlowDataAsset* flowDataAsset,
 		FVdjmRecordFlowSessionHandle& outSessionHandle,
 		bool bResetRuntimeStates = true);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow|Subgraph", meta = (WorldContext = "worldContextObject"))
+	static bool StartRecordEventSubgraphSession(
+		UObject* worldContextObject,
+		UVdjmRecordEventFlowDataAsset* flowDataAsset,
+		FName subgraphTag,
+		FVdjmRecordFlowSessionHandle& outSessionHandle,
+		bool bResetRuntimeStates = true);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow|Subgraph", meta = (WorldContext = "worldContextObject", DisplayName = "Run Record Event Subgraph", ToolTip = "FlowDataAsset의 SubgraphTag를 새 flow session으로 실행합니다. FlowDataAsset이 None이고 fallback이 켜져 있으면 현재/main flow asset을 사용합니다."))
+	static bool RunRecordEventSubgraph(
+		UObject* worldContextObject,
+		UVdjmRecordEventFlowDataAsset* flowDataAsset,
+		FName subgraphTag,
+		FVdjmRecordFlowSessionHandle& outSessionHandle,
+		FString& outErrorReason,
+		bool bResetRuntimeStates = true,
+		bool bAllowCurrentFlowAssetFallback = true);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow|Subgraph", meta = (WorldContext = "worldContextObject"))
+	static bool RegisterRecordSubgraphSignalBranch(
+		UObject* worldContextObject,
+		const FVdjmRecordSubgraphSignalBranch& branch,
+		FString& outErrorReason,
+		bool bReplaceExisting = true);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow|Subgraph", meta = (WorldContext = "worldContextObject"))
+	static bool UnregisterRecordSubgraphSignalBranch(UObject* worldContextObject, FName branchTag);
 
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow|Session", meta = (WorldContext = "worldContextObject"))
 	static bool EmitRecordFlowSignalToSession(

@@ -18,6 +18,7 @@ class UVdjmRecordEnvCurrentInfo_deprecated;
 */
 //	WITH_VDJM_WIN64_AVENCODER <- window 전용 매크로
 DECLARE_LOG_CATEGORY_EXTERN(LogVdjmRecorderCore, Log, All);
+DECLARE_LOG_CATEGORY_EXTERN(LogVdjmRecorderPreviewInput, Log, All);
 
 /*
 §	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
@@ -92,6 +93,7 @@ struct VDJMRECORDER_API FVdjmRecordEventSignalRoute
 
 public:
 	static constexpr int32 CurrentSession = 0;
+	static constexpr int32 ExplicitSession = 5;
 	static constexpr int32 MainSession = 10;
 	static constexpr int32 AllActiveSessions = 20;
 	static constexpr int32 Global = 30;
@@ -107,6 +109,11 @@ public:
 	bool IsMainSession() const
 	{
 		return Value == MainSession;
+	}
+
+	bool IsExplicitSession() const
+	{
+		return Value == ExplicitSession;
 	}
 
 	bool IsAllActiveSessions() const

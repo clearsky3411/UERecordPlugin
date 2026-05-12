@@ -9,6 +9,7 @@
 	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓	↓
 */
 DEFINE_LOG_CATEGORY(LogVdjmRecorderCore)
+DEFINE_LOG_CATEGORY(LogVdjmRecorderPreviewInput)
 
 bool FVdjmRecordEncoderSnapshot::IsValidateCommonEncoderArguments() const
 {

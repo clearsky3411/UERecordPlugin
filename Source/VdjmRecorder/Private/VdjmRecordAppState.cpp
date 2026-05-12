@@ -591,6 +591,76 @@ UVdjmRecordAppStateStore* UVdjmRecordAppStateStore::FindOrCreateAppStateStore(UO
 	return newStore;
 }
 
+bool UVdjmRecordAppStateStore::RefreshAppStateFromRuntime(
+	UObject* worldContextObject,
+	UVdjmRecordAppStateStore*& outAppStateStore,
+	FString& outErrorReason,
+	bool bLoadBeforeRefresh,
+	bool bCreateIfMissing,
+	bool bRefreshRecordsToc,
+	bool bSaveAfterRefresh)
+{
+	outAppStateStore = nullptr;
+	outErrorReason.Reset();
+
+	if (worldContextObject == nullptr)
+	{
+		outErrorReason = TEXT("World context object is not available.");
+		return false;
+	}
+
+	UVdjmRecordAppStateStore* appStateStore = FindOrCreateAppStateStore(worldContextObject);
+	if (appStateStore == nullptr)
+	{
+		outErrorReason = TEXT("AppState store is not available.");
+		return false;
+	}
+
+	outAppStateStore = appStateStore;
+	appStateStore->mLastErrorReason.Reset();
+
+	if (bLoadBeforeRefresh && not appStateStore->LoadAppState(outErrorReason, bCreateIfMissing))
+	{
+		appStateStore->mLastErrorReason = outErrorReason;
+		return false;
+	}
+
+	if (bRefreshRecordsToc)
+	{
+		UVdjmRecordMetadataStore* metadataStore = UVdjmRecordMetadataStore::FindOrCreateMetadataStore(worldContextObject);
+		if (metadataStore == nullptr)
+		{
+			outErrorReason = TEXT("Metadata store is not available.");
+			appStateStore->mLastErrorReason = outErrorReason;
+			return false;
+		}
+
+		FString registryErrorReason;
+		if (not metadataStore->RefreshRegistryFromDisk(registryErrorReason))
+		{
+			outErrorReason = registryErrorReason.IsEmpty()
+				? TEXT("Failed to refresh media registry from disk.")
+				: registryErrorReason;
+			appStateStore->mLastErrorReason = outErrorReason;
+			return false;
+		}
+
+		if (not appStateStore->RefreshRecordsTocFromMetadataStore(metadataStore, outErrorReason))
+		{
+			appStateStore->mLastErrorReason = outErrorReason;
+			return false;
+		}
+	}
+
+	if (bSaveAfterRefresh && not appStateStore->SaveAppState(outErrorReason))
+	{
+		appStateStore->mLastErrorReason = outErrorReason;
+		return false;
+	}
+
+	return true;
+}
+
 bool UVdjmRecordAppStateStore::InitializeStore(UObject* worldContextObject)
 {
 	if (worldContextObject == nullptr)

@@ -1,6 +1,7 @@
 #include "VdjmEvents/VdjmRecordEventFlowBlueprintLibrary.h"
 
 #include "VdjmEvents/VdjmRecordEventFlowEntryPoint.h"
+#include "VdjmEvents/VdjmRecordEventFlowDataAsset.h"
 #include "VdjmEvents/VdjmRecordEventManager.h"
 #include "VdjmRecorderWorldContextSubsystem.h"
 
@@ -108,6 +109,110 @@ bool UVdjmRecordEventFlowBlueprintLibrary::EmitRecordFlowSignal(UObject* worldCo
 	}
 
 	return eventManager->EmitFlowSignal(signalTag);
+}
+
+bool UVdjmRecordEventFlowBlueprintLibrary::BindRecordFlowSignal(
+	UObject* worldContextObject,
+	UObject* listenerObject,
+	FName signalTag,
+	const FVdjmRecordFlowSignalCallback& callback)
+{
+	if (signalTag.IsNone() || listenerObject == nullptr || not callback.IsBound())
+	{
+		return false;
+	}
+
+	UVdjmRecordEventManager* eventManager = GetRecordEventManager(worldContextObject);
+	if (eventManager == nullptr)
+	{
+		return false;
+	}
+
+	return eventManager->BindFlowSignal(signalTag, listenerObject, callback);
+}
+
+bool UVdjmRecordEventFlowBlueprintLibrary::UnbindRecordFlowSignal(
+	UObject* worldContextObject,
+	UObject* listenerObject,
+	FName signalTag)
+{
+	if (signalTag.IsNone() || listenerObject == nullptr)
+	{
+		return false;
+	}
+
+	UVdjmRecordEventManager* eventManager = GetRecordEventManager(worldContextObject);
+	if (eventManager == nullptr)
+	{
+		return false;
+	}
+
+	return eventManager->UnbindFlowSignal(signalTag, listenerObject);
+}
+
+int32 UVdjmRecordEventFlowBlueprintLibrary::UnbindRecordFlowSignalsForObject(
+	UObject* worldContextObject,
+	UObject* listenerObject)
+{
+	if (listenerObject == nullptr)
+	{
+		return 0;
+	}
+
+	UVdjmRecordEventManager* eventManager = GetRecordEventManager(worldContextObject);
+	if (eventManager == nullptr)
+	{
+		return 0;
+	}
+
+	return eventManager->UnbindFlowSignalsForObject(listenerObject);
+}
+
+FVdjmRecordEventSignalRoute UVdjmRecordEventFlowBlueprintLibrary::MakeCurrentSessionSignalRoute()
+{
+	FVdjmRecordEventSignalRoute signalRoute;
+	signalRoute.Value = FVdjmRecordEventSignalRoute::CurrentSession;
+	return signalRoute;
+}
+
+FVdjmRecordEventSignalRoute UVdjmRecordEventFlowBlueprintLibrary::MakeMainSessionSignalRoute()
+{
+	FVdjmRecordEventSignalRoute signalRoute;
+	signalRoute.Value = FVdjmRecordEventSignalRoute::MainSession;
+	return signalRoute;
+}
+
+FVdjmRecordEventSignalRoute UVdjmRecordEventFlowBlueprintLibrary::MakeAllActiveSessionsSignalRoute()
+{
+	FVdjmRecordEventSignalRoute signalRoute;
+	signalRoute.Value = FVdjmRecordEventSignalRoute::AllActiveSessions;
+	return signalRoute;
+}
+
+FVdjmRecordEventSignalRoute UVdjmRecordEventFlowBlueprintLibrary::MakeGlobalSignalRoute()
+{
+	FVdjmRecordEventSignalRoute signalRoute;
+	signalRoute.Value = FVdjmRecordEventSignalRoute::Global;
+	return signalRoute;
+}
+
+bool UVdjmRecordEventFlowBlueprintLibrary::EmitRecordFlowSignalByRoute(
+	UObject* worldContextObject,
+	FName signalTag,
+	FVdjmRecordEventSignalRoute signalRoute)
+{
+	if (signalTag.IsNone())
+	{
+		return false;
+	}
+
+	UVdjmRecordEventManager* eventManager = GetRecordEventManager(worldContextObject);
+	if (eventManager == nullptr)
+	{
+		return false;
+	}
+
+	return eventManager->EmitFlowSignalByRoute(signalTag, signalRoute);
 }
 
 bool UVdjmRecordEventFlowBlueprintLibrary::EmitRecordFlowSignalWithDebug(
@@ -250,6 +355,117 @@ bool UVdjmRecordEventFlowBlueprintLibrary::StartRecordEventFlowSession(
 	}
 
 	return eventManager->StartEventFlowSession(flowDataAsset, outSessionHandle, bResetRuntimeStates);
+}
+
+bool UVdjmRecordEventFlowBlueprintLibrary::StartRecordEventSubgraphSession(
+	UObject* worldContextObject,
+	UVdjmRecordEventFlowDataAsset* flowDataAsset,
+	FName subgraphTag,
+	FVdjmRecordFlowSessionHandle& outSessionHandle,
+	bool bResetRuntimeStates)
+{
+	outSessionHandle = FVdjmRecordFlowSessionHandle::MakeInvalid();
+
+	UVdjmRecordEventManager* eventManager = GetRecordEventManager(worldContextObject);
+	if (eventManager == nullptr)
+	{
+		return false;
+	}
+
+	return eventManager->StartEventSubgraphSession(flowDataAsset, subgraphTag, outSessionHandle, bResetRuntimeStates);
+}
+
+bool UVdjmRecordEventFlowBlueprintLibrary::RunRecordEventSubgraph(
+	UObject* worldContextObject,
+	UVdjmRecordEventFlowDataAsset* flowDataAsset,
+	FName subgraphTag,
+	FVdjmRecordFlowSessionHandle& outSessionHandle,
+	FString& outErrorReason,
+	bool bResetRuntimeStates,
+	bool bAllowCurrentFlowAssetFallback)
+{
+	outSessionHandle = FVdjmRecordFlowSessionHandle::MakeInvalid();
+	outErrorReason.Reset();
+
+	if (subgraphTag.IsNone())
+	{
+		outErrorReason = TEXT("SubgraphTag is None.");
+		return false;
+	}
+
+	UVdjmRecordEventManager* eventManager = GetRecordEventManager(worldContextObject);
+	if (eventManager == nullptr)
+	{
+		outErrorReason = TEXT("Record event manager is not available.");
+		return false;
+	}
+
+	UVdjmRecordEventFlowDataAsset* resolvedFlowDataAsset = flowDataAsset;
+	if (resolvedFlowDataAsset == nullptr && bAllowCurrentFlowAssetFallback)
+	{
+		resolvedFlowDataAsset = eventManager->GetCurrentOrMainFlowAsset();
+	}
+
+	if (resolvedFlowDataAsset == nullptr)
+	{
+		outErrorReason = TEXT("FlowDataAsset is not available.");
+		return false;
+	}
+
+	if (resolvedFlowDataAsset->FindSubgraphIndexByTag(subgraphTag) == INDEX_NONE)
+	{
+		outErrorReason = FString::Printf(
+			TEXT("Subgraph was not found. FlowAsset=%s SubgraphTag=%s"),
+			*resolvedFlowDataAsset->GetPathName(),
+			*subgraphTag.ToString());
+		return false;
+	}
+
+	if (not eventManager->StartEventSubgraphSession(
+		resolvedFlowDataAsset,
+		subgraphTag,
+		outSessionHandle,
+		bResetRuntimeStates))
+	{
+		outErrorReason = FString::Printf(
+			TEXT("Failed to start subgraph session. FlowAsset=%s SubgraphTag=%s"),
+			*resolvedFlowDataAsset->GetPathName(),
+			*subgraphTag.ToString());
+		return false;
+	}
+
+	return true;
+}
+
+bool UVdjmRecordEventFlowBlueprintLibrary::RegisterRecordSubgraphSignalBranch(
+	UObject* worldContextObject,
+	const FVdjmRecordSubgraphSignalBranch& branch,
+	FString& outErrorReason,
+	bool bReplaceExisting)
+{
+	outErrorReason.Reset();
+
+	UVdjmRecordEventManager* eventManager = GetRecordEventManager(worldContextObject);
+	if (eventManager == nullptr)
+	{
+		outErrorReason = TEXT("Record event manager is not available.");
+		return false;
+	}
+
+	return eventManager->RegisterSubgraphSignalBranch(branch, outErrorReason, bReplaceExisting);
+}
+
+bool UVdjmRecordEventFlowBlueprintLibrary::UnregisterRecordSubgraphSignalBranch(
+	UObject* worldContextObject,
+	FName branchTag)
+{
+	UVdjmRecordEventManager* eventManager = GetRecordEventManager(worldContextObject);
+	if (eventManager == nullptr)
+	{
+		return false;
+	}
+
+	return eventManager->UnregisterSubgraphSignalBranch(branchTag);
 }
 
 bool UVdjmRecordEventFlowBlueprintLibrary::EmitRecordFlowSignalToSession(

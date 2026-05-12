@@ -360,6 +360,24 @@ struct VDJMRECORDER_API FVdjmRecorderControllerStatusSnapshot
 	bool bIsFinalizingRecording = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Recorder|Controller|Status")
+	bool bIsBridgeInitialized = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|Controller|Status")
+	bool bIsValidInit = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|Controller|Status")
+	bool bIsRecordingPossible = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|Controller|Status")
+	bool bIsRecordStartable = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|Controller|Status")
+	bool bCanUseRecorderFeature = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|Controller|Status")
+	bool bCanStartRecording = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|Controller|Status")
 	bool bHasPendingOptionRequest = false;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Recorder|Controller|Status")
@@ -367,6 +385,12 @@ struct VDJMRECORDER_API FVdjmRecorderControllerStatusSnapshot
 
 	UPROPERTY(BlueprintReadOnly, Category = "Recorder|Controller|Status")
 	int32 ActiveMediaPublishJobCount = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|Controller|Status")
+	EVdjmRecordBridgeInitStep CurrentBridgeInitStep = EVdjmRecordBridgeInitStep::EInitializeStart;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Recorder|Controller|Status")
+	int32 RecordedFrameCount = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Recorder|Controller|Status")
 	bool bHasLatestArtifact = false;
@@ -430,15 +454,35 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Recorder|Controller|Status")
 	bool ValidateControllerState(FString& outStatusText) const;
 	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Status")
+	bool HasBridgeActor() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Status")
 	bool IsRecording() const;
 	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Status")
 	bool IsFinalizingRecording() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Status")
+	bool IsBridgeInitialized() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Status")
+	bool IsValidInit() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Status")
+	bool IsRecordingPossible() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Status")
+	bool IsRecordStartable() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Status")
+	bool CanUseRecorderFeature() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Status")
+	bool CanStartRecording() const;
 	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Status")
 	bool IsControllerBusy() const;
 	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Status")
 	bool IsPostProcessingMedia() const;
 	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Status")
 	int32 GetActiveMediaPublishJobCount() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Status")
+	EVdjmRecordBridgeInitStep GetBridgeInitStep() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Status")
+	int32 GetRecordedFrameCount() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Status")
+	FString GetControllerStatusText() const;
 	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Artifact")
 	UVdjmRecordArtifact* GetLatestArtifact() const;
 	UFUNCTION(BlueprintPure, Category = "Recorder|Controller|Metadata")

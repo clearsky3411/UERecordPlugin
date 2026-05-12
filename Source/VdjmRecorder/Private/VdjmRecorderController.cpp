@@ -216,6 +216,24 @@ FVdjmRecorderControllerStatusSnapshot UVdjmRecorderController::GetControllerStat
 	statusSnapshot.bHasBridgeActor = bridge != nullptr;
 	statusSnapshot.bIsRecording = bridge != nullptr && bridge->IsRecording();
 	statusSnapshot.bIsFinalizingRecording = bridge != nullptr && bridge->IsFinalizingRecording();
+	statusSnapshot.bIsBridgeInitialized = bridge != nullptr && bridge->IsCompleteChainInit();
+	statusSnapshot.CurrentBridgeInitStep = bridge != nullptr
+		? bridge->GetCurrentInitStep()
+		: EVdjmRecordBridgeInitStep::EInitializeStart;
+	statusSnapshot.bIsValidInit =
+		bridge != nullptr &&
+		statusSnapshot.CurrentBridgeInitStep == EVdjmRecordBridgeInitStep::EComplete &&
+		statusSnapshot.bIsBridgeInitialized;
+	statusSnapshot.bIsRecordingPossible = bridge != nullptr && bridge->DbcRecordingPossible();
+	statusSnapshot.bIsRecordStartable = bridge != nullptr && bridge->DbcRecordStartable();
+	statusSnapshot.bCanUseRecorderFeature =
+		statusSnapshot.bIsValidInit &&
+		statusSnapshot.bIsRecordingPossible &&
+		not statusSnapshot.bIsPostProcessingMedia;
+	statusSnapshot.bCanStartRecording =
+		statusSnapshot.bIsRecordStartable &&
+		not statusSnapshot.bIsPostProcessingMedia;
+	statusSnapshot.RecordedFrameCount = bridge != nullptr ? bridge->GetRecordedFrameCount() : 0;
 
 	statusSnapshot.bHasLatestArtifact = IsValid(LatestArtifact);
 	if (IsValid(LatestArtifact))
@@ -228,7 +246,11 @@ FVdjmRecorderControllerStatusSnapshot UVdjmRecorderController::GetControllerStat
 		statusSnapshot.LatestPublishedContentUri = LatestArtifact->GetPublishedContentUri();
 	}
 
-	if (statusSnapshot.bIsFinalizingRecording)
+	if (not statusSnapshot.bHasBridgeActor)
+	{
+		statusSnapshot.StatusText = TEXT("Recorder bridge actor is not available.");
+	}
+	else if (statusSnapshot.bIsFinalizingRecording)
 	{
 		statusSnapshot.StatusText = TEXT("Recorder is finalizing the current recording.");
 	}
@@ -239,6 +261,14 @@ FVdjmRecorderControllerStatusSnapshot UVdjmRecorderController::GetControllerStat
 	else if (statusSnapshot.bIsRecording)
 	{
 		statusSnapshot.StatusText = TEXT("Recorder is recording.");
+	}
+	else if (not statusSnapshot.bIsValidInit)
+	{
+		statusSnapshot.StatusText = TEXT("Recorder bridge initialization is not valid yet.");
+	}
+	else if (not statusSnapshot.bIsRecordingPossible)
+	{
+		statusSnapshot.StatusText = TEXT("Recorder pipeline or preset is not ready.");
 	}
 	else if (statusSnapshot.bHasLatestArtifact)
 	{
@@ -277,6 +307,18 @@ bool UVdjmRecorderController::ValidateControllerState(FString& outStatusText) co
 		return false;
 	}
 
+	if (not statusSnapshot.bIsValidInit)
+	{
+		outStatusText = TEXT("Recorder bridge initialization is not valid.");
+		return false;
+	}
+
+	if (not statusSnapshot.bIsRecordingPossible)
+	{
+		outStatusText = TEXT("Recorder recording pipeline or preset is not ready.");
+		return false;
+	}
+
 	if (statusSnapshot.bHasLatestArtifact && not statusSnapshot.bIsLatestArtifactValid)
 	{
 		outStatusText = TEXT("Latest record artifact is invalid.");
@@ -298,6 +340,11 @@ bool UVdjmRecorderController::ValidateControllerState(FString& outStatusText) co
 	return true;
 }
 
+bool UVdjmRecorderController::HasBridgeActor() const
+{
+	return GetBridgeActor() != nullptr;
+}
+
 bool UVdjmRecorderController::IsRecording() const
 {
 	const AVdjmRecordBridgeActor* bridge = GetBridgeActor();
@@ -308,6 +355,38 @@ bool UVdjmRecorderController::IsFinalizingRecording() const
 {
 	const AVdjmRecordBridgeActor* bridge = GetBridgeActor();
 	return bridge != nullptr && bridge->IsFinalizingRecording();
+}
+
+bool UVdjmRecorderController::IsBridgeInitialized() const
+{
+	const AVdjmRecordBridgeActor* bridge = GetBridgeActor();
+	return bridge != nullptr && bridge->IsCompleteChainInit();
+}
+
+bool UVdjmRecorderController::IsValidInit() const
+{
+	return GetControllerStatusSnapshot().bIsValidInit;
+}
+
+bool UVdjmRecorderController::IsRecordingPossible() const
+{
+	return GetControllerStatusSnapshot().bIsRecordingPossible;
+}
+
+bool UVdjmRecorderController::IsRecordStartable() const
+{
+	const AVdjmRecordBridgeActor* bridge = GetBridgeActor();
+	return bridge != nullptr && bridge->DbcRecordStartable();
+}
+
+bool UVdjmRecorderController::CanUseRecorderFeature() const
+{
+	return GetControllerStatusSnapshot().bCanUseRecorderFeature;
+}
+
+bool UVdjmRecorderController::CanStartRecording() const
+{
+	return GetControllerStatusSnapshot().bCanStartRecording;
 }
 
 bool UVdjmRecorderController::IsControllerBusy() const
@@ -323,6 +402,23 @@ bool UVdjmRecorderController::IsPostProcessingMedia() const
 int32 UVdjmRecorderController::GetActiveMediaPublishJobCount() const
 {
 	return MetadataStore != nullptr ? MetadataStore->GetActiveMediaPublishJobCount() : 0;
+}
+
+EVdjmRecordBridgeInitStep UVdjmRecorderController::GetBridgeInitStep() const
+{
+	const AVdjmRecordBridgeActor* bridge = GetBridgeActor();
+	return bridge != nullptr ? bridge->GetCurrentInitStep() : EVdjmRecordBridgeInitStep::EInitializeStart;
+}
+
+int32 UVdjmRecorderController::GetRecordedFrameCount() const
+{
+	const AVdjmRecordBridgeActor* bridge = GetBridgeActor();
+	return bridge != nullptr ? bridge->GetRecordedFrameCount() : 0;
+}
+
+FString UVdjmRecorderController::GetControllerStatusText() const
+{
+	return GetControllerStatusSnapshot().StatusText;
 }
 
 UVdjmRecordArtifact* UVdjmRecorderController::GetLatestArtifact() const

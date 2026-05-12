@@ -152,6 +152,13 @@ public:
 		FString& OutError);
 
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow", meta = (WorldContext = "Outer"))
+	static UVdjmRecordEventFlowRuntime* CreateFlowRuntimeFromSubgraph(
+		UObject* Outer,
+		const UVdjmRecordEventFlowDataAsset* sourceFlowAsset,
+		FName subgraphTag,
+		FString& outError);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow", meta = (WorldContext = "Outer"))
 	static UVdjmRecordEventFlowRuntime* CreateFlowRuntimeFromJsonString(
 		UObject* Outer,
 		const FString& InJsonString,
@@ -162,6 +169,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow")
 	bool InitializeFromAsset(const UVdjmRecordEventFlowDataAsset* SourceFlowAsset, FString& OutError);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow")
+	bool InitializeFromSubgraph(const UVdjmRecordEventFlowDataAsset* sourceFlowAsset, FName subgraphTag, FString& outError);
 
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow")
 	bool InitializeFromJsonString(const FString& InJsonString, FString& OutError);

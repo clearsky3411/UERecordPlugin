@@ -243,6 +243,30 @@ UVdjmRecordEventFlowRuntime* UVdjmRecordEventFlowRuntime::CreateFlowRuntimeFromA
 	return NewFlowRuntime;
 }
 
+UVdjmRecordEventFlowRuntime* UVdjmRecordEventFlowRuntime::CreateFlowRuntimeFromSubgraph(
+	UObject* Outer,
+	const UVdjmRecordEventFlowDataAsset* sourceFlowAsset,
+	FName subgraphTag,
+	FString& outError)
+{
+	outError.Reset();
+
+	UObject* runtimeOuter = Outer ? Outer : GetTransientPackage();
+	UVdjmRecordEventFlowRuntime* newFlowRuntime = NewObject<UVdjmRecordEventFlowRuntime>(runtimeOuter);
+	if (newFlowRuntime == nullptr)
+	{
+		outError = TEXT("Failed to allocate subgraph flow runtime.");
+		return nullptr;
+	}
+
+	if (!newFlowRuntime->InitializeFromSubgraph(sourceFlowAsset, subgraphTag, outError))
+	{
+		return nullptr;
+	}
+
+	return newFlowRuntime;
+}
+
 UVdjmRecordEventFlowRuntime* UVdjmRecordEventFlowRuntime::CreateFlowRuntimeFromJsonString(
 	UObject* Outer,
 	const FString& InJsonString,
@@ -332,6 +356,47 @@ bool UVdjmRecordEventFlowRuntime::InitializeFromAsset(const UVdjmRecordEventFlow
 	Subgraphs = MoveTemp(newSubgraphs);
 	SourceFlowAsset = const_cast<UVdjmRecordEventFlowDataAsset*>(InSourceFlowAsset);
 	return CompileManifest(OutError);
+}
+
+bool UVdjmRecordEventFlowRuntime::InitializeFromSubgraph(
+	const UVdjmRecordEventFlowDataAsset* sourceFlowAsset,
+	FName subgraphTag,
+	FString& outError)
+{
+	outError.Reset();
+	SourceFlowAsset = nullptr;
+
+	if (sourceFlowAsset == nullptr)
+	{
+		outError = TEXT("Source flow asset is null.");
+		return false;
+	}
+
+	if (subgraphTag.IsNone())
+	{
+		outError = TEXT("Subgraph tag is None.");
+		return false;
+	}
+
+	const int32 subgraphIndex = sourceFlowAsset->FindSubgraphIndexByTag(subgraphTag);
+	if (subgraphIndex == INDEX_NONE)
+	{
+		outError = FString::Printf(TEXT("Subgraph was not found. Tag=%s"), *subgraphTag.ToString());
+		return false;
+	}
+
+	TArray<TObjectPtr<UVdjmRecordEventBase>> newEvents;
+	const FVdjmRecordEventSubgraph& sourceSubgraph = sourceFlowAsset->Subgraphs[subgraphIndex];
+	const FString contextLabel = FString::Printf(TEXT("Subgraph '%s' event"), *sourceSubgraph.SubgraphTag.ToString());
+	if (not CloneEventArray(sourceSubgraph.Events, this, newEvents, outError, contextLabel))
+	{
+		return false;
+	}
+
+	Events = MoveTemp(newEvents);
+	Subgraphs.Reset();
+	SourceFlowAsset = const_cast<UVdjmRecordEventFlowDataAsset*>(sourceFlowAsset);
+	return CompileManifest(outError);
 }
 
 bool UVdjmRecordEventFlowRuntime::InitializeFromJsonString(const FString& InJsonString, FString& OutError)

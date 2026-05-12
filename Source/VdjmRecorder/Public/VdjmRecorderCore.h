@@ -817,6 +817,40 @@ struct VDJMRECORDER_API FVdjmRecordMediaPostProcessSnapshot
 	FString LastErrorReason;
 };
 
+UENUM(BlueprintType)
+enum class EVdjmRecordMetadataRegistryScanStep : uint8
+{
+	ENone UMETA(DisplayName = "None"),
+	ERegisterManifestFiles UMETA(DisplayName = "Register Manifest Files"),
+	ERefreshRegistryEntries UMETA(DisplayName = "Refresh Registry Entries"),
+	ESaveRegistry UMETA(DisplayName = "Save Registry"),
+	EComplete UMETA(DisplayName = "Complete"),
+	EFailed UMETA(DisplayName = "Failed")
+};
+
+UENUM(BlueprintType)
+enum class EVdjmRecordMetadataRegistryScanRunResult : uint8
+{
+	ERunning UMETA(DisplayName = "Running"),
+	ESucceeded UMETA(DisplayName = "Succeeded"),
+	EFailed UMETA(DisplayName = "Failed")
+};
+
+USTRUCT(BlueprintType)
+struct VDJMRECORDER_API FVdjmRecordMetadataRegistryScanRequest
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|Metadata|RegistryScan", meta = (ClampMin = "1"))
+	int32 MaxManifestFilesPerStep = 8;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|Metadata|RegistryScan", meta = (ClampMin = "1"))
+	int32 MaxRegistryEntriesPerStep = 64;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|Metadata|RegistryScan")
+	bool bSaveRegistryOnComplete = true;
+};
+
 UCLASS(BlueprintType)
 class VDJMRECORDER_API UVdjmRecordMetadataStore : public UObject
 {
@@ -852,6 +886,10 @@ public:
 	bool SaveRegistry(FString& outErrorReason) const;
 	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata|Registry")
 	bool RefreshRegistryFromDisk(FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata|RegistryScan")
+	bool StartRegistryScanFromDisk(const FVdjmRecordMetadataRegistryScanRequest& scanRequest, FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata|RegistryScan")
+	EVdjmRecordMetadataRegistryScanRunResult AdvanceRegistryScanFromDisk(FString& outErrorReason);
 	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata|Registry")
 	bool RegisterManifest(UVdjmRecordMediaManifest* mediaManifest, FString& outErrorReason);
 	UFUNCTION(BlueprintCallable, Category = "Recorder|Metadata|Registry")
@@ -877,6 +915,18 @@ public:
 	int32 GetMediaRegistryEntryCount() const { return mRegistryEntries.Num(); }
 	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|Registry")
 	FString GetRegistryFilePath() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|RegistryScan")
+	bool IsRegistryScanRunning() const { return mbRegistryScanRunning; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|RegistryScan")
+	EVdjmRecordMetadataRegistryScanStep GetCurrentRegistryScanStep() const { return mCurrentRegistryScanStep; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|RegistryScan")
+	float GetRegistryScanProgress() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|RegistryScan")
+	int32 GetRegistryScanPendingCount() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|RegistryScan")
+	int32 GetRegistryScanProcessedCount() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|RegistryScan")
+	int32 GetRegistryScanTotalCount() const;
 	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|PostProcess")
 	FVdjmRecordMediaPostProcessSnapshot GetMediaPostProcessSnapshot() const;
 	UFUNCTION(BlueprintPure, Category = "Recorder|Metadata|PostProcess")
@@ -913,23 +963,37 @@ private:
 	FString GetManifestDirectoryPath() const;
 	FString MakeMetadataFilePathForArtifact(const UVdjmRecordArtifact* artifact) const;
 	bool DeleteVideoFileForMissingMetadata(UVdjmRecordArtifact* artifact, const FString& reason, FString& outErrorReason) const;
+	void ResetRegistryScanRuntimeState();
+	EVdjmRecordMetadataRegistryScanRunResult FailRegistryScan(const FString& errorReason, FString& outErrorReason);
+	void CompleteRegistryScan();
 
 	TWeakObjectPtr<UWorld> mCachedWorld;
 	UPROPERTY(Transient)
 	TObjectPtr<UVdjmRecordMediaManifest> mLastManifest;
 	UPROPERTY(Transient)
 	TArray<FVdjmRecordMediaRegistryEntry> mRegistryEntries;
+	TArray<FString> mPendingRegistryScanManifestFilePaths;
+	FVdjmRecordMetadataRegistryScanRequest mRegistryScanRequest;
 	EVdjmRecordManifestAuthorityRole mAuthorityRole = EVdjmRecordManifestAuthorityRole::EDeveloper;
+	EVdjmRecordMetadataRegistryScanStep mCurrentRegistryScanStep = EVdjmRecordMetadataRegistryScanStep::ENone;
 	FString mAuthorityUserId;
 	FString mAuthorityTokenId;
 	FString mAuthorityKeyId;
 	FString mLastPublishedContentUri;
 	FString mLastMediaPublishErrorReason;
+	FString mLastRegistryScanErrorReason;
 	int32 mNextPostProcessJobId = 1;
 	int32 mActiveMediaPublishJobCount = 0;
 	int32 mCompletedMediaPublishJobCount = 0;
+	int32 mRegistryScanManifestCursor = 0;
+	int32 mRegistryScanEntryStateCursor = 0;
+	int32 mRegistryScanTotalManifestFileCount = 0;
+	int32 mRegistryScanProcessedManifestFileCount = 0;
+	int32 mRegistryScanTotalEntryStateCount = 0;
+	int32 mRegistryScanProcessedEntryStateCount = 0;
 	EVdjmRecordMediaPublishStatus mLastMediaPublishStatus = EVdjmRecordMediaPublishStatus::ENotStarted;
 	bool mbDeleteVideoIfMetadataMissing = true;
+	bool mbRegistryScanRunning = false;
 };
 
 UCLASS(BlueprintType)
@@ -986,6 +1050,8 @@ private:
 	void HandleMediaOpenFailed(FString failedUrl);
 	UFUNCTION()
 	void HandleMediaEndReached();
+	UFUNCTION()
+	void HandleMediaSeekCompleted();
 
 	bool StartPreviewInternal(
 		UMediaPlayer* mediaPlayer,
@@ -998,6 +1064,7 @@ private:
 	void BindMediaPlayerEvents();
 	void UnbindMediaPlayerEvents();
 	void SeekPreviewStartAndPlay();
+	bool TryPlayPreview();
 	void ResetPreviewState();
 
 	TWeakObjectPtr<UWorld> mCachedWorld;
@@ -1011,6 +1078,7 @@ private:
 	bool mbPreviewActive = false;
 	bool mbPreviewOpened = false;
 	bool mbPendingInitialSeek = false;
+	bool mbPendingPlayAfterSeek = false;
 };
 
 /*

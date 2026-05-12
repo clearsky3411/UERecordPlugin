@@ -1,5 +1,11 @@
 # Android Recording: Audio + GIF Preview 설계 문서 (Living Doc)
 
+> [!WARNING]
+> 이 문서는 **2026-04-22 기준으로 업데이트가 중지된 history/archive 문서**다.
+> 현재 구현 기준이나 다음 작업 판단은 `Docs/Codex_Handoff.md`, `Docs/VdjmRecorder_Current_Architecture.md`,
+> `Docs/Current_Work_Checklist.md`, 그리고 기능별 guide 문서를 우선 참조한다.
+> 이 문서는 과거 의사결정, 당시 계획, 리스크 추적을 복원할 때만 참고한다.
+
 ## 문서 목적
 - 현재 안정화된 Android/Vulkan 녹화 경로를 유지하면서,
   1) **내부 오디오 캡처**,
