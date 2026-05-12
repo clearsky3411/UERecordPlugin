@@ -4,7 +4,11 @@
 #include "VdjmWidgetMediaCarouselTypes.h"
 #include "VdjmWidgetMediaCardWidget.generated.h"
 
+class UImage;
+class UMediaPlayer;
+class UMediaTexture;
 class UWidget;
+class UVdjmRecordMediaPreviewPlayer;
 
 /**
  * A single media card owned by a carousel.
@@ -48,6 +52,12 @@ public:
 	void StopPreview(bool bReleaseMediaResources);
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card")
 	void ReleaseMediaResources();
+	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card")
+	bool PrepareActivePreviewVisuals();
+	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card")
+	bool StartManagedActivePreview(FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card")
+	bool ApplyActiveMediaTextureBrush();
 	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
 	bool HasValidCardSource() const;
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card")
@@ -65,11 +75,17 @@ public:
 	EVdjmWidgetMediaCardState GetCardState() const { return mCardState; }
 	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
 	FString GetLastErrorReason() const { return mLastErrorReason; }
+	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
+	UMediaPlayer* GetManagedMediaPlayer() const { return mMediaPlayer; }
+	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
+	UMediaTexture* GetManagedMediaTexture() const { return mMediaTexture; }
 
 	UPROPERTY(BlueprintAssignable, Category = "VdjmWidgets|Media|Card")
 	FVdjmWidgetMediaCardStateDelegate OnCardStateChanged;
 
 protected:
+	virtual void NativeDestruct() override;
+
 	UFUNCTION(BlueprintImplementableEvent, Category = "VdjmWidgets|Media|Card")
 	void BP_OnCardSourceChanged(const FVdjmWidgetMediaCardSource& cardSource);
 	UFUNCTION(BlueprintImplementableEvent, Category = "VdjmWidgets|Media|Card")
@@ -91,6 +107,9 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "VdjmWidgets|Media|Card")
 	void BP_StopPreview(bool bReleaseMediaResources);
 
+	void EnsureMediaObjects();
+	UImage* ResolveActivePreviewImage() const;
+
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "VdjmWidgets|Media|Card")
 	TObjectPtr<UWidget> EmptyLayer;
 
@@ -106,10 +125,25 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "VdjmWidgets|Media|Card")
 	TObjectPtr<UWidget> ErrorLayer;
 
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "VdjmWidgets|Media|Card")
+	TObjectPtr<UImage> Image_ActivePreview;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VdjmWidgets|Media|Card")
+	bool bAutoManagePreviewMedia = true;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VdjmWidgets|Media|Card|Debug")
 	bool bDebugTraceState = true;
 
 private:
+	UPROPERTY(Transient)
+	TObjectPtr<UMediaPlayer> mMediaPlayer;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMediaTexture> mMediaTexture;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UVdjmRecordMediaPreviewPlayer> mPreviewPlayer;
+
 	UPROPERTY(Transient)
 	FVdjmWidgetMediaCardSource mCardSource;
 

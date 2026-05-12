@@ -1,7 +1,10 @@
 #include "VdjmWidgetMediaCardWidget.h"
 
 #include "Components/PanelWidget.h"
+#include "Components/Image.h"
 #include "Components/Widget.h"
+#include "MediaPlayer.h"
+#include "MediaTexture.h"
 #include "Misc/Paths.h"
 #include "VdjmWidgets.h"
 
@@ -98,6 +101,69 @@ namespace
 		outErrorReason.Reset();
 		return true;
 	}
+
+	UImage* FindFirstImageInWidget(UWidget* widget)
+	{
+		if (widget == nullptr)
+		{
+			return nullptr;
+		}
+
+		if (UImage* image = Cast<UImage>(widget))
+		{
+			return image;
+		}
+
+		if (UPanelWidget* panelWidget = Cast<UPanelWidget>(widget))
+		{
+			for (int32 childIndex = 0; childIndex < panelWidget->GetChildrenCount(); ++childIndex)
+			{
+				if (UImage* childImage = FindFirstImageInWidget(panelWidget->GetChildAt(childIndex)))
+				{
+					return childImage;
+				}
+			}
+		}
+
+		return nullptr;
+	}
+}
+
+void UVdjmWidgetMediaCardWidget::NativeDestruct()
+{
+	ReleaseMediaResources();
+	Super::NativeDestruct();
+}
+
+void UVdjmWidgetMediaCardWidget::EnsureMediaObjects()
+{
+	if (mMediaPlayer == nullptr)
+	{
+		mMediaPlayer = NewObject<UMediaPlayer>(this);
+	}
+
+	if (mMediaTexture == nullptr)
+	{
+		mMediaTexture = NewObject<UMediaTexture>(this);
+		mMediaTexture->AutoClear = true;
+		mMediaTexture->ClearColor = FLinearColor::Black;
+	}
+
+	if (mMediaTexture != nullptr && mMediaPlayer != nullptr)
+	{
+		mMediaTexture->SetMediaPlayer(mMediaPlayer);
+		mMediaTexture->UpdateResource();
+	}
+}
+
+UImage* UVdjmWidgetMediaCardWidget::ResolveActivePreviewImage() const
+{
+	if (Image_ActivePreview != nullptr)
+	{
+		return Image_ActivePreview;
+	}
+
+	return FindFirstImageInWidget(ActiveLayer);
 }
 
 bool UVdjmWidgetMediaCardWidget::SetCardSource(const FVdjmWidgetMediaCardSource& cardSource)
@@ -195,8 +261,8 @@ void UVdjmWidgetMediaCardWidget::EnterActive()
 	SetOptionalWidgetVisibility(VisibleLayer, ESlateVisibility::Collapsed);
 	SetOptionalWidgetVisibility(ActiveLayer, ESlateVisibility::Visible);
 	SetOptionalWidgetVisibility(ErrorLayer, ESlateVisibility::Collapsed);
-	StartActivePreviewLoop();
 	BP_ShowActiveCard();
+	StartActivePreviewLoop();
 }
 
 void UVdjmWidgetMediaCardWidget::EnterHidden()
@@ -227,11 +293,39 @@ void UVdjmWidgetMediaCardWidget::EnterError(const FString& errorReason)
 void UVdjmWidgetMediaCardWidget::StartActivePreviewLoop()
 {
 	BP_StartActivePreviewLoop();
+	if (not bAutoManagePreviewMedia)
+	{
+		return;
+	}
+
+	FString errorReason;
+	if (not StartManagedActivePreview(errorReason) && bDebugTraceState)
+	{
+		UE_LOG(
+			LogVdjmWidgets,
+			Warning,
+			TEXT("VdjmCard AutoPreview Failed Widget=%s Reason=%s"),
+			*GetNameSafe(this),
+			*errorReason);
+	}
 }
 
 void UVdjmWidgetMediaCardWidget::StopPreview(bool bReleaseMediaResources)
 {
 	BP_StopPreview(bReleaseMediaResources);
+	if (mPreviewPlayer != nullptr)
+	{
+		mPreviewPlayer->StopPreview(bReleaseMediaResources);
+	}
+	else if (mMediaPlayer != nullptr)
+	{
+		mMediaPlayer->Pause();
+		if (bReleaseMediaResources)
+		{
+			mMediaPlayer->Close();
+		}
+	}
+
 	if (bReleaseMediaResources)
 	{
 		ReleaseMediaResources();
@@ -240,6 +334,146 @@ void UVdjmWidgetMediaCardWidget::StopPreview(bool bReleaseMediaResources)
 
 void UVdjmWidgetMediaCardWidget::ReleaseMediaResources()
 {
+	if (mPreviewPlayer != nullptr)
+	{
+		mPreviewPlayer->StopPreview(true);
+		mPreviewPlayer = nullptr;
+	}
+
+	if (mMediaPlayer != nullptr)
+	{
+		mMediaPlayer->Close();
+	}
+
+	if (mMediaTexture != nullptr)
+	{
+		mMediaTexture->SetMediaPlayer(nullptr);
+		mMediaTexture->UpdateResource();
+		mMediaTexture = nullptr;
+	}
+
+	mMediaPlayer = nullptr;
+}
+
+bool UVdjmWidgetMediaCardWidget::PrepareActivePreviewVisuals()
+{
+	EnsureMediaObjects();
+	return ApplyActiveMediaTextureBrush();
+}
+
+bool UVdjmWidgetMediaCardWidget::StartManagedActivePreview(FString& outErrorReason)
+{
+	outErrorReason.Reset();
+	if (not HasValidCardSource())
+	{
+		outErrorReason = TEXT("Card source is empty or invalid.");
+		mLastErrorReason = outErrorReason;
+		return false;
+	}
+
+	if (not PrepareActivePreviewVisuals())
+	{
+		outErrorReason = TEXT("Failed to prepare active preview visuals.");
+		mLastErrorReason = outErrorReason;
+		return false;
+	}
+
+	if (mPreviewPlayer == nullptr)
+	{
+		mPreviewPlayer = UVdjmRecordMediaPreviewPlayer::CreateMediaPreviewPlayer(this, mMediaPlayer);
+	}
+
+	if (mPreviewPlayer == nullptr)
+	{
+		outErrorReason = TEXT("Preview player is invalid.");
+		mLastErrorReason = outErrorReason;
+		return false;
+	}
+
+	FString previewSource;
+	EVdjmWidgetMediaSourceKind sourceKind = EVdjmWidgetMediaSourceKind::ENone;
+	FString sourceErrorReason;
+	GetActivePreviewSource(previewSource, sourceKind, sourceErrorReason);
+
+	const bool bResult = mPreviewPlayer->StartPreviewFromRegistryEntry(
+		mMediaPlayer,
+		mCardSource.RegistryEntry,
+		outErrorReason);
+	if (not bResult)
+	{
+		mLastErrorReason = outErrorReason;
+	}
+	else
+	{
+		mLastErrorReason.Reset();
+	}
+
+	if (bDebugTraceState)
+	{
+		if (bResult)
+		{
+			UE_LOG(
+				LogVdjmWidgets,
+				Log,
+				TEXT("VdjmCard AutoPreview Start Widget=%s Result=true SourceKind=%s Source=%s Reason=None"),
+				*GetNameSafe(this),
+				*GetEnumValueString(sourceKind),
+				previewSource.IsEmpty() ? TEXT("None") : *previewSource);
+		}
+		else
+		{
+			UE_LOG(
+				LogVdjmWidgets,
+				Warning,
+				TEXT("VdjmCard AutoPreview Start Widget=%s Result=false SourceKind=%s Source=%s Reason=%s"),
+				*GetNameSafe(this),
+				*GetEnumValueString(sourceKind),
+				previewSource.IsEmpty() ? TEXT("None") : *previewSource,
+				outErrorReason.IsEmpty() ? TEXT("None") : *outErrorReason);
+		}
+	}
+	return bResult;
+}
+
+bool UVdjmWidgetMediaCardWidget::ApplyActiveMediaTextureBrush()
+{
+	if (mMediaTexture == nullptr)
+	{
+		return false;
+	}
+
+	UImage* activePreviewImage = ResolveActivePreviewImage();
+	if (activePreviewImage == nullptr)
+	{
+		if (bDebugTraceState)
+		{
+			UE_LOG(
+				LogVdjmWidgets,
+				Warning,
+				TEXT("VdjmCard AutoPreview BrushFailed Widget=%s Reason=ActivePreviewImageMissing ActiveLayer=%s"),
+				*GetNameSafe(this),
+				*GetNameSafe(ActiveLayer));
+		}
+		return false;
+	}
+
+	FSlateBrush mediaBrush;
+	mediaBrush.SetResourceObject(mMediaTexture);
+	mediaBrush.ImageSize = FVector2D(512.0f, 512.0f);
+	activePreviewImage->SetBrush(mediaBrush);
+
+	if (bDebugTraceState)
+	{
+		UE_LOG(
+			LogVdjmWidgets,
+			Log,
+			TEXT("VdjmCard AutoPreview BrushApplied Widget=%s Image=%s Texture=%s Player=%s"),
+			*GetNameSafe(this),
+			*GetNameSafe(activePreviewImage),
+			*GetNameSafe(mMediaTexture),
+			*GetNameSafe(mMediaPlayer));
+	}
+	return true;
 }
 
 bool UVdjmWidgetMediaCardWidget::HasValidCardSource() const
