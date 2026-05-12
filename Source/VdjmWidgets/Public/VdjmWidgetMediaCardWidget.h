@@ -48,6 +48,14 @@ public:
 	void StopPreview(bool bReleaseMediaResources);
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card")
 	void ReleaseMediaResources();
+	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
+	bool HasValidCardSource() const;
+	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card")
+	bool ValidateCardSource(FString& outErrorReason) const;
+	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card")
+	bool GetVisiblePreviewSource(FString& outSource, EVdjmWidgetMediaSourceKind& outSourceKind, FString& outErrorReason) const;
+	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card")
+	bool GetActivePreviewSource(FString& outSource, EVdjmWidgetMediaSourceKind& outSourceKind, FString& outErrorReason) const;
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card|Debug")
 	void DumpDebugCardState(const FString& reason) const;
 

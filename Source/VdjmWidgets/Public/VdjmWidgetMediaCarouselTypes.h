@@ -36,6 +36,26 @@ enum class EVdjmWidgetMediaCarouselInputAction : uint8
 	ESwipe UMETA(DisplayName = "Swipe")
 };
 
+UENUM(BlueprintType)
+enum class EVdjmWidgetMediaCarouselActiveAfterRefreshPolicy : uint8
+{
+	EKeepRecordId UMETA(DisplayName = "Keep Record Id"),
+	EKeepIndex UMETA(DisplayName = "Keep Index"),
+	EFirst UMETA(DisplayName = "First"),
+	ELatest UMETA(DisplayName = "Latest")
+};
+
+UENUM(BlueprintType)
+enum class EVdjmWidgetMediaSourceKind : uint8
+{
+	ENone UMETA(DisplayName = "None"),
+	EThumbnailFile UMETA(DisplayName = "Thumbnail File"),
+	EPreviewClipFile UMETA(DisplayName = "Preview Clip File"),
+	EOutputFile UMETA(DisplayName = "Output File"),
+	EPlaybackLocator UMETA(DisplayName = "Playback Locator"),
+	EPublishedContentUri UMETA(DisplayName = "Published Content Uri")
+};
+
 USTRUCT(BlueprintType)
 struct VDJMWIDGETS_API FVdjmWidgetMediaCardSource
 {
@@ -126,12 +146,22 @@ struct VDJMWIDGETS_API FVdjmWidgetMediaCarouselInputPayload
 	int32 CardIndex = INDEX_NONE;
 
 	UPROPERTY(BlueprintReadWrite, Category = "VdjmWidgets|Media|Carousel")
+	int32 SourceIndex = INDEX_NONE;
+
+	UPROPERTY(BlueprintReadWrite, Category = "VdjmWidgets|Media|Carousel")
+	EVdjmWidgetMediaCardState CardState = EVdjmWidgetMediaCardState::EEmpty;
+
+	UPROPERTY(BlueprintReadWrite, Category = "VdjmWidgets|Media|Carousel")
 	FVector2D ScreenPosition = FVector2D::ZeroVector;
 
 	UPROPERTY(BlueprintReadWrite, Category = "VdjmWidgets|Media|Carousel")
 	FVector2D Delta = FVector2D::ZeroVector;
+
+	UPROPERTY(BlueprintReadWrite, Category = "VdjmWidgets|Media|Carousel")
+	bool bHasSource = false;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmWidgetMediaCarouselRefreshDelegate, bool, bSuccess, const FString&, ErrorReason);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmWidgetMediaCarouselActiveSourceChangedDelegate, int32, PreviousSourceIndex, int32, NewSourceIndex);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVdjmWidgetMediaCarouselInputDelegate, const FVdjmWidgetMediaCarouselInputPayload&, Payload);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVdjmWidgetMediaCardStateDelegate, EVdjmWidgetMediaCardState, PreviousState, EVdjmWidgetMediaCardState, NewState);

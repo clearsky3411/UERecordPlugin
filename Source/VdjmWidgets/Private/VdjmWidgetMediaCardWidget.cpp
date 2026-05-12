@@ -2,6 +2,7 @@
 
 #include "Components/PanelWidget.h"
 #include "Components/Widget.h"
+#include "Misc/Paths.h"
 #include "VdjmWidgets.h"
 
 namespace
@@ -46,6 +47,56 @@ namespace
 	{
 		const UPanelWidget* panelWidget = Cast<UPanelWidget>(widget);
 		return panelWidget != nullptr ? panelWidget->GetChildrenCount() : INDEX_NONE;
+	}
+
+	bool IsExternalMediaSource(const FString& source)
+	{
+		return source.StartsWith(TEXT("content://"), ESearchCase::IgnoreCase) ||
+			source.StartsWith(TEXT("http://"), ESearchCase::IgnoreCase) ||
+			source.StartsWith(TEXT("https://"), ESearchCase::IgnoreCase);
+	}
+
+	bool TryResolveLocalFileSource(
+		const FString& source,
+		EVdjmWidgetMediaSourceKind sourceKind,
+		const TCHAR* sourceName,
+		FString& outSource,
+		EVdjmWidgetMediaSourceKind& outSourceKind,
+		FString& outErrorReason)
+	{
+		if (source.IsEmpty())
+		{
+			return false;
+		}
+
+		if (IsExternalMediaSource(source) || FPaths::FileExists(source))
+		{
+			outSource = source;
+			outSourceKind = sourceKind;
+			outErrorReason.Reset();
+			return true;
+		}
+
+		outErrorReason = FString::Printf(TEXT("%s does not exist. Source=%s"), sourceName, *source);
+		return false;
+	}
+
+	bool TryResolveExternalSource(
+		const FString& source,
+		EVdjmWidgetMediaSourceKind sourceKind,
+		FString& outSource,
+		EVdjmWidgetMediaSourceKind& outSourceKind,
+		FString& outErrorReason)
+	{
+		if (source.IsEmpty())
+		{
+			return false;
+		}
+
+		outSource = source;
+		outSourceKind = sourceKind;
+		outErrorReason.Reset();
+		return true;
 	}
 }
 
@@ -189,6 +240,136 @@ void UVdjmWidgetMediaCardWidget::StopPreview(bool bReleaseMediaResources)
 
 void UVdjmWidgetMediaCardWidget::ReleaseMediaResources()
 {
+}
+
+bool UVdjmWidgetMediaCardWidget::HasValidCardSource() const
+{
+	return mCardSource.bValid &&
+		(not mCardSource.RegistryEntry.RecordId.IsEmpty() ||
+			not mCardSource.RegistryEntry.MetadataFilePath.IsEmpty() ||
+			not mCardSource.RegistryEntry.OutputFilePath.IsEmpty() ||
+			not mCardSource.RegistryEntry.PlaybackLocator.IsEmpty() ||
+			not mCardSource.RegistryEntry.PublishedContentUri.IsEmpty());
+}
+
+bool UVdjmWidgetMediaCardWidget::ValidateCardSource(FString& outErrorReason) const
+{
+	outErrorReason.Reset();
+	if (not HasValidCardSource())
+	{
+		outErrorReason = TEXT("Card source is empty or invalid.");
+		return false;
+	}
+
+	FString source;
+	EVdjmWidgetMediaSourceKind sourceKind = EVdjmWidgetMediaSourceKind::ENone;
+	return GetActivePreviewSource(source, sourceKind, outErrorReason);
+}
+
+bool UVdjmWidgetMediaCardWidget::GetVisiblePreviewSource(
+	FString& outSource,
+	EVdjmWidgetMediaSourceKind& outSourceKind,
+	FString& outErrorReason) const
+{
+	outSource.Reset();
+	outSourceKind = EVdjmWidgetMediaSourceKind::ENone;
+	outErrorReason.Reset();
+	if (not HasValidCardSource())
+	{
+		outErrorReason = TEXT("Card source is empty or invalid.");
+		return false;
+	}
+
+	const FVdjmRecordMediaRegistryEntry& registryEntry = mCardSource.RegistryEntry;
+	if (TryResolveLocalFileSource(
+		registryEntry.ThumbnailFilePath,
+		EVdjmWidgetMediaSourceKind::EThumbnailFile,
+		TEXT("ThumbnailFilePath"),
+		outSource,
+		outSourceKind,
+		outErrorReason))
+	{
+		return true;
+	}
+
+	return GetActivePreviewSource(outSource, outSourceKind, outErrorReason);
+}
+
+bool UVdjmWidgetMediaCardWidget::GetActivePreviewSource(
+	FString& outSource,
+	EVdjmWidgetMediaSourceKind& outSourceKind,
+	FString& outErrorReason) const
+{
+	outSource.Reset();
+	outSourceKind = EVdjmWidgetMediaSourceKind::ENone;
+	outErrorReason.Reset();
+	if (not HasValidCardSource())
+	{
+		outErrorReason = TEXT("Card source is empty or invalid.");
+		return false;
+	}
+
+	const FVdjmRecordMediaRegistryEntry& registryEntry = mCardSource.RegistryEntry;
+	if (TryResolveLocalFileSource(
+		registryEntry.PreviewClipFilePath,
+		EVdjmWidgetMediaSourceKind::EPreviewClipFile,
+		TEXT("PreviewClipFilePath"),
+		outSource,
+		outSourceKind,
+		outErrorReason))
+	{
+		return true;
+	}
+
+	if (TryResolveLocalFileSource(
+		registryEntry.OutputFilePath,
+		EVdjmWidgetMediaSourceKind::EOutputFile,
+		TEXT("OutputFilePath"),
+		outSource,
+		outSourceKind,
+		outErrorReason))
+	{
+		return true;
+	}
+
+	if (registryEntry.PlaybackLocatorType.Equals(TEXT("local_path"), ESearchCase::IgnoreCase))
+	{
+		if (TryResolveLocalFileSource(
+			registryEntry.PlaybackLocator,
+			EVdjmWidgetMediaSourceKind::EPlaybackLocator,
+			TEXT("PlaybackLocator"),
+			outSource,
+			outSourceKind,
+			outErrorReason))
+		{
+			return true;
+		}
+	}
+	else if (TryResolveExternalSource(
+		registryEntry.PlaybackLocator,
+		EVdjmWidgetMediaSourceKind::EPlaybackLocator,
+		outSource,
+		outSourceKind,
+		outErrorReason))
+	{
+		return true;
+	}
+
+	if (TryResolveExternalSource(
+		registryEntry.PublishedContentUri,
+		EVdjmWidgetMediaSourceKind::EPublishedContentUri,
+		outSource,
+		outSourceKind,
+		outErrorReason))
+	{
+		return true;
+	}
+
+	if (outErrorReason.IsEmpty())
+	{
+		outErrorReason = TEXT("No playable preview source was found.");
+	}
+	return false;
 }
 
 void UVdjmWidgetMediaCardWidget::DumpDebugCardState(const FString& reason) const

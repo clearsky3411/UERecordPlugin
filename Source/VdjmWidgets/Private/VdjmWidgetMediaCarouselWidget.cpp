@@ -29,6 +29,26 @@ namespace
 		return (index % count + count) % count;
 	}
 
+	int32 FindSourceIndexByRecordId(
+		const TArray<FVdjmWidgetMediaCardSource>& sources,
+		const FString& recordId)
+	{
+		if (recordId.IsEmpty())
+		{
+			return INDEX_NONE;
+		}
+
+		for (int32 sourceIndex = 0; sourceIndex < sources.Num(); ++sourceIndex)
+		{
+			if (sources[sourceIndex].RegistryEntry.RecordId == recordId)
+			{
+				return sourceIndex;
+			}
+		}
+
+		return INDEX_NONE;
+	}
+
 	EVdjmWidgetMediaCarouselLayoutState ResolveLayoutState(int32 sourceCount, int32 visibleCount)
 	{
 		if (sourceCount <= 0)
@@ -315,9 +335,69 @@ bool UVdjmWidgetMediaCarouselWidget::RefreshCarousel(FString& outErrorReason)
 		}
 	}
 
+	AVdjmRecordMediaPreviewManagerActor* previewManager = mSource->GetPreviewManager();
+	if (bRefreshPreviewStoreOnRefresh && previewManager != nullptr)
+	{
+		FString refreshStoreErrorReason;
+		if (not previewManager->RefreshPreviewStoreFromDisk(refreshStoreErrorReason))
+		{
+			outErrorReason = refreshStoreErrorReason.IsEmpty()
+				? TEXT("Failed to refresh preview store from disk.")
+				: refreshStoreErrorReason;
+			if (bKeepPreviousSnapshotOnRefreshFailure && mSourceSnapshot.Num() > 0)
+			{
+				FString rebuildErrorReason;
+				RebuildVisibleCards(rebuildErrorReason);
+				if (bDebugTraceLayout)
+				{
+					UE_LOG(
+						LogVdjmWidgets,
+						Warning,
+						TEXT("VdjmCarousel RefreshStore Failed KeepPrevious=true Reason=%s RebuildReason=%s"),
+						*outErrorReason,
+						*rebuildErrorReason);
+				}
+			}
+			else if (bDebugTraceLayout)
+			{
+				UE_LOG(
+					LogVdjmWidgets,
+					Warning,
+					TEXT("VdjmCarousel RefreshStore Failed KeepPrevious=false Reason=%s"),
+					*outErrorReason);
+			}
+			OnCarouselRefreshFinished.Broadcast(false, outErrorReason);
+			return false;
+		}
+
+		if (bDebugTraceLayout)
+		{
+			UE_LOG(
+				LogVdjmWidgets,
+				Log,
+				TEXT("VdjmCarousel RefreshStore Success Manager=%s RegistryCount=%d"),
+				*GetNameSafe(previewManager),
+				previewManager->GetPreviewRegistryEntries().Num());
+		}
+	}
+
 	TArray<FVdjmWidgetMediaCardSource> sources;
 	if (not mSource->RefreshSourceSnapshot(sources, outErrorReason))
 	{
+		if (bKeepPreviousSnapshotOnRefreshFailure && mSourceSnapshot.Num() > 0)
+		{
+			FString rebuildErrorReason;
+			RebuildVisibleCards(rebuildErrorReason);
+			if (bDebugTraceLayout)
+			{
+				UE_LOG(
+					LogVdjmWidgets,
+					Warning,
+					TEXT("VdjmCarousel RefreshSnapshot Failed KeepPrevious=true Reason=%s RebuildReason=%s"),
+					*outErrorReason,
+					*rebuildErrorReason);
+			}
+		}
 		if (bDebugTraceLayout)
 		{
 			UE_LOG(LogVdjmWidgets, Warning, TEXT("VdjmCarousel Refresh Failed Reason=%s"), *outErrorReason);
@@ -390,14 +470,19 @@ bool UVdjmWidgetMediaCarouselWidget::ApplySourceSnapshot(
 		return false;
 	}
 
+	const int32 previousSourceIndex = mActiveSourceIndex;
+	const FString previousRecordId = mSourceSnapshot.IsValidIndex(mActiveSourceIndex)
+		? mSourceSnapshot[mActiveSourceIndex].RegistryEntry.RecordId
+		: FString();
+
 	mSourceSnapshot = sources;
-	if (mSourceSnapshot.Num() <= 0)
+	mActiveSourceIndex = ResolveActiveSourceIndexAfterRefresh(
+		mSourceSnapshot,
+		previousSourceIndex,
+		previousRecordId);
+	if (previousSourceIndex != mActiveSourceIndex)
 	{
-		mActiveSourceIndex = INDEX_NONE;
-	}
-	else if (not mSourceSnapshot.IsValidIndex(mActiveSourceIndex))
-	{
-		mActiveSourceIndex = 0;
+		OnActiveSourceChanged.Broadcast(previousSourceIndex, mActiveSourceIndex);
 	}
 
 	if (bDebugTraceLayout)
@@ -405,9 +490,12 @@ bool UVdjmWidgetMediaCarouselWidget::ApplySourceSnapshot(
 		UE_LOG(
 			LogVdjmWidgets,
 			Log,
-			TEXT("VdjmCarousel ApplySourceSnapshot Resolved SourceCount=%d Active=%d"),
+			TEXT("VdjmCarousel ApplySourceSnapshot Resolved SourceCount=%d PreviousActive=%d Active=%d PreviousRecordId=%s Policy=%s"),
 			mSourceSnapshot.Num(),
-			mActiveSourceIndex);
+			previousSourceIndex,
+			mActiveSourceIndex,
+			previousRecordId.IsEmpty() ? TEXT("None") : *previousRecordId,
+			*GetEnumValueString(ActiveAfterRefreshPolicy));
 	}
 
 	return RebuildVisibleCards(outErrorReason);
@@ -438,6 +526,13 @@ void UVdjmWidgetMediaCarouselWidget::SetPreviewManager(
 	{
 		mSource->SetPreviewManager(previewManager);
 	}
+}
+
+FVdjmWidgetMediaCarouselInputPayload UVdjmWidgetMediaCarouselWidget::GetLastInputPayload() const
+{
+	return mInputController != nullptr
+		? mInputController->GetLastInputPayload()
+		: FVdjmWidgetMediaCarouselInputPayload();
 }
 
 TArray<UVdjmWidgetMediaCardWidget*> UVdjmWidgetMediaCarouselWidget::GetCards() const
@@ -782,6 +877,37 @@ int32 UVdjmWidgetMediaCarouselWidget::ResolveActiveSourceIndex(int32 activeSourc
 	return mSourceSnapshot.IsValidIndex(activeSourceIndex) ? activeSourceIndex : INDEX_NONE;
 }
 
+int32 UVdjmWidgetMediaCarouselWidget::ResolveActiveSourceIndexAfterRefresh(
+	const TArray<FVdjmWidgetMediaCardSource>& sources,
+	int32 previousSourceIndex,
+	const FString& previousRecordId) const
+{
+	if (sources.Num() <= 0)
+	{
+		return INDEX_NONE;
+	}
+
+	switch (ActiveAfterRefreshPolicy)
+	{
+	case EVdjmWidgetMediaCarouselActiveAfterRefreshPolicy::EKeepRecordId:
+	{
+		const int32 recordSourceIndex = FindSourceIndexByRecordId(sources, previousRecordId);
+		if (sources.IsValidIndex(recordSourceIndex))
+		{
+			return recordSourceIndex;
+		}
+		return FMath::Clamp(previousSourceIndex, 0, sources.Num() - 1);
+	}
+	case EVdjmWidgetMediaCarouselActiveAfterRefreshPolicy::EKeepIndex:
+		return FMath::Clamp(previousSourceIndex, 0, sources.Num() - 1);
+	case EVdjmWidgetMediaCarouselActiveAfterRefreshPolicy::ELatest:
+		return sources.Num() - 1;
+	case EVdjmWidgetMediaCarouselActiveAfterRefreshPolicy::EFirst:
+	default:
+		return 0;
+	}
+}
+
 bool UVdjmWidgetMediaCarouselWidget::ApplyResolvedActiveSourceIndex(
 	int32 activeSourceIndex,
 	bool bRefreshLayout)
@@ -829,6 +955,138 @@ bool UVdjmWidgetMediaCarouselWidget::ApplyResolvedActiveSourceIndex(
 	}
 
 	return true;
+}
+
+FVdjmWidgetMediaCarouselInputPayload UVdjmWidgetMediaCarouselWidget::BuildInputPayload(
+	const FGeometry& inGeometry,
+	const FVector2D& screenPosition,
+	const FVector2D& delta,
+	EVdjmWidgetMediaCarouselInputAction action) const
+{
+	FVdjmWidgetMediaCarouselInputPayload inputPayload;
+	inputPayload.Action = action;
+	inputPayload.ScreenPosition = screenPosition;
+	inputPayload.Delta = delta;
+
+	const int32 slotIndex = FindNearestLayoutSlotFromScreenPosition(inGeometry, screenPosition);
+	inputPayload.CardIndex = slotIndex;
+	if (mLayoutSlots.IsValidIndex(slotIndex))
+	{
+		const FVdjmWidgetMediaCarouselSlot& layoutSlot = mLayoutSlots[slotIndex];
+		inputPayload.SourceIndex = layoutSlot.SourceIndex;
+		inputPayload.CardState = layoutSlot.TargetCardState;
+		inputPayload.bHasSource = mSourceSnapshot.IsValidIndex(layoutSlot.SourceIndex);
+	}
+
+	return inputPayload;
+}
+
+int32 UVdjmWidgetMediaCarouselWidget::FindNearestLayoutSlotFromScreenPosition(
+	const FGeometry& inGeometry,
+	const FVector2D& screenPosition) const
+{
+	if (mLayoutSlots.Num() <= 0)
+	{
+		return INDEX_NONE;
+	}
+
+	FVector2D localSize = inGeometry.GetLocalSize();
+	if (localSize.X <= 1.0f || localSize.Y <= 1.0f)
+	{
+		localSize = GetCarouselViewSize();
+	}
+
+	const FVector2D localCenter = localSize * 0.5f;
+	const FVector2D transientOffset = GetLayoutDirection() * GetLayoutSpacing() * mTransientSlotOffset;
+	int32 bestSlotIndex = INDEX_NONE;
+	float bestDistanceSquared = TNumericLimits<float>::Max();
+
+	for (int32 slotIndex = 0; slotIndex < mLayoutSlots.Num(); ++slotIndex)
+	{
+		const FVector2D slotCenter = inGeometry.LocalToAbsolute(
+			localCenter + mLayoutSlots[slotIndex].RenderTranslation + transientOffset);
+		const float distanceSquared = FVector2D::DistSquared(screenPosition, slotCenter);
+		if (distanceSquared < bestDistanceSquared)
+		{
+			bestDistanceSquared = distanceSquared;
+			bestSlotIndex = slotIndex;
+		}
+	}
+
+	return bestSlotIndex;
+}
+
+bool UVdjmWidgetMediaCarouselWidget::HandleTapInput(
+	const FGeometry& inGeometry,
+	const FVector2D& screenPosition,
+	const FVector2D& totalDelta,
+	double elapsedSeconds)
+{
+	if (mInputController == nullptr)
+	{
+		return false;
+	}
+
+	FVdjmWidgetMediaCarouselInputPayload inputPayload = BuildInputPayload(
+		inGeometry,
+		screenPosition,
+		totalDelta,
+		EVdjmWidgetMediaCarouselInputAction::EClicked);
+	mInputController->StoreInputPayload(inputPayload);
+
+	if (not mLayoutSlots.IsValidIndex(inputPayload.CardIndex))
+	{
+		if (bDebugTraceInput)
+		{
+			UE_LOG(
+				LogVdjmWidgets,
+				Log,
+				TEXT("VdjmCarousel TapIgnored Reason=NoSlot Screen=%s Elapsed=%.3f"),
+				*screenPosition.ToString(),
+				elapsedSeconds);
+		}
+		return false;
+	}
+
+	if (not inputPayload.bHasSource)
+	{
+		OnEmptyCardTapped.Broadcast(inputPayload);
+		if (bDebugTraceInput)
+		{
+			UE_LOG(
+				LogVdjmWidgets,
+				Log,
+				TEXT("VdjmCarousel TapEmpty Slot=%d State=%s Screen=%s Delta=%s Elapsed=%.3f"),
+				inputPayload.CardIndex,
+				*GetEnumValueString(inputPayload.CardState),
+				*screenPosition.ToString(),
+				*totalDelta.ToString(),
+				elapsedSeconds);
+		}
+		return true;
+	}
+
+	const int32 activeSourceIndexBeforeTap = mActiveSourceIndex;
+	OnCardTapped.Broadcast(inputPayload);
+	const bool bActivated = bActivateCardOnTap && inputPayload.SourceIndex != mActiveSourceIndex
+		? ApplyResolvedActiveSourceIndex(inputPayload.SourceIndex, true)
+		: inputPayload.SourceIndex == mActiveSourceIndex;
+	if (bDebugTraceInput)
+	{
+		UE_LOG(
+			LogVdjmWidgets,
+			Log,
+			TEXT("VdjmCarousel TapCard Slot=%d Source=%d State=%s ActiveBefore=%d Activated=%s Screen=%s Delta=%s Elapsed=%.3f"),
+			inputPayload.CardIndex,
+			inputPayload.SourceIndex,
+			*GetEnumValueString(inputPayload.CardState),
+			activeSourceIndexBeforeTap,
+			bActivated ? TEXT("true") : TEXT("false"),
+			*screenPosition.ToString(),
+			*totalDelta.ToString(),
+			elapsedSeconds);
+	}
+	return bActivated;
 }
 
 void UVdjmWidgetMediaCarouselWidget::DumpDebugCarouselState(const FString& reason) const
@@ -894,11 +1152,6 @@ void UVdjmWidgetMediaCarouselWidget::BeginDebugPointerTrace(
 	const FPointerEvent& pointerEvent,
 	const TCHAR* inputType)
 {
-	if (not bDebugTraceInput)
-	{
-		return;
-	}
-
 	const double nowSeconds = GetWorld() != nullptr ? GetWorld()->GetTimeSeconds() : FPlatformTime::Seconds();
 	const FVector2D screenPosition = pointerEvent.GetScreenSpacePosition();
 	mbDebugPointerTracking = true;
@@ -908,17 +1161,29 @@ void UVdjmWidgetMediaCarouselWidget::BeginDebugPointerTrace(
 	mDebugPointerLastMoveLogSeconds = nowSeconds;
 	mDebugPointerMoveCount = 0;
 
-	UE_LOG(
-		LogVdjmWidgets,
-		Log,
-		TEXT("VdjmCarousel Input Begin Type=%s Pointer=%d Screen=%s Local=%s GeometryLocalSize=%s AbsTopLeft=%s Consume=%s"),
-		inputType,
-		pointerEvent.GetPointerIndex(),
-		*screenPosition.ToString(),
-		*inGeometry.AbsoluteToLocal(screenPosition).ToString(),
-		*inGeometry.GetLocalSize().ToString(),
-		*inGeometry.LocalToAbsolute(FVector2D::ZeroVector).ToString(),
-		GetBoolString(bDebugConsumeInput));
+	if (mInputController != nullptr)
+	{
+		mInputController->StoreInputPayload(BuildInputPayload(
+			inGeometry,
+			screenPosition,
+			FVector2D::ZeroVector,
+			EVdjmWidgetMediaCarouselInputAction::EPressed));
+	}
+
+	if (bDebugTraceInput)
+	{
+		UE_LOG(
+			LogVdjmWidgets,
+			Log,
+			TEXT("VdjmCarousel Input Begin Type=%s Pointer=%d Screen=%s Local=%s GeometryLocalSize=%s AbsTopLeft=%s Consume=%s"),
+			inputType,
+			pointerEvent.GetPointerIndex(),
+			*screenPosition.ToString(),
+			*inGeometry.AbsoluteToLocal(screenPosition).ToString(),
+			*inGeometry.GetLocalSize().ToString(),
+			*inGeometry.LocalToAbsolute(FVector2D::ZeroVector).ToString(),
+			GetBoolString(bDebugConsumeInput));
+	}
 }
 
 void UVdjmWidgetMediaCarouselWidget::UpdateDebugPointerTrace(
@@ -926,7 +1191,7 @@ void UVdjmWidgetMediaCarouselWidget::UpdateDebugPointerTrace(
 	const FPointerEvent& pointerEvent,
 	const TCHAR* inputType)
 {
-	if (not bDebugTraceInput || not mbDebugPointerTracking)
+	if (not mbDebugPointerTracking)
 	{
 		return;
 	}
@@ -941,6 +1206,21 @@ void UVdjmWidgetMediaCarouselWidget::UpdateDebugPointerTrace(
 	{
 		mTransientSlotOffset = FMath::Clamp(FVector2D::DotProduct(totalDelta, direction) / spacing, -1.25f, 1.25f);
 		ApplySlotTransforms(mLayoutSlots);
+	}
+
+	if (mInputController != nullptr)
+	{
+		mInputController->StoreInputPayload(BuildInputPayload(
+			inGeometry,
+			screenPosition,
+			totalDelta,
+			EVdjmWidgetMediaCarouselInputAction::EMoved));
+	}
+
+	if (not bDebugTraceInput)
+	{
+		mDebugPointerLastScreenPosition = screenPosition;
+		return;
 	}
 
 	if (nowSeconds - mDebugPointerLastMoveLogSeconds < DebugInputMoveLogIntervalSeconds)
@@ -974,7 +1254,7 @@ void UVdjmWidgetMediaCarouselWidget::EndDebugPointerTrace(
 	const FPointerEvent& pointerEvent,
 	const TCHAR* inputType)
 {
-	if (not bDebugTraceInput)
+	if (not mbDebugPointerTracking)
 	{
 		return;
 	}
@@ -985,33 +1265,47 @@ void UVdjmWidgetMediaCarouselWidget::EndDebugPointerTrace(
 	const double elapsedSeconds = nowSeconds - mDebugPointerStartSeconds;
 	const float axisDelta = FVector2D::DotProduct(totalDelta, GetLayoutDirection());
 	const bool bSwipe = FMath::Abs(axisDelta) >= DebugSwipeDistanceThreshold && elapsedSeconds >= DebugSwipeMinDurationSeconds;
+	if (mInputController != nullptr)
+	{
+		mInputController->StoreInputPayload(BuildInputPayload(
+			inGeometry,
+			screenPosition,
+			totalDelta,
+			bSwipe ? EVdjmWidgetMediaCarouselInputAction::ESwipe : EVdjmWidgetMediaCarouselInputAction::EReleased));
+	}
+
 	const bool bSwipeCommitted = bSwipe && CommitDebugSwipe(totalDelta, elapsedSeconds);
 	if (not bSwipeCommitted)
 	{
 		mTransientSlotOffset = 0.0f;
 		ApplySlotTransforms(mLayoutSlots);
 	}
+	const bool bTapHandled = not bSwipe && HandleTapInput(inGeometry, screenPosition, totalDelta, elapsedSeconds);
 	mbDebugPointerTracking = false;
 
-	UE_LOG(
-		LogVdjmWidgets,
-		Log,
-		TEXT("VdjmCarousel Input End Type=%s Pointer=%d Screen=%s Local=%s TotalDelta=%s Distance=%.1f AxisDelta=%.1f Elapsed=%.3f MoveCount=%d Result=%s Committed=%s Threshold=%.1f MinDuration=%.3f"),
-		inputType,
-		pointerEvent.GetPointerIndex(),
-		*screenPosition.ToString(),
-		*inGeometry.AbsoluteToLocal(screenPosition).ToString(),
-		*totalDelta.ToString(),
-		totalDelta.Size(),
-		axisDelta,
-		elapsedSeconds,
-		mDebugPointerMoveCount,
-		bSwipe ? TEXT("Swipe") : TEXT("Tap"),
-		bSwipeCommitted ? TEXT("true") : TEXT("false"),
-		DebugSwipeDistanceThreshold,
-		DebugSwipeMinDurationSeconds);
+	if (bDebugTraceInput)
+	{
+		UE_LOG(
+			LogVdjmWidgets,
+			Log,
+			TEXT("VdjmCarousel Input End Type=%s Pointer=%d Screen=%s Local=%s TotalDelta=%s Distance=%.1f AxisDelta=%.1f Elapsed=%.3f MoveCount=%d Result=%s Committed=%s TapHandled=%s Threshold=%.1f MinDuration=%.3f"),
+			inputType,
+			pointerEvent.GetPointerIndex(),
+			*screenPosition.ToString(),
+			*inGeometry.AbsoluteToLocal(screenPosition).ToString(),
+			*totalDelta.ToString(),
+			totalDelta.Size(),
+			axisDelta,
+			elapsedSeconds,
+			mDebugPointerMoveCount,
+			bSwipe ? TEXT("Swipe") : TEXT("Tap"),
+			bSwipeCommitted ? TEXT("true") : TEXT("false"),
+			bTapHandled ? TEXT("true") : TEXT("false"),
+			DebugSwipeDistanceThreshold,
+			DebugSwipeMinDurationSeconds);
 
-	DumpDebugCarouselState(bSwipe ? TEXT("InputEndSwipe") : TEXT("InputEndTap"));
+		DumpDebugCarouselState(bSwipe ? TEXT("InputEndSwipe") : TEXT("InputEndTap"));
+	}
 }
 
 bool UVdjmWidgetMediaCarouselWidget::CommitDebugSwipe(

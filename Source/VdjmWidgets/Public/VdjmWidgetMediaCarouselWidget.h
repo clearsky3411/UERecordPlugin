@@ -189,6 +189,8 @@ public:
 	bool SlidePrevious();
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
 	void SetPreviewManager(AVdjmRecordMediaPreviewManagerActor* previewManager);
+	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Carousel")
+	FVdjmWidgetMediaCarouselInputPayload GetLastInputPayload() const;
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel|Debug")
 	void DumpDebugCarouselState(const FString& reason) const;
 
@@ -206,6 +208,12 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "VdjmWidgets|Media|Carousel")
 	FVdjmWidgetMediaCarouselActiveSourceChangedDelegate OnActiveSourceChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "VdjmWidgets|Media|Carousel")
+	FVdjmWidgetMediaCarouselInputDelegate OnCardTapped;
+
+	UPROPERTY(BlueprintAssignable, Category = "VdjmWidgets|Media|Carousel")
+	FVdjmWidgetMediaCarouselInputDelegate OnEmptyCardTapped;
 
 protected:
 	virtual void NativeConstruct() override;
@@ -225,7 +233,22 @@ protected:
 	FVector2D GetLayoutDirection() const;
 	float GetLayoutSpacing() const;
 	int32 ResolveActiveSourceIndex(int32 activeSourceIndex) const;
+	int32 ResolveActiveSourceIndexAfterRefresh(
+		const TArray<FVdjmWidgetMediaCardSource>& sources,
+		int32 previousSourceIndex,
+		const FString& previousRecordId) const;
 	bool ApplyResolvedActiveSourceIndex(int32 activeSourceIndex, bool bRefreshLayout);
+	FVdjmWidgetMediaCarouselInputPayload BuildInputPayload(
+		const FGeometry& inGeometry,
+		const FVector2D& screenPosition,
+		const FVector2D& delta,
+		EVdjmWidgetMediaCarouselInputAction action) const;
+	int32 FindNearestLayoutSlotFromScreenPosition(const FGeometry& inGeometry, const FVector2D& screenPosition) const;
+	bool HandleTapInput(
+		const FGeometry& inGeometry,
+		const FVector2D& screenPosition,
+		const FVector2D& totalDelta,
+		double elapsedSeconds);
 	void BeginDebugPointerTrace(const FGeometry& inGeometry, const FPointerEvent& pointerEvent, const TCHAR* inputType);
 	void UpdateDebugPointerTrace(const FGeometry& inGeometry, const FPointerEvent& pointerEvent, const TCHAR* inputType);
 	void EndDebugPointerTrace(const FGeometry& inGeometry, const FPointerEvent& pointerEvent, const TCHAR* inputType);
@@ -258,6 +281,18 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VdjmWidgets|Media|Carousel")
 	FVdjmWidgetMediaCarouselLayoutOptions LayoutOptions;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VdjmWidgets|Media|Carousel|Refresh")
+	EVdjmWidgetMediaCarouselActiveAfterRefreshPolicy ActiveAfterRefreshPolicy = EVdjmWidgetMediaCarouselActiveAfterRefreshPolicy::EKeepRecordId;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VdjmWidgets|Media|Carousel|Refresh")
+	bool bRefreshPreviewStoreOnRefresh = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VdjmWidgets|Media|Carousel|Refresh")
+	bool bKeepPreviousSnapshotOnRefreshFailure = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VdjmWidgets|Media|Carousel|Input")
+	bool bActivateCardOnTap = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "VdjmWidgets|Media|Carousel|Debug")
 	bool bDebugTraceInput = true;
