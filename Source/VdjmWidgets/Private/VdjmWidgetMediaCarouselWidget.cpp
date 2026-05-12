@@ -238,6 +238,11 @@ bool UVdjmWidgetMediaCarouselWidget::RefreshCarousel(FString& outErrorReason)
 		return false;
 	}
 
+	if (mSource->GetPreviewManager() == nullptr)
+	{
+		mSource->SetPreviewManager(AVdjmRecordMediaPreviewManagerActor::FindMediaPreviewManagerActor(this));
+	}
+
 	TArray<FVdjmWidgetMediaCardSource> sources;
 	if (not mSource->RefreshSourceSnapshot(sources, outErrorReason))
 	{
