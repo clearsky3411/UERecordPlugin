@@ -245,14 +245,6 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview|Store")
 	bool RefreshPreviewStoreFromDisk(FString& outErrorReason);
-
-	/*
-	 * Legacy carousel cleanup note:
-	 * The failed card layout/swipe experiment was removed, but these init APIs stay here because
-	 * loading screens and EventFlow still need a controllable way to prepare the manifest registry.
-	 * This actor does not own the new carousel UX; new card creation, layout, input, and swipe work
-	 * must live in VdjmWidgets. This path is only the registry/source preparation boundary.
-	 */
 	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview|Init", meta = (WorldContext = "worldContextObject"))
 	static bool GetMediaPreviewManagerInitStatus(UObject* worldContextObject, FVdjmRecordMediaPreviewInitStatus& outStatus);
 	UFUNCTION(BlueprintCallable, Category = "Recorder|MediaPreview|Init")
