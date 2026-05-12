@@ -59,6 +59,214 @@ AGENTS.md와 Docs/Codex_Handoff.md를 먼저 읽고, 현재 VdjmMobileUi 작업 
 - 로컬 변수와 파라미터는 camelCase, 함수는 PascalCase를 쓴다.
 - 사용자가 원하는 철학은 "이벤트 구성만으로 앱 기능과 UX 흐름을 제어"하는 것이다.
 
+## 2026-05-12 퇴근 전 최신 인계
+
+이 섹션을 가장 먼저 본다. 아래의 legacy preview/carousel 메모에는 과거 실험 내용이 섞여 있으므로, 현재 구현 기준은 새 `VdjmWidgets` carousel/card 구조다.
+
+### 현재 branch / commit
+
+- Branch: `codex/record-controller`
+- Remote push 완료.
+- 최근 관련 commit:
+  - `3123793 Auto manage media preview cards`
+  - `c1c6a5e Add carousel refresh and tap routing`
+  - `db05fbb Complete carousel slot state and swipe plumbing`
+  - `2337fc4 Add carousel input and layout debug traces`
+  - `3f8edbf Auto resolve preview manager for Vdjm carousel`
+  - `ea936c9 Add VdjmWidgets carousel skeleton`
+- 마지막 확인 시 working tree는 clean이었다.
+
+### 현재 성공한 것
+
+- 새 `VdjmWidgets` 기반 carousel/card 구조가 동작한다.
+- Android 실기기에서 swipe로 active source 이동이 된다.
+- 기존처럼 멀리 날아가거나 화면 밖으로 사라지는 문제는 새 input/layout 경로에서 완화되었다.
+- `RefreshCarousel()`가 `PreviewManager->RefreshPreviewStoreFromDisk()`를 옵션으로 호출해서 manifest/registry를 능동 refresh한다.
+- `OnCardTapped`, `OnEmptyCardTapped` delegate가 추가되었다.
+- 카드가 `Empty/Waiting/Visible/Active/Hidden/Error` layer visibility를 C++에서 자동 제어한다.
+- `Image_ActivePreview`를 card BP에 두면, active 진입 시 card가 자동으로 `UMediaPlayer`, `UMediaTexture`, `UVdjmRecordMediaPreviewPlayer`를 만들고 `Image_ActivePreview` brush에 media texture를 꽂는다.
+- active preview 재생은 실기기에서 동작 확인되었다. 사용자가 "된다"라고 확인했다.
+
+### 현재 핵심 파일
+
+- `Source/VdjmWidgets/Public/VdjmWidgetMediaCarouselTypes.h`
+- `Source/VdjmWidgets/Public/VdjmWidgetMediaCarouselWidget.h`
+- `Source/VdjmWidgets/Private/VdjmWidgetMediaCarouselWidget.cpp`
+- `Source/VdjmWidgets/Public/VdjmWidgetMediaCardWidget.h`
+- `Source/VdjmWidgets/Private/VdjmWidgetMediaCardWidget.cpp`
+- legacy 재생 로직 참고:
+  - `Source/VdjmRecorder/Public/VdjmRecorderCore.h`
+  - `Source/VdjmRecorder/Private/VdjmRecorderCore.cpp`
+  - `UVdjmRecordMediaPreviewPlayer`
+
+### 새 Card 책임
+
+`UVdjmWidgetMediaCardWidget`는 이제 단순 layer wrapper가 아니라 media preview도 소유한다.
+
+- Active 상태:
+  - `ActiveLayer`만 visible.
+  - `BP_ShowActiveCard()` 호출.
+  - `BP_StartActivePreviewLoop()` 호출.
+  - `bAutoManagePreviewMedia=true`이면 C++이 자동으로 media objects 생성/brush 적용/play start.
+- Visible 상태:
+  - `VisibleLayer`만 visible.
+  - preview는 stop/pause.
+  - 첫 프레임/thumbnail 자동 표시는 아직 별도 미구현.
+- Empty 상태:
+  - `EmptyLayer`만 visible.
+  - source는 invalid.
+  - empty card tap은 `OnEmptyCardTapped`로 분기된다.
+- Hidden/Error:
+  - preview close/release.
+
+Card BP 쪽 권장:
+
+- ActiveLayer 안 preview image 이름을 `Image_ActivePreview`로 둔다.
+- `BP_StartActivePreviewLoop`에서 직접 MediaPlayer를 또 열면 C++ 자동 관리와 중복될 수 있다.
+- 직접 처리하고 싶으면 card의 `bAutoManagePreviewMedia=false`로 끈다.
+
+### 새 Carousel 책임
+
+`UVdjmWidgetMediaCarouselWidget`는 card manager다.
+
+- `RefreshCarousel()`
+  - manager 자동 resolve.
+  - `bRefreshPreviewStoreOnRefresh=true`이면 disk registry refresh.
+  - snapshot 생성.
+  - `ActiveAfterRefreshPolicy`에 따라 active 유지.
+  - card pool 생성/재사용.
+  - layout slot 계산.
+  - card source/state 적용.
+- Swipe:
+  - touch/mouse begin/move/end를 carousel이 직접 받는다.
+  - `DebugSwipeDistanceThreshold`, `DebugSwipeMinDurationSeconds`로 swipe 판정.
+  - 현재는 즉시 commit 방식이다. 관성/snap animation은 아직 미구현.
+- Tap:
+  - screen position 기준 가장 가까운 slot을 찾는다.
+  - source가 있으면 `OnCardTapped` broadcast 후 active source로 전환.
+  - source가 없으면 `OnEmptyCardTapped`만 broadcast.
+- Layout:
+  - `VisibleCardCount`만큼 slot/card를 유지한다.
+  - source 수보다 slot 수가 많으면 empty slot/card가 생긴다. 현재 의도적으로 허용 중이다.
+  - `bLoop=false`이면 끝에서 window 밖 slot은 empty가 될 수 있다.
+
+### 현재 남은 핵심 문제: Preview lifecycle
+
+사용자는 back 기능을 `EmitSignal("open-preview")` 식으로 운용한다. 현재 EventFlow의 `LowerWidgetNode`는 `RemoveFromParent()`가 아니라 아래처럼 visibility만 내린다.
+
+```cpp
+widgetInstance->SetVisibility(ESlateVisibility::Collapsed);
+```
+
+즉:
+
+- widget은 viewport/parent에서 분리되지 않는다.
+- `NativeDestruct()`는 호출되지 않을 수 있다.
+- active card media player가 살아 있으면 Android media tick 로그가 계속 날 수 있다.
+- `RemoveWidgetNode`만 `RemoveFromParent()`를 호출한다.
+
+논의된 다음 방향:
+
+1. `open-preview` signal에 media start/stop을 섞지 않는다.
+2. 별도 명시 lifecycle signal을 만들 수 있다.
+   - 후보: `preview-visible`, `preview-hidden`
+   - 또는 `media-preview-start`, `media-preview-stop`
+3. 가장 단순하고 명시적인 다음 구현은 carousel public API 추가다.
+
+추가 예정 함수:
+
+```cpp
+UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
+void SetCarouselActive(bool bActive);
+
+UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
+bool StartActiveCardPreview();
+
+UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
+void StopAllCardPreviews(bool bReleaseMediaResources);
+
+UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Carousel")
+bool IsCarouselActive() const;
+```
+
+추가 예정 옵션:
+
+```cpp
+bAutoStartPreviewWhenActivated = true
+bStopPreviewWhenDeactivated = true
+bReleasePreviewWhenDeactivated = true
+bRefreshWhenActivated = false
+```
+
+권장 사용:
+
+```text
+preview-visible  -> MediaCarousel.SetCarouselActive(true)
+preview-hidden   -> MediaCarousel.SetCarouselActive(false)
+```
+
+또는 top-level `VdjmUiLobby`의 `OnVisibilityChanged`에서:
+
+```text
+Visible   -> MediaCarousel.SetCarouselActive(true)
+Collapsed -> MediaCarousel.SetCarouselActive(false)
+```
+
+주의: 부모 widget이 `Collapsed` 되어도 자식 carousel 자신의 visibility 값은 바뀌지 않을 수 있다. 따라서 carousel 혼자 부모 lower를 자동 감지하기는 불안정하다. 이벤트 매니저가 직접 show/lower를 알고 있으므로, 장기적으로는 event lifecycle interface나 explicit signal이 더 명확하다.
+
+### Packaging warning
+
+현재 Android packaging 중 아래 warning이 있었다.
+
+```text
+/Game/Temp/PreviewWidgets/VdjmUiPreviewGalleryScreen
+Failed to load Class /Script/VdjmRecorder.VdjmRecordMediaPreviewScreenWidget as Parent
+```
+
+원인:
+
+- Temp asset `VdjmUiPreviewGalleryScreen`이 삭제된 legacy parent `UVdjmRecordMediaPreviewScreenWidget`를 참조한다.
+- 새 preview lobby는 `VdjmUiLobby` 안의 `VdjmWidgets` carousel을 쓰는 방향이다.
+
+처리:
+
+- 지금 당장 code fix 대상은 아니었다.
+- 나중에 asset을 삭제하거나 parent를 일반 `UserWidget`/새 widget base로 바꿔야 packaging warning이 사라진다.
+
+### 최근 빌드 검증
+
+아래 명령으로 Win64 Editor build 성공:
+
+```powershell
+& 'E:\ueLauncher\5_6\UE_5.6\Engine\Build\BatchFiles\Build.bat' VdjmBg1LabEditor Win64 Development -Project='G:\Project\00Main\bg1LAb\VdjmBg1Lab\VdjmBg1Lab.uproject' -WaitMutex
+```
+
+결과:
+
+```text
+Result: Succeeded
+```
+
+### 다음 채팅에서 바로 할 일
+
+1. `AGENTS.md`와 이 문서를 읽는다.
+2. `git status --short --branch`로 clean 상태 확인.
+3. `UVdjmWidgetMediaCarouselWidget`에 lifecycle API를 추가한다.
+   - `SetCarouselActive`
+   - `StartActiveCardPreview`
+   - `StopAllCardPreviews`
+   - `IsCarouselActive`
+4. BP에서 `preview-visible/preview-hidden` 또는 `VdjmUiLobby OnVisibilityChanged`에 연결하는 사용법을 정리한다.
+5. Win64 build 후 커밋/푸시한다.
+
+### 다음 구현 시 주의
+
+- `VdjmRecorder`가 `VdjmWidgets`를 직접 알면 의존성이 꼬인다. EventManager 쪽에서 carousel을 직접 클래스 참조하지 않는다.
+- Event lifecycle을 중앙화하려면 `VdjmRecorder` 쪽 generic interface로 해야 한다.
+- 현재 당장은 explicit signal + carousel public API가 가장 단순하다.
+- `StartActiveCardPreview`는 현재 carousel에 아직 없다. card에는 `StartManagedActivePreview()`가 있다.
+- `StopAllCardPreviews(true)`는 preview 화면을 떠날 때, `false`는 잠깐 pause만 할 때 쓴다.
+
 ## 핵심 설계 철학
 
 - `BridgeActor`는 실제 Android 녹화 실행체다.
