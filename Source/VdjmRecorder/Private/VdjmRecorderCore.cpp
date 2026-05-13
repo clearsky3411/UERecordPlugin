@@ -3130,14 +3130,22 @@ UWorld* UVdjmRecordMediaPreviewPlayer::GetWorld() const
 
 void UVdjmRecordMediaPreviewPlayer::HandleMediaOpened(FString openedUrl)
 {
-	(void)openedUrl;
 	mbPreviewOpened = true;
+	UE_LOG(
+		LogVdjmRecorderCore,
+		Log,
+		TEXT("PreviewPlayer MediaOpened Source=%s Url=%s Start=%.3f End=%.3f"),
+		*mCurrentSource,
+		*openedUrl,
+		mPreviewStartTimeSec,
+		mPreviewEndTimeSec);
 	SeekPreviewStartAndPlay();
 }
 
 void UVdjmRecordMediaPreviewPlayer::HandleMediaOpenFailed(FString failedUrl)
 {
 	mLastErrorReason = FString::Printf(TEXT("Failed to open preview media. Source=%s"), *failedUrl);
+	UE_LOG(LogVdjmRecorderCore, Warning, TEXT("PreviewPlayer MediaOpenFailed Source=%s"), *failedUrl);
 	mbPreviewActive = false;
 	mbPreviewOpened = false;
 	mbPendingInitialSeek = false;
@@ -3156,6 +3164,12 @@ void UVdjmRecordMediaPreviewPlayer::HandleMediaSeekCompleted()
 {
 	if (mbPreviewActive)
 	{
+		UE_LOG(
+			LogVdjmRecorderCore,
+			Log,
+			TEXT("PreviewPlayer SeekCompleted Source=%s Time=%.3f"),
+			*mCurrentSource,
+			IsValid(mMediaPlayer) ? mMediaPlayer->GetTime().GetTotalSeconds() : 0.0);
 		TryPlayPreview();
 	}
 }
@@ -3237,6 +3251,14 @@ bool UVdjmRecordMediaPreviewPlayer::OpenCurrentSource(FString& outErrorReason)
 		StopPreview(false);
 		return false;
 	}
+
+	UE_LOG(
+		LogVdjmRecorderCore,
+		Log,
+		TEXT("PreviewPlayer OpenRequested Source=%s Type=%s AsUrl=%s"),
+		*mCurrentSource,
+		*mCurrentSourceType,
+		bShouldOpenAsUrl ? TEXT("true") : TEXT("false"));
 
 	if (mMediaPlayer->IsReady())
 	{
@@ -3324,10 +3346,24 @@ bool UVdjmRecordMediaPreviewPlayer::TryPlayPreview()
 		mbPreviewOpened = true;
 		mbPendingInitialSeek = false;
 		mbPendingPlayAfterSeek = false;
+		UE_LOG(
+			LogVdjmRecorderCore,
+			Log,
+			TEXT("PreviewPlayer PlayStarted Source=%s Time=%.3f"),
+			*mCurrentSource,
+			mMediaPlayer->GetTime().GetTotalSeconds());
 	}
 	else
 	{
 		mbPendingPlayAfterSeek = true;
+		UE_LOG(
+			LogVdjmRecorderCore,
+			Warning,
+			TEXT("PreviewPlayer PlayFailed Source=%s Closed=%s Preparing=%s Ready=%s"),
+			*mCurrentSource,
+			mMediaPlayer->IsClosed() ? TEXT("true") : TEXT("false"),
+			mMediaPlayer->IsPreparing() ? TEXT("true") : TEXT("false"),
+			mMediaPlayer->IsReady() ? TEXT("true") : TEXT("false"));
 	}
 	return bPlayResult;
 }

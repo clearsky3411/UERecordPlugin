@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Blueprint/UserWidget.h"
+#include "TimerManager.h"
 #include "VdjmWidgetMediaCardWidget.h"
 #include "VdjmWidgetMediaCarouselWidget.generated.h"
 
@@ -189,6 +190,10 @@ public:
 	bool SlidePrevious();
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
 	void SetPreviewManager(AVdjmRecordMediaPreviewManagerActor* previewManager);
+	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
+	bool StartActiveCardPreview(FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
+	void StopAllCardPreviews(bool bReleaseMediaResources);
 	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Carousel")
 	FVdjmWidgetMediaCarouselInputPayload GetLastInputPayload() const;
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel|Debug")
@@ -217,6 +222,7 @@ public:
 
 protected:
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 	virtual FReply NativeOnMouseButtonDown(const FGeometry& inGeometry, const FPointerEvent& inMouseEvent) override;
 	virtual FReply NativeOnMouseButtonUp(const FGeometry& inGeometry, const FPointerEvent& inMouseEvent) override;
 	virtual FReply NativeOnMouseMove(const FGeometry& inGeometry, const FPointerEvent& inMouseEvent) override;
@@ -313,6 +319,16 @@ protected:
 	float DebugSwipeMinDurationSeconds = 0.03f;
 
 private:
+	void RequestActivePreviewStart(FName reason);
+	void ScheduleActivePreviewStart(float delaySeconds);
+	void ScheduleActivePreviewVerify();
+	void CancelActivePreviewStart();
+	void HandleActivePreviewStartTimer();
+	void HandleActivePreviewVerifyTimer();
+	bool CanRetryActivePreviewStart() const;
+	bool IsPreviewGeometryReady(const UWidget* widget) const;
+	UVdjmWidgetMediaCardWidget* FindActiveCard() const;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UVdjmWidgetMediaCarouselSource> mSource;
 
@@ -340,13 +356,17 @@ private:
 	UPROPERTY(Transient)
 	TArray<FVdjmWidgetMediaCarouselSlot> mLayoutSlots;
 
+	FTimerHandle mActivePreviewStartTimerHandle;
+	FTimerHandle mActivePreviewVerifyTimerHandle;
 	FVector2D mDebugPointerStartScreenPosition = FVector2D::ZeroVector;
 	FVector2D mDebugPointerLastScreenPosition = FVector2D::ZeroVector;
+	FName mActivePreviewStartReason = NAME_None;
 	double mDebugPointerStartSeconds = 0.0;
 	double mDebugPointerLastMoveLogSeconds = 0.0;
 	float mTransientSlotOffset = 0.0f;
 	EVdjmWidgetMediaCarouselLayoutState mLayoutState = EVdjmWidgetMediaCarouselLayoutState::EEmpty;
 	int32 mActiveSourceIndex = INDEX_NONE;
+	int32 mActivePreviewStartAttemptCount = 0;
 	int32 mDebugPointerMoveCount = 0;
 	bool mbDebugPointerTracking = false;
 };

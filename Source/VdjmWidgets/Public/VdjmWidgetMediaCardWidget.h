@@ -49,6 +49,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card")
 	void StartActivePreviewLoop();
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card")
+	bool TryStartActivePreviewLoop(FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card")
 	void StopPreview(bool bReleaseMediaResources);
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Card")
 	void ReleaseMediaResources();
@@ -79,6 +81,14 @@ public:
 	UMediaPlayer* GetManagedMediaPlayer() const { return mMediaPlayer; }
 	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
 	UMediaTexture* GetManagedMediaTexture() const { return mMediaTexture; }
+	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
+	bool IsAutoManagingPreviewMedia() const { return bAutoManagePreviewMedia; }
+	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
+	bool IsManagedPreviewActive() const;
+	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
+	bool IsManagedPreviewOpened() const;
+	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
+	FString GetManagedPreviewLastErrorReason() const;
 
 	UPROPERTY(BlueprintAssignable, Category = "VdjmWidgets|Media|Card")
 	FVdjmWidgetMediaCardStateDelegate OnCardStateChanged;

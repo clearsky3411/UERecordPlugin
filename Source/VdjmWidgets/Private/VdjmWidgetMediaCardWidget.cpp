@@ -262,7 +262,10 @@ void UVdjmWidgetMediaCardWidget::EnterActive()
 	SetOptionalWidgetVisibility(ActiveLayer, ESlateVisibility::Visible);
 	SetOptionalWidgetVisibility(ErrorLayer, ESlateVisibility::Collapsed);
 	BP_ShowActiveCard();
-	StartActivePreviewLoop();
+	if (bAutoManagePreviewMedia && HasValidCardSource())
+	{
+		PrepareActivePreviewVisuals();
+	}
 }
 
 void UVdjmWidgetMediaCardWidget::EnterHidden()
@@ -292,22 +295,33 @@ void UVdjmWidgetMediaCardWidget::EnterError(const FString& errorReason)
 
 void UVdjmWidgetMediaCardWidget::StartActivePreviewLoop()
 {
+	FString errorReason;
+	TryStartActivePreviewLoop(errorReason);
+}
+
+bool UVdjmWidgetMediaCardWidget::TryStartActivePreviewLoop(FString& outErrorReason)
+{
+	outErrorReason.Reset();
 	BP_StartActivePreviewLoop();
 	if (not bAutoManagePreviewMedia)
 	{
-		return;
+		return true;
 	}
 
-	FString errorReason;
-	if (not StartManagedActivePreview(errorReason) && bDebugTraceState)
+	if (not StartManagedActivePreview(outErrorReason))
 	{
-		UE_LOG(
-			LogVdjmWidgets,
-			Warning,
-			TEXT("VdjmCard AutoPreview Failed Widget=%s Reason=%s"),
-			*GetNameSafe(this),
-			*errorReason);
+		if (bDebugTraceState)
+		{
+			UE_LOG(
+				LogVdjmWidgets,
+				Warning,
+				TEXT("VdjmCard AutoPreview Failed Widget=%s Reason=%s"),
+				*GetNameSafe(this),
+				*outErrorReason);
+		}
+		return false;
 	}
+	return true;
 }
 
 void UVdjmWidgetMediaCardWidget::StopPreview(bool bReleaseMediaResources)
@@ -484,6 +498,21 @@ bool UVdjmWidgetMediaCardWidget::HasValidCardSource() const
 			not mCardSource.RegistryEntry.OutputFilePath.IsEmpty() ||
 			not mCardSource.RegistryEntry.PlaybackLocator.IsEmpty() ||
 			not mCardSource.RegistryEntry.PublishedContentUri.IsEmpty());
+}
+
+bool UVdjmWidgetMediaCardWidget::IsManagedPreviewActive() const
+{
+	return mPreviewPlayer != nullptr && mPreviewPlayer->IsPreviewActive();
+}
+
+bool UVdjmWidgetMediaCardWidget::IsManagedPreviewOpened() const
+{
+	return mPreviewPlayer != nullptr && mPreviewPlayer->IsPreviewOpened();
+}
+
+FString UVdjmWidgetMediaCardWidget::GetManagedPreviewLastErrorReason() const
+{
+	return mPreviewPlayer != nullptr ? mPreviewPlayer->GetLastErrorReason() : FString();
 }
 
 bool UVdjmWidgetMediaCardWidget::ValidateCardSource(FString& outErrorReason) const

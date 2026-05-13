@@ -106,6 +106,11 @@ namespace
 	{
 		return bValue ? TEXT("true") : TEXT("false");
 	}
+
+	constexpr int32 ActivePreviewMaxStartAttempts = 5;
+	constexpr float ActivePreviewInitialDelaySeconds = 0.10f;
+	constexpr float ActivePreviewRetryDelaySeconds = 0.35f;
+	constexpr float ActivePreviewVerifyDelaySeconds = 0.45f;
 }
 
 void UVdjmWidgetMediaCarouselSource::SetPreviewManager(AVdjmRecordMediaPreviewManagerActor* previewManager)
@@ -528,6 +533,50 @@ void UVdjmWidgetMediaCarouselWidget::SetPreviewManager(
 	}
 }
 
+bool UVdjmWidgetMediaCarouselWidget::StartActiveCardPreview(FString& outErrorReason)
+{
+	outErrorReason.Reset();
+
+	UVdjmWidgetMediaCardWidget* activeCard = FindActiveCard();
+	if (activeCard == nullptr)
+	{
+		outErrorReason = TEXT("Active card is not assigned yet.");
+		return false;
+	}
+
+	if (not activeCard->HasValidCardSource())
+	{
+		outErrorReason = TEXT("Active card source is invalid.");
+		return false;
+	}
+
+	if (activeCard->GetCardState() != EVdjmWidgetMediaCardState::EActive)
+	{
+		outErrorReason = TEXT("Active card is not in active state.");
+		return false;
+	}
+
+	if (not IsPreviewGeometryReady(this) || not IsPreviewGeometryReady(activeCard))
+	{
+		outErrorReason = TEXT("Active preview geometry is not ready.");
+		return false;
+	}
+
+	return activeCard->TryStartActivePreviewLoop(outErrorReason);
+}
+
+void UVdjmWidgetMediaCarouselWidget::StopAllCardPreviews(bool bReleaseMediaResources)
+{
+	CancelActivePreviewStart();
+	for (UVdjmWidgetMediaCardWidget* cardWidget : mCards)
+	{
+		if (cardWidget != nullptr)
+		{
+			cardWidget->StopPreview(bReleaseMediaResources);
+		}
+	}
+}
+
 FVdjmWidgetMediaCarouselInputPayload UVdjmWidgetMediaCarouselWidget::GetLastInputPayload() const
 {
 	return mInputController != nullptr
@@ -554,6 +603,230 @@ void UVdjmWidgetMediaCarouselWidget::NativeConstruct()
 	{
 		DumpDebugCarouselState(TEXT("Construct"));
 	}
+}
+
+void UVdjmWidgetMediaCarouselWidget::NativeDestruct()
+{
+	StopAllCardPreviews(true);
+	Super::NativeDestruct();
+}
+
+void UVdjmWidgetMediaCarouselWidget::RequestActivePreviewStart(FName reason)
+{
+	CancelActivePreviewStart();
+	mActivePreviewStartAttemptCount = 0;
+	mActivePreviewStartReason = reason;
+
+	if (not mSourceSnapshot.IsValidIndex(mActiveSourceIndex))
+	{
+		if (bDebugTraceLayout)
+		{
+			UE_LOG(
+				LogVdjmWidgets,
+				Log,
+				TEXT("VdjmCarousel ActivePreview RequestIgnored Reason=%s Active=%d SourceCount=%d"),
+				*reason.ToString(),
+				mActiveSourceIndex,
+				mSourceSnapshot.Num());
+		}
+		return;
+	}
+
+	if (bDebugTraceLayout)
+	{
+		UE_LOG(
+			LogVdjmWidgets,
+			Log,
+			TEXT("VdjmCarousel ActivePreview Request Reason=%s Active=%d SourceCount=%d"),
+			*reason.ToString(),
+			mActiveSourceIndex,
+			mSourceSnapshot.Num());
+	}
+	ScheduleActivePreviewStart(ActivePreviewInitialDelaySeconds);
+}
+
+void UVdjmWidgetMediaCarouselWidget::ScheduleActivePreviewStart(float delaySeconds)
+{
+	if (UWorld* world = GetWorld())
+	{
+		world->GetTimerManager().ClearTimer(mActivePreviewStartTimerHandle);
+		world->GetTimerManager().SetTimer(
+			mActivePreviewStartTimerHandle,
+			this,
+			&UVdjmWidgetMediaCarouselWidget::HandleActivePreviewStartTimer,
+			FMath::Max(0.01f, delaySeconds),
+			false);
+		return;
+	}
+
+	HandleActivePreviewStartTimer();
+}
+
+void UVdjmWidgetMediaCarouselWidget::ScheduleActivePreviewVerify()
+{
+	if (UWorld* world = GetWorld())
+	{
+		world->GetTimerManager().ClearTimer(mActivePreviewVerifyTimerHandle);
+		world->GetTimerManager().SetTimer(
+			mActivePreviewVerifyTimerHandle,
+			this,
+			&UVdjmWidgetMediaCarouselWidget::HandleActivePreviewVerifyTimer,
+			ActivePreviewVerifyDelaySeconds,
+			false);
+		return;
+	}
+
+	HandleActivePreviewVerifyTimer();
+}
+
+void UVdjmWidgetMediaCarouselWidget::CancelActivePreviewStart()
+{
+	if (UWorld* world = GetWorld())
+	{
+		world->GetTimerManager().ClearTimer(mActivePreviewStartTimerHandle);
+		world->GetTimerManager().ClearTimer(mActivePreviewVerifyTimerHandle);
+	}
+}
+
+void UVdjmWidgetMediaCarouselWidget::HandleActivePreviewStartTimer()
+{
+	++mActivePreviewStartAttemptCount;
+
+	FString errorReason;
+	const bool bStarted = StartActiveCardPreview(errorReason);
+	if (bDebugTraceLayout)
+	{
+		if (bStarted)
+		{
+			UE_LOG(
+				LogVdjmWidgets,
+				Log,
+				TEXT("VdjmCarousel ActivePreview StartAttempt Reason=%s Attempt=%d/%d Active=%d Result=true Error=%s"),
+				*mActivePreviewStartReason.ToString(),
+				mActivePreviewStartAttemptCount,
+				ActivePreviewMaxStartAttempts,
+				mActiveSourceIndex,
+				errorReason.IsEmpty() ? TEXT("None") : *errorReason);
+		}
+		else
+		{
+			UE_LOG(
+				LogVdjmWidgets,
+				Warning,
+				TEXT("VdjmCarousel ActivePreview StartAttempt Reason=%s Attempt=%d/%d Active=%d Result=false Error=%s"),
+				*mActivePreviewStartReason.ToString(),
+				mActivePreviewStartAttemptCount,
+				ActivePreviewMaxStartAttempts,
+				mActiveSourceIndex,
+				errorReason.IsEmpty() ? TEXT("None") : *errorReason);
+		}
+	}
+
+	if (bStarted)
+	{
+		ScheduleActivePreviewVerify();
+		return;
+	}
+
+	if (CanRetryActivePreviewStart())
+	{
+		ScheduleActivePreviewStart(ActivePreviewRetryDelaySeconds);
+	}
+}
+
+void UVdjmWidgetMediaCarouselWidget::HandleActivePreviewVerifyTimer()
+{
+	UVdjmWidgetMediaCardWidget* activeCard = FindActiveCard();
+	if (activeCard == nullptr)
+	{
+		if (CanRetryActivePreviewStart())
+		{
+			ScheduleActivePreviewStart(ActivePreviewRetryDelaySeconds);
+		}
+		return;
+	}
+
+	if (not activeCard->IsAutoManagingPreviewMedia() || activeCard->IsManagedPreviewOpened())
+	{
+		if (bDebugTraceLayout)
+		{
+			UE_LOG(
+				LogVdjmWidgets,
+				Log,
+				TEXT("VdjmCarousel ActivePreview Ready Reason=%s Attempt=%d Active=%d Card=%s Opened=%s AutoManaged=%s"),
+				*mActivePreviewStartReason.ToString(),
+				mActivePreviewStartAttemptCount,
+				mActiveSourceIndex,
+				*GetNameSafe(activeCard),
+				activeCard->IsManagedPreviewOpened() ? TEXT("true") : TEXT("false"),
+				activeCard->IsAutoManagingPreviewMedia() ? TEXT("true") : TEXT("false"));
+		}
+		return;
+	}
+
+	const FString lastErrorReason = activeCard->GetManagedPreviewLastErrorReason();
+	if (bDebugTraceLayout)
+	{
+		UE_LOG(
+			LogVdjmWidgets,
+			Warning,
+			TEXT("VdjmCarousel ActivePreview VerifyFailed Reason=%s Attempt=%d/%d Active=%d Card=%s PreviewActive=%s Error=%s"),
+			*mActivePreviewStartReason.ToString(),
+			mActivePreviewStartAttemptCount,
+			ActivePreviewMaxStartAttempts,
+			mActiveSourceIndex,
+			*GetNameSafe(activeCard),
+			activeCard->IsManagedPreviewActive() ? TEXT("true") : TEXT("false"),
+			lastErrorReason.IsEmpty() ? TEXT("None") : *lastErrorReason);
+	}
+
+	if (CanRetryActivePreviewStart())
+	{
+		ScheduleActivePreviewStart(ActivePreviewRetryDelaySeconds);
+	}
+}
+
+bool UVdjmWidgetMediaCarouselWidget::CanRetryActivePreviewStart() const
+{
+	return mActivePreviewStartAttemptCount < ActivePreviewMaxStartAttempts &&
+		mSourceSnapshot.IsValidIndex(mActiveSourceIndex);
+}
+
+bool UVdjmWidgetMediaCarouselWidget::IsPreviewGeometryReady(const UWidget* widget) const
+{
+	if (widget == nullptr)
+	{
+		return false;
+	}
+
+	const FVector2D localSize = widget->GetCachedGeometry().GetLocalSize();
+	return localSize.X > 1.0f && localSize.Y > 1.0f;
+}
+
+UVdjmWidgetMediaCardWidget* UVdjmWidgetMediaCarouselWidget::FindActiveCard() const
+{
+	for (UVdjmWidgetMediaCardWidget* cardWidget : mCards)
+	{
+		if (cardWidget == nullptr || cardWidget->GetCardState() != EVdjmWidgetMediaCardState::EActive)
+		{
+			continue;
+		}
+
+		if (cardWidget->GetCardSource().SourceRegistryIndex == mActiveSourceIndex)
+		{
+			return cardWidget;
+		}
+	}
+
+	for (UVdjmWidgetMediaCardWidget* cardWidget : mCards)
+	{
+		if (cardWidget != nullptr && cardWidget->GetCardState() == EVdjmWidgetMediaCardState::EActive)
+		{
+			return cardWidget;
+		}
+	}
+
+	return nullptr;
 }
 
 FReply UVdjmWidgetMediaCarouselWidget::NativeOnMouseButtonDown(
@@ -697,7 +970,12 @@ bool UVdjmWidgetMediaCarouselWidget::RebuildVisibleCards(FString& outErrorReason
 		return false;
 	}
 
-	return ApplyLayoutSlots(layoutSlots, outErrorReason);
+	const bool bApplied = ApplyLayoutSlots(layoutSlots, outErrorReason);
+	if (bApplied)
+	{
+		RequestActivePreviewStart(TEXT("RebuildVisibleCards"));
+	}
+	return bApplied;
 }
 
 bool UVdjmWidgetMediaCarouselWidget::ApplyLayoutSlots(
@@ -954,6 +1232,7 @@ bool UVdjmWidgetMediaCarouselWidget::ApplyResolvedActiveSourceIndex(
 		return RebuildVisibleCards(errorReason);
 	}
 
+	RequestActivePreviewStart(TEXT("ActiveChangedNoLayout"));
 	return true;
 }
 
@@ -1071,6 +1350,10 @@ bool UVdjmWidgetMediaCarouselWidget::HandleTapInput(
 	const bool bActivated = bActivateCardOnTap && inputPayload.SourceIndex != mActiveSourceIndex
 		? ApplyResolvedActiveSourceIndex(inputPayload.SourceIndex, true)
 		: inputPayload.SourceIndex == mActiveSourceIndex;
+	if (bActivated && inputPayload.SourceIndex == activeSourceIndexBeforeTap)
+	{
+		RequestActivePreviewStart(TEXT("TapActiveCard"));
+	}
 	if (bDebugTraceInput)
 	{
 		UE_LOG(
