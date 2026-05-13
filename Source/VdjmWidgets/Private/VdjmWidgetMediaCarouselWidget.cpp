@@ -252,7 +252,7 @@ EVdjmWidgetMediaCarouselLayoutState UVdjmWidgetMediaCarouselLayoutPolicy::BuildL
 		layoutSlot.SourceIndex = bHasSource ? sourceIndex : INDEX_NONE;
 		layoutSlot.SlotOffset = slotOffset;
 		layoutSlot.TargetCardState = bHasSource
-			? (slotIndex == activeSlotIndex ? EVdjmWidgetMediaCardState::EActive : EVdjmWidgetMediaCardState::EVisible)
+			? (slotIndex == activeSlotIndex ? EVdjmWidgetMediaCardState::EWaiting : EVdjmWidgetMediaCardState::EVisible)
 			: EVdjmWidgetMediaCardState::EEmpty;
 		layoutSlot.RenderTranslation = direction * spacing * slotOffset;
 		const float scale = FMath::Lerp(layoutOptions.ActiveScale, layoutOptions.FarScale, normalizedDistance);
@@ -550,12 +550,6 @@ bool UVdjmWidgetMediaCarouselWidget::StartActiveCardPreview(FString& outErrorRea
 		return false;
 	}
 
-	if (activeCard->GetCardState() != EVdjmWidgetMediaCardState::EActive)
-	{
-		outErrorReason = TEXT("Active card is not in active state.");
-		return false;
-	}
-
 	if (not IsPreviewGeometryReady(this) || not IsPreviewGeometryReady(activeCard))
 	{
 		outErrorReason = TEXT("Active preview geometry is not ready.");
@@ -753,6 +747,11 @@ void UVdjmWidgetMediaCarouselWidget::HandleActivePreviewVerifyTimer()
 	const bool bPlaybackStalled = activeCard->IsManagedPreviewPlaybackStalled();
 	if (not bAutoManaged || bPlaybackHealthy)
 	{
+		if (activeCard->GetCardState() != EVdjmWidgetMediaCardState::EActive)
+		{
+			activeCard->SetCardState(EVdjmWidgetMediaCardState::EActive);
+		}
+
 		if (bDebugTraceLayout)
 		{
 			UE_LOG(
@@ -812,6 +811,10 @@ void UVdjmWidgetMediaCarouselWidget::HandleActivePreviewVerifyTimer()
 	if (CanRetryActivePreviewStart())
 	{
 		activeCard->StopPreview(true);
+		if (activeCard->GetCardState() != EVdjmWidgetMediaCardState::EWaiting)
+		{
+			activeCard->SetCardState(EVdjmWidgetMediaCardState::EWaiting);
+		}
 		ScheduleActivePreviewStart(ActivePreviewRetryDelaySeconds);
 	}
 }
@@ -837,20 +840,12 @@ UVdjmWidgetMediaCardWidget* UVdjmWidgetMediaCarouselWidget::FindActiveCard() con
 {
 	for (UVdjmWidgetMediaCardWidget* cardWidget : mCards)
 	{
-		if (cardWidget == nullptr || cardWidget->GetCardState() != EVdjmWidgetMediaCardState::EActive)
+		if (cardWidget == nullptr)
 		{
 			continue;
 		}
 
 		if (cardWidget->GetCardSource().SourceRegistryIndex == mActiveSourceIndex)
-		{
-			return cardWidget;
-		}
-	}
-
-	for (UVdjmWidgetMediaCardWidget* cardWidget : mCards)
-	{
-		if (cardWidget != nullptr && cardWidget->GetCardState() == EVdjmWidgetMediaCardState::EActive)
 		{
 			return cardWidget;
 		}

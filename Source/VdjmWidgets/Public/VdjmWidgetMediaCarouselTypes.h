@@ -8,8 +8,11 @@ UENUM(BlueprintType)
 enum class EVdjmWidgetMediaCardState : uint8
 {
 	EEmpty UMETA(DisplayName = "Empty"),
+	// Source is assigned and the card is visible, but preview media or thumbnail is not ready yet.
 	EWaiting UMETA(DisplayName = "Waiting"),
+	// Source is assigned and the card is showing a non-playing thumbnail/preview surface.
 	EVisible UMETA(DisplayName = "Visible"),
+	// Source is assigned and the active preview has been verified as playing.
 	EActive UMETA(DisplayName = "Active"),
 	EHidden UMETA(DisplayName = "Hidden"),
 	EError UMETA(DisplayName = "Error")

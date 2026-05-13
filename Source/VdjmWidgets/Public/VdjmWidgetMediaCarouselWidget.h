@@ -88,7 +88,8 @@ public:
  * Converts layout slots into target card states.
  *
  * Responsibility:
- * - Decide whether a slot should be Active, Visible, Hidden, or Empty.
+ * - Decide the initial media/visual phase for a slot.
+ * - Active-source slots start as Waiting; playback verification promotes them to Active.
  *
  * Must not:
  * - Move widgets, create cards, refresh registry, or open media directly.
