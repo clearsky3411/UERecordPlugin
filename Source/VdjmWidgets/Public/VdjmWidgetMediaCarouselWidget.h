@@ -89,7 +89,7 @@ public:
  *
  * Responsibility:
  * - Decide the initial media/visual phase for a slot.
- * - Active-source slots start as Waiting; playback verification promotes them to Active.
+ * - Source slots start as Waiting; carousel timers promote side cards to Visible and verified center playback to Active.
  *
  * Must not:
  * - Move widgets, create cards, refresh registry, or open media directly.
@@ -190,6 +190,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
 	bool SlidePrevious();
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
+	bool PreviewSlidePositionNormalized(float normalizedPosition);
+	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
+	bool CommitSlidePositionNormalized(float normalizedPosition);
+	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
 	void SetPreviewManager(AVdjmRecordMediaPreviewManagerActor* previewManager);
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
 	bool StartActiveCardPreview(FString& outErrorReason);
@@ -202,6 +206,8 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Carousel")
 	int32 GetActiveSourceIndex() const { return mActiveSourceIndex; }
+	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Carousel")
+	float GetSlidePositionNormalized() const;
 	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Carousel")
 	EVdjmWidgetMediaCarouselLayoutState GetLayoutState() const { return mLayoutState; }
 	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Carousel")
@@ -245,6 +251,7 @@ protected:
 		int32 previousSourceIndex,
 		const FString& previousRecordId) const;
 	bool ApplyResolvedActiveSourceIndex(int32 activeSourceIndex, bool bRefreshLayout);
+	bool ApplySlidePreviewPosition(float normalizedPosition);
 	FVdjmWidgetMediaCarouselInputPayload BuildInputPayload(
 		const FGeometry& inGeometry,
 		const FVector2D& screenPosition,
@@ -326,8 +333,12 @@ private:
 	void CancelActivePreviewStart();
 	void HandleActivePreviewStartTimer();
 	void HandleActivePreviewVerifyTimer();
+	void ScheduleVisibleCardStateRefresh();
+	void CancelVisibleCardStateRefresh();
+	void HandleVisibleCardStateRefreshTimer();
 	bool CanRetryActivePreviewStart() const;
 	bool IsPreviewGeometryReady(const UWidget* widget) const;
+	int32 GetVisualActiveSourceIndex() const;
 	UVdjmWidgetMediaCardWidget* FindActiveCard() const;
 
 	UPROPERTY(Transient)
@@ -359,6 +370,7 @@ private:
 
 	FTimerHandle mActivePreviewStartTimerHandle;
 	FTimerHandle mActivePreviewVerifyTimerHandle;
+	FTimerHandle mVisibleCardStateTimerHandle;
 	FVector2D mDebugPointerStartScreenPosition = FVector2D::ZeroVector;
 	FVector2D mDebugPointerLastScreenPosition = FVector2D::ZeroVector;
 	FName mActivePreviewStartReason = NAME_None;
@@ -367,7 +379,9 @@ private:
 	float mTransientSlotOffset = 0.0f;
 	EVdjmWidgetMediaCarouselLayoutState mLayoutState = EVdjmWidgetMediaCarouselLayoutState::EEmpty;
 	int32 mActiveSourceIndex = INDEX_NONE;
+	int32 mPreviewSlideSourceIndex = INDEX_NONE;
 	int32 mActivePreviewStartAttemptCount = 0;
 	int32 mDebugPointerMoveCount = 0;
 	bool mbDebugPointerTracking = false;
+	bool mbSlidePreviewActive = false;
 };

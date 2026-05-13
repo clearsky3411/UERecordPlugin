@@ -111,6 +111,7 @@ namespace
 	constexpr float ActivePreviewInitialDelaySeconds = 0.10f;
 	constexpr float ActivePreviewRetryDelaySeconds = 0.35f;
 	constexpr float ActivePreviewVerifyDelaySeconds = 0.45f;
+	constexpr float VisibleCardStateReadyDelaySeconds = 0.05f;
 }
 
 void UVdjmWidgetMediaCarouselSource::SetPreviewManager(AVdjmRecordMediaPreviewManagerActor* previewManager)
@@ -252,7 +253,7 @@ EVdjmWidgetMediaCarouselLayoutState UVdjmWidgetMediaCarouselLayoutPolicy::BuildL
 		layoutSlot.SourceIndex = bHasSource ? sourceIndex : INDEX_NONE;
 		layoutSlot.SlotOffset = slotOffset;
 		layoutSlot.TargetCardState = bHasSource
-			? (slotIndex == activeSlotIndex ? EVdjmWidgetMediaCardState::EWaiting : EVdjmWidgetMediaCardState::EVisible)
+			? EVdjmWidgetMediaCardState::EWaiting
 			: EVdjmWidgetMediaCardState::EEmpty;
 		layoutSlot.RenderTranslation = direction * spacing * slotOffset;
 		const float scale = FMath::Lerp(layoutOptions.ActiveScale, layoutOptions.FarScale, normalizedDistance);
@@ -480,6 +481,9 @@ bool UVdjmWidgetMediaCarouselWidget::ApplySourceSnapshot(
 		? mSourceSnapshot[mActiveSourceIndex].RegistryEntry.RecordId
 		: FString();
 
+	mbSlidePreviewActive = false;
+	mPreviewSlideSourceIndex = INDEX_NONE;
+	mTransientSlotOffset = 0.0f;
 	mSourceSnapshot = sources;
 	mActiveSourceIndex = ResolveActiveSourceIndexAfterRefresh(
 		mSourceSnapshot,
@@ -523,6 +527,48 @@ bool UVdjmWidgetMediaCarouselWidget::SlidePrevious()
 	return ApplyResolvedActiveSourceIndex(mActiveSourceIndex - 1, true);
 }
 
+bool UVdjmWidgetMediaCarouselWidget::PreviewSlidePositionNormalized(float normalizedPosition)
+{
+	return ApplySlidePreviewPosition(normalizedPosition);
+}
+
+bool UVdjmWidgetMediaCarouselWidget::CommitSlidePositionNormalized(float normalizedPosition)
+{
+	const int32 sourceCount = mSourceSnapshot.Num();
+	if (sourceCount <= 0)
+	{
+		if (bDebugTraceLayout)
+		{
+			UE_LOG(LogVdjmWidgets, Log, TEXT("VdjmCarousel SlideCommitIgnored Reason=NoSources"));
+		}
+		return false;
+	}
+
+	const float clampedPosition = FMath::Clamp(normalizedPosition, 0.0f, 1.0f);
+	const int32 requestedSourceIndex = sourceCount <= 1
+		? 0
+		: FMath::Clamp(FMath::RoundToInt(clampedPosition * static_cast<float>(sourceCount - 1)), 0, sourceCount - 1);
+
+	mbSlidePreviewActive = false;
+	mPreviewSlideSourceIndex = INDEX_NONE;
+	mTransientSlotOffset = 0.0f;
+
+	const bool bResult = ApplyResolvedActiveSourceIndex(requestedSourceIndex, true);
+	if (bDebugTraceLayout)
+	{
+		UE_LOG(
+			LogVdjmWidgets,
+			Log,
+			TEXT("VdjmCarousel SlideCommit Normalized=%.3f Requested=%d Result=%s Active=%d SourceCount=%d"),
+			clampedPosition,
+			requestedSourceIndex,
+			bResult ? TEXT("true") : TEXT("false"),
+			mActiveSourceIndex,
+			sourceCount);
+	}
+	return bResult;
+}
+
 void UVdjmWidgetMediaCarouselWidget::SetPreviewManager(
 	AVdjmRecordMediaPreviewManagerActor* previewManager)
 {
@@ -562,6 +608,7 @@ bool UVdjmWidgetMediaCarouselWidget::StartActiveCardPreview(FString& outErrorRea
 void UVdjmWidgetMediaCarouselWidget::StopAllCardPreviews(bool bReleaseMediaResources)
 {
 	CancelActivePreviewStart();
+	CancelVisibleCardStateRefresh();
 	for (UVdjmWidgetMediaCardWidget* cardWidget : mCards)
 	{
 		if (cardWidget != nullptr)
@@ -587,6 +634,31 @@ TArray<UVdjmWidgetMediaCardWidget*> UVdjmWidgetMediaCarouselWidget::GetCards() c
 		cards.Add(card);
 	}
 	return cards;
+}
+
+float UVdjmWidgetMediaCarouselWidget::GetSlidePositionNormalized() const
+{
+	const int32 sourceCount = mSourceSnapshot.Num();
+	if (sourceCount <= 1)
+	{
+		return 0.0f;
+	}
+
+	if (mbSlidePreviewActive && mSourceSnapshot.IsValidIndex(mPreviewSlideSourceIndex))
+	{
+		const float previewSourcePosition = FMath::Clamp(
+			static_cast<float>(mPreviewSlideSourceIndex) - mTransientSlotOffset,
+			0.0f,
+			static_cast<float>(sourceCount - 1));
+		return previewSourcePosition / static_cast<float>(sourceCount - 1);
+	}
+
+	if (not mSourceSnapshot.IsValidIndex(mActiveSourceIndex))
+	{
+		return 0.0f;
+	}
+
+	return static_cast<float>(mActiveSourceIndex) / static_cast<float>(sourceCount - 1);
 }
 
 void UVdjmWidgetMediaCarouselWidget::NativeConstruct()
@@ -679,6 +751,67 @@ void UVdjmWidgetMediaCarouselWidget::CancelActivePreviewStart()
 	{
 		world->GetTimerManager().ClearTimer(mActivePreviewStartTimerHandle);
 		world->GetTimerManager().ClearTimer(mActivePreviewVerifyTimerHandle);
+	}
+}
+
+void UVdjmWidgetMediaCarouselWidget::ScheduleVisibleCardStateRefresh()
+{
+	if (UWorld* world = GetWorld())
+	{
+		world->GetTimerManager().ClearTimer(mVisibleCardStateTimerHandle);
+		world->GetTimerManager().SetTimer(
+			mVisibleCardStateTimerHandle,
+			this,
+			&UVdjmWidgetMediaCarouselWidget::HandleVisibleCardStateRefreshTimer,
+			VisibleCardStateReadyDelaySeconds,
+			false);
+		return;
+	}
+
+	HandleVisibleCardStateRefreshTimer();
+}
+
+void UVdjmWidgetMediaCarouselWidget::CancelVisibleCardStateRefresh()
+{
+	if (UWorld* world = GetWorld())
+	{
+		world->GetTimerManager().ClearTimer(mVisibleCardStateTimerHandle);
+	}
+}
+
+void UVdjmWidgetMediaCarouselWidget::HandleVisibleCardStateRefreshTimer()
+{
+	const int32 visualActiveSourceIndex = GetVisualActiveSourceIndex();
+	int32 promotedCount = 0;
+	for (UVdjmWidgetMediaCardWidget* cardWidget : mCards)
+	{
+		if (cardWidget == nullptr || not cardWidget->HasValidCardSource())
+		{
+			continue;
+		}
+
+		const int32 cardSourceIndex = cardWidget->GetCardSource().SourceRegistryIndex;
+		if (cardSourceIndex == visualActiveSourceIndex)
+		{
+			continue;
+		}
+
+		if (cardWidget->GetCardState() == EVdjmWidgetMediaCardState::EWaiting)
+		{
+			cardWidget->SetCardState(EVdjmWidgetMediaCardState::EVisible);
+			++promotedCount;
+		}
+	}
+
+	if (bDebugTraceLayout)
+	{
+		UE_LOG(
+			LogVdjmWidgets,
+			Log,
+			TEXT("VdjmCarousel VisibleCards Ready VisualActive=%d Promoted=%d SlidePreview=%s"),
+			visualActiveSourceIndex,
+			promotedCount,
+			mbSlidePreviewActive ? TEXT("true") : TEXT("false"));
 	}
 }
 
@@ -834,6 +967,28 @@ bool UVdjmWidgetMediaCarouselWidget::IsPreviewGeometryReady(const UWidget* widge
 
 	const FVector2D localSize = widget->GetCachedGeometry().GetLocalSize();
 	return localSize.X > 1.0f && localSize.Y > 1.0f;
+}
+
+int32 UVdjmWidgetMediaCarouselWidget::GetVisualActiveSourceIndex() const
+{
+	const int32 sourceCount = mSourceSnapshot.Num();
+	if (sourceCount <= 0)
+	{
+		return INDEX_NONE;
+	}
+
+	if (mbSlidePreviewActive && mSourceSnapshot.IsValidIndex(mPreviewSlideSourceIndex))
+	{
+		const float previewSourcePosition = FMath::Clamp(
+			static_cast<float>(mPreviewSlideSourceIndex) - mTransientSlotOffset,
+			0.0f,
+			static_cast<float>(sourceCount - 1));
+		return FMath::Clamp(FMath::RoundToInt(previewSourcePosition), 0, sourceCount - 1);
+	}
+
+	return mSourceSnapshot.IsValidIndex(mActiveSourceIndex)
+		? mActiveSourceIndex
+		: INDEX_NONE;
 }
 
 UVdjmWidgetMediaCardWidget* UVdjmWidgetMediaCarouselWidget::FindActiveCard() const
@@ -1008,6 +1163,7 @@ bool UVdjmWidgetMediaCarouselWidget::ApplyLayoutSlots(
 	FString& outErrorReason)
 {
 	outErrorReason.Reset();
+	CancelVisibleCardStateRefresh();
 	mLayoutSlots = layoutSlots;
 	ApplySlotTransforms(mLayoutSlots);
 
@@ -1065,6 +1221,7 @@ bool UVdjmWidgetMediaCarouselWidget::ApplyLayoutSlots(
 		DumpDebugCarouselState(TEXT("ApplyLayoutSlots"));
 	}
 	ApplyHostChildOrder(mLayoutSlots);
+	ScheduleVisibleCardStateRefresh();
 	return true;
 }
 
@@ -1233,6 +1390,8 @@ bool UVdjmWidgetMediaCarouselWidget::ApplyResolvedActiveSourceIndex(
 	}
 
 	const int32 previousSourceIndex = mActiveSourceIndex;
+	mbSlidePreviewActive = false;
+	mPreviewSlideSourceIndex = INDEX_NONE;
 	mActiveSourceIndex = resolvedActiveSourceIndex;
 	mTransientSlotOffset = 0.0f;
 	if (previousSourceIndex != mActiveSourceIndex)
@@ -1261,6 +1420,99 @@ bool UVdjmWidgetMediaCarouselWidget::ApplyResolvedActiveSourceIndex(
 	return true;
 }
 
+bool UVdjmWidgetMediaCarouselWidget::ApplySlidePreviewPosition(float normalizedPosition)
+{
+	if (not EnsureControllers())
+	{
+		return false;
+	}
+
+	const int32 sourceCount = mSourceSnapshot.Num();
+	if (sourceCount <= 0)
+	{
+		if (bDebugTraceLayout)
+		{
+			UE_LOG(LogVdjmWidgets, Log, TEXT("VdjmCarousel SlidePreviewIgnored Reason=NoSources"));
+		}
+		return false;
+	}
+
+	CancelActivePreviewStart();
+
+	const float clampedPosition = FMath::Clamp(normalizedPosition, 0.0f, 1.0f);
+	const float sourcePosition = sourceCount <= 1
+		? 0.0f
+		: clampedPosition * static_cast<float>(sourceCount - 1);
+	int32 previewSourceIndex = FMath::FloorToInt(sourcePosition);
+	float previewFraction = sourcePosition - static_cast<float>(previewSourceIndex);
+	if (previewSourceIndex >= sourceCount - 1)
+	{
+		previewSourceIndex = sourceCount - 1;
+		previewFraction = 0.0f;
+	}
+	previewSourceIndex = FMath::Clamp(previewSourceIndex, 0, sourceCount - 1);
+
+	TArray<FVdjmWidgetMediaCarouselSlot> layoutSlots;
+	mLayoutState = mLayoutPolicy->BuildLayout(
+		mSourceSnapshot,
+		previewSourceIndex,
+		LayoutOptions,
+		GetCarouselViewSize(),
+		layoutSlots);
+
+	FString errorReason;
+	if (not mCardPool->EnsureCards(
+		this,
+		CardHostPanel,
+		CardWidgetClass,
+		layoutSlots.Num(),
+		mCards,
+		errorReason))
+	{
+		if (bDebugTraceLayout)
+		{
+			UE_LOG(LogVdjmWidgets, Warning, TEXT("VdjmCarousel SlidePreview Failed Reason=%s"), *errorReason);
+		}
+		return false;
+	}
+
+	mbSlidePreviewActive = true;
+	mPreviewSlideSourceIndex = previewSourceIndex;
+	mTransientSlotOffset = -previewFraction;
+
+	const bool bApplied = ApplyLayoutSlots(layoutSlots, errorReason);
+	if (bDebugTraceLayout)
+	{
+		if (bApplied)
+		{
+			UE_LOG(
+				LogVdjmWidgets,
+				Log,
+				TEXT("VdjmCarousel SlidePreview Normalized=%.3f SourcePosition=%.3f PreviewSource=%d Fraction=%.3f Offset=%.3f Applied=true Reason=%s"),
+				clampedPosition,
+				sourcePosition,
+				previewSourceIndex,
+				previewFraction,
+				mTransientSlotOffset,
+				errorReason.IsEmpty() ? TEXT("None") : *errorReason);
+		}
+		else
+		{
+			UE_LOG(
+				LogVdjmWidgets,
+				Warning,
+				TEXT("VdjmCarousel SlidePreview Normalized=%.3f SourcePosition=%.3f PreviewSource=%d Fraction=%.3f Offset=%.3f Applied=false Reason=%s"),
+				clampedPosition,
+				sourcePosition,
+				previewSourceIndex,
+				previewFraction,
+				mTransientSlotOffset,
+				errorReason.IsEmpty() ? TEXT("None") : *errorReason);
+		}
+	}
+	return bApplied;
+}
+
 FVdjmWidgetMediaCarouselInputPayload UVdjmWidgetMediaCarouselWidget::BuildInputPayload(
 	const FGeometry& inGeometry,
 	const FVector2D& screenPosition,
@@ -1278,7 +1530,9 @@ FVdjmWidgetMediaCarouselInputPayload UVdjmWidgetMediaCarouselWidget::BuildInputP
 	{
 		const FVdjmWidgetMediaCarouselSlot& layoutSlot = mLayoutSlots[slotIndex];
 		inputPayload.SourceIndex = layoutSlot.SourceIndex;
-		inputPayload.CardState = layoutSlot.TargetCardState;
+		inputPayload.CardState = mCards.IsValidIndex(slotIndex) && mCards[slotIndex] != nullptr
+			? mCards[slotIndex]->GetCardState()
+			: layoutSlot.TargetCardState;
 		inputPayload.bHasSource = mSourceSnapshot.IsValidIndex(layoutSlot.SourceIndex);
 	}
 
@@ -1408,7 +1662,7 @@ void UVdjmWidgetMediaCarouselWidget::DumpDebugCarouselState(const FString& reaso
 	UE_LOG(
 		LogVdjmWidgets,
 		Log,
-		TEXT("VdjmCarousel State Reason=%s Widget=%s Visibility=%s Host=%s HostChildren=%d CardClass=%s SourceCount=%d CardCount=%d Active=%d Layout=%s TransientSlotOffset=%.3f LocalSize=%s AbsTopLeft=%s AbsCenter=%s"),
+		TEXT("VdjmCarousel State Reason=%s Widget=%s Visibility=%s Host=%s HostChildren=%d CardClass=%s SourceCount=%d CardCount=%d Active=%d VisualActive=%d Layout=%s TransientSlotOffset=%.3f SlidePreview=%s SlideNormalized=%.3f LocalSize=%s AbsTopLeft=%s AbsCenter=%s"),
 		*reason,
 		*GetNameSafe(this),
 		GetVisibilityString(GetVisibility()),
@@ -1418,8 +1672,11 @@ void UVdjmWidgetMediaCarouselWidget::DumpDebugCarouselState(const FString& reaso
 		mSourceSnapshot.Num(),
 		mCards.Num(),
 		mActiveSourceIndex,
+		GetVisualActiveSourceIndex(),
 		*GetEnumValueString(mLayoutState),
 		mTransientSlotOffset,
+		mbSlidePreviewActive ? TEXT("true") : TEXT("false"),
+		GetSlidePositionNormalized(),
 		*carouselLocalSize.ToString(),
 		*carouselAbsTopLeft.ToString(),
 		*carouselAbsCenter.ToString());
