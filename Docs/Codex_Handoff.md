@@ -1,6 +1,6 @@
 # Codex Handoff
 
-Last updated: 2026-05-12
+Last updated: 2026-06-13 19:52 (user-provided)
 
 이 문서는 긴 대화 컨텍스트가 압축되거나 새 채팅방으로 이동할 때, 현재 작업 의도와 이어받을 기준을 빠르게 복원하기 위한 인계 문서다.
 
@@ -59,9 +59,108 @@ AGENTS.md와 Docs/Codex_Handoff.md를 먼저 읽고, 현재 VdjmMobileUi 작업 
 - 로컬 변수와 파라미터는 camelCase, 함수는 PascalCase를 쓴다.
 - 사용자가 원하는 철학은 "이벤트 구성만으로 앱 기능과 UX 흐름을 제어"하는 것이다.
 
+## 2026-06-13 19:52 퇴근 기록
+
+이 섹션을 다음 작업 시작 시 가장 먼저 본다. 기록 시각은 사용자가 지정한 `202606131952` 기준이다.
+
+### 현재 branch / commit
+
+- Branch: `codex/record-controller`
+- Remote push 완료.
+- 마지막 확인 시 working tree는 clean.
+- 최신 commit:
+  - `2278464 Add retro plugin import tool`
+  - `fb41fac Add normalized carousel slide control`
+  - `2177021 Separate active source from card playback state`
+  - `2043ae2 Add preview playback watchdog`
+  - `354148f Defer carousel active preview startup`
+
+### 오늘 완료한 것
+
+- `UVdjmWidgetMediaCarouselWidget`에 normalized slide API를 추가했다.
+  - `PreviewSlidePositionNormalized(float normalizedPosition)`
+  - `CommitSlidePositionNormalized(float normalizedPosition)`
+  - `GetSlidePositionNormalized()`
+- slider 입력도 swipe와 같은 carousel layout/active 정책을 타도록 만들었다.
+  - slider `OnValueChanged`는 preview 위치만 움직인다.
+  - slider drag/release end에서 commit하면 가장 가까운 source index로 snap하고 active preview flow를 탄다.
+- source card는 먼저 `Waiting`으로 배치하고, carousel timer가 center 후보가 아닌 side card만 `Visible`로 승격하도록 정리했다.
+- active preview는 carousel이 지연 시작, retry, watchdog verify를 소유한다.
+  - 건강한 재생으로 확인되면 active card를 `EActive`로 승격한다.
+  - pending/stalled 상태는 `UVdjmRecordMediaPreviewPlayer`의 watchdog 상태를 본다.
+- 회사 Perforce 프로젝트에 플러그인을 vendor copy로 가져가기 위한 도구를 추가했다.
+  - `Tools/Import-VdjmPlugin.ps1`
+  - DOS/retro menu 방식으로 동작한다.
+  - local git repo, remote git repo, plain folder source를 `...\Plugins\VdjmMobileUi`로 export copy한다.
+  - `.git`, `.vs`, `Binaries`, `Intermediate`, `Saved`, `DerivedDataCache`는 제외한다.
+  - `Docs/ImportedFromGit.md`를 생성해 source/ref/branch/commit/import time을 남긴다.
+
+### 검증한 것
+
+- Win64 Editor build 성공.
+
+```powershell
+& "E:\ueLauncher\5_6\UE_5.6\Engine\Build\BatchFiles\Build.bat" VdjmBg1LabEditor Win64 Development "-Project=G:\Project\00Main\bg1LAb\VdjmBg1Lab\VdjmBg1Lab.uproject" -WaitMutex -NoHotReload
+```
+
+- `Tools/Import-VdjmPlugin.ps1`는 임시 경로 export로 검증했다.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File Tools\Import-VdjmPlugin.ps1 `
+  -RunOnce `
+  -SourceRepo "G:\Project\00Main\bg1LAb\VdjmBg1Lab\Plugins\VdjmMobileUi" `
+  -TargetPluginDir "$env:TEMP\VdjmImportTest\Plugins\VdjmMobileUi" `
+  -Ref HEAD `
+  -CleanTarget `
+  -Force
+```
+
+- 위 테스트에서 `Docs\ImportedFromGit.md` 생성 확인.
+
+### 내일 바로 할 일
+
+1. 회사 프로젝트 쪽에 `Tools/Import-VdjmPlugin.ps1`를 실제로 사용해본다.
+   - interactive:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Tools\Import-VdjmPlugin.ps1
+```
+
+   - non-interactive 예시:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Tools\Import-VdjmPlugin.ps1 `
+  -RunOnce `
+  -SourceRepo "G:\Project\00Main\bg1LAb\VdjmBg1Lab\Plugins\VdjmMobileUi" `
+  -TargetPluginDir "D:\CompanyProject\Plugins\VdjmMobileUi" `
+  -Ref "main" `
+  -CleanTarget `
+  -Force
+```
+
+2. 실제 회사 Perforce workspace에서는 `TargetPluginDir`가 반드시 `...\Plugins\VdjmMobileUi` 형태인지 확인한다.
+   - `CleanTarget`은 대상 폴더를 정리하므로 신중히 사용한다.
+   - `p4 reconcile`은 p4 client/root 설정이 맞는지 확인 후 켠다.
+3. 회사 프로젝트 import가 안정화되면 carousel/card 남은 작업 1~6을 다시 진행한다.
+   - visible card thumbnail/first-frame loading.
+   - card 상태를 큰 상태와 visible 내부 표시 상태로 더 정확히 분리.
+   - active preview 실패 시 검은 active 유지 대신 waiting/error로 전환.
+   - refresh 진입점 통합.
+   - preview show/lower lifecycle 명시 API.
+   - debug/log 정리.
+4. `Project Launcher` 문제는 당분간 패스한다.
+
+### Perforce 병합/관리 원칙
+
+- Git repo가 원본이다.
+- 회사 Perforce 프로젝트의 `Plugins\VdjmMobileUi`는 vendor copy다.
+- Perforce 안에 `.git` 폴더를 직접 넣지 않는다.
+- import 후 `Docs/ImportedFromGit.md`로 어떤 Git commit 기준인지 추적한다.
+- Perforce에는 source/content/config/uplugin/doc stamp만 submit하고, `Binaries/Intermediate/Saved/.git`은 넣지 않는다.
+
 ## 2026-05-12 퇴근 전 최신 인계
 
-이 섹션을 가장 먼저 본다. 아래의 legacy preview/carousel 메모에는 과거 실험 내용이 섞여 있으므로, 현재 구현 기준은 새 `VdjmWidgets` carousel/card 구조다.
+이 섹션은 과거 인계 기록이다. 최신 기준은 위 `2026-06-13 19:52 퇴근 기록`을 먼저 본다. 아래의 legacy preview/carousel 메모에는 과거 실험 내용이 섞여 있으므로, 현재 구현 기준은 새 `VdjmWidgets` carousel/card 구조다.
 
 ### 현재 branch / commit
 
