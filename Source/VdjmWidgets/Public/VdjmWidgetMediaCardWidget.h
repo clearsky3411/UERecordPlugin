@@ -88,6 +88,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
 	bool IsManagedPreviewOpened() const;
 	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
+	bool IsManagedPreviewPlaybackHealthy() const;
+	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
+	bool IsManagedPreviewPlaybackPending() const;
+	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
+	bool IsManagedPreviewPlaybackStalled() const;
+	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Card")
 	FString GetManagedPreviewLastErrorReason() const;
 
 	UPROPERTY(BlueprintAssignable, Category = "VdjmWidgets|Media|Card")

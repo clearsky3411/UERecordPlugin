@@ -1027,6 +1027,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview")
 	bool IsPreviewOpened() const { return mbPreviewOpened; }
 	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview")
+	bool IsPreviewPlaybackHealthy() const { return mbPreviewPlaybackHealthy; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview")
+	bool IsPreviewPlaybackPending() const;
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview")
+	bool IsPreviewPlaybackStalled() const { return mbPreviewPlaybackStalled; }
+	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview")
 	FString GetCurrentSource() const { return mCurrentSource; }
 	UFUNCTION(BlueprintPure, Category = "Recorder|MediaPreview")
 	double GetPreviewStartTimeSec() const { return mPreviewStartTimeSec; }
@@ -1065,6 +1071,9 @@ private:
 	void UnbindMediaPlayerEvents();
 	void SeekPreviewStartAndPlay();
 	bool TryPlayPreview();
+	void ResetPlaybackWatchdog();
+	void ObservePlaybackProgress(double currentTimeSec, double currentWorldTimeSec);
+	void MarkPlaybackStalled(const FString& reason);
 	void ResetPreviewState();
 
 	TWeakObjectPtr<UWorld> mCachedWorld;
@@ -1075,10 +1084,15 @@ private:
 	FString mLastErrorReason;
 	double mPreviewStartTimeSec = 0.0;
 	double mPreviewEndTimeSec = 3.0;
+	double mPlaybackWatchdogStartWorldTimeSec = 0.0;
+	double mLastObservedPlaybackTimeSec = -1.0;
+	double mLastPlaybackProgressWorldTimeSec = 0.0;
 	bool mbPreviewActive = false;
 	bool mbPreviewOpened = false;
 	bool mbPendingInitialSeek = false;
 	bool mbPendingPlayAfterSeek = false;
+	bool mbPreviewPlaybackHealthy = false;
+	bool mbPreviewPlaybackStalled = false;
 };
 
 /*

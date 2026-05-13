@@ -26,6 +26,10 @@
 
 namespace
 {
+	constexpr double PreviewPlaybackStartupGraceSeconds = 1.5;
+	constexpr double PreviewPlaybackStallSeconds = 1.0;
+	constexpr double PreviewPlaybackProgressEpsilonSeconds = 0.02;
+
 	struct FVdjmRecordMediaPublishJobPayload
 	{
 		int32 JobId = INDEX_NONE;
@@ -3034,6 +3038,7 @@ void UVdjmRecordMediaPreviewPlayer::StopPreview(bool bCloseMedia)
 	mbPreviewOpened = false;
 	mbPendingInitialSeek = false;
 	mbPendingPlayAfterSeek = false;
+	ResetPlaybackWatchdog();
 	UnbindMediaPlayerEvents();
 
 	if (IsValid(mMediaPlayer))
@@ -3065,6 +3070,7 @@ bool UVdjmRecordMediaPreviewPlayer::RestartPreview(FString& outErrorReason)
 	}
 
 	mbPreviewActive = true;
+	ResetPlaybackWatchdog();
 	SeekPreviewStartAndPlay();
 	return true;
 }
@@ -3078,6 +3084,7 @@ void UVdjmRecordMediaPreviewPlayer::Tick(float deltaTime)
 		return;
 	}
 
+	const double currentWorldTimeSec = FPlatformTime::Seconds();
 	if ((mbPendingInitialSeek || mbPendingPlayAfterSeek) && mMediaPlayer->IsReady())
 	{
 		if (mbPendingInitialSeek)
@@ -3093,14 +3100,35 @@ void UVdjmRecordMediaPreviewPlayer::Tick(float deltaTime)
 
 	if (not mbPreviewOpened)
 	{
+		if (not IsPreviewPlaybackPending())
+		{
+			MarkPlaybackStalled(TEXT("Preview media did not open before watchdog timeout."));
+		}
 		return;
 	}
 
 	const double currentTimeSec = mMediaPlayer->GetTime().GetTotalSeconds();
+	ObservePlaybackProgress(currentTimeSec, currentWorldTimeSec);
+	if (mbPreviewPlaybackStalled)
+	{
+		return;
+	}
+
 	if (currentTimeSec >= mPreviewEndTimeSec)
 	{
 		SeekPreviewStartAndPlay();
 	}
+}
+
+bool UVdjmRecordMediaPreviewPlayer::IsPreviewPlaybackPending() const
+{
+	if (not mbPreviewActive || mbPreviewPlaybackHealthy || mbPreviewPlaybackStalled)
+	{
+		return false;
+	}
+
+	const double currentWorldTimeSec = FPlatformTime::Seconds();
+	return currentWorldTimeSec - mPlaybackWatchdogStartWorldTimeSec < PreviewPlaybackStartupGraceSeconds;
 }
 
 bool UVdjmRecordMediaPreviewPlayer::IsTickable() const
@@ -3131,6 +3159,7 @@ UWorld* UVdjmRecordMediaPreviewPlayer::GetWorld() const
 void UVdjmRecordMediaPreviewPlayer::HandleMediaOpened(FString openedUrl)
 {
 	mbPreviewOpened = true;
+	ResetPlaybackWatchdog();
 	UE_LOG(
 		LogVdjmRecorderCore,
 		Log,
@@ -3150,6 +3179,8 @@ void UVdjmRecordMediaPreviewPlayer::HandleMediaOpenFailed(FString failedUrl)
 	mbPreviewOpened = false;
 	mbPendingInitialSeek = false;
 	mbPendingPlayAfterSeek = false;
+	mbPreviewPlaybackHealthy = false;
+	mbPreviewPlaybackStalled = true;
 }
 
 void UVdjmRecordMediaPreviewPlayer::HandleMediaEndReached()
@@ -3219,6 +3250,7 @@ bool UVdjmRecordMediaPreviewPlayer::StartPreviewInternal(
 	mbPreviewOpened = false;
 	mbPendingInitialSeek = true;
 	mbPendingPlayAfterSeek = false;
+	ResetPlaybackWatchdog();
 
 	BindMediaPlayerEvents();
 	return OpenCurrentSource(outErrorReason);
@@ -3346,6 +3378,8 @@ bool UVdjmRecordMediaPreviewPlayer::TryPlayPreview()
 		mbPreviewOpened = true;
 		mbPendingInitialSeek = false;
 		mbPendingPlayAfterSeek = false;
+		ResetPlaybackWatchdog();
+		mLastObservedPlaybackTimeSec = mMediaPlayer->GetTime().GetTotalSeconds();
 		UE_LOG(
 			LogVdjmRecorderCore,
 			Log,
@@ -3366,6 +3400,88 @@ bool UVdjmRecordMediaPreviewPlayer::TryPlayPreview()
 			mMediaPlayer->IsReady() ? TEXT("true") : TEXT("false"));
 	}
 	return bPlayResult;
+}
+
+void UVdjmRecordMediaPreviewPlayer::ResetPlaybackWatchdog()
+{
+	const double currentWorldTimeSec = FPlatformTime::Seconds();
+	mPlaybackWatchdogStartWorldTimeSec = currentWorldTimeSec;
+	mLastObservedPlaybackTimeSec = -1.0;
+	mLastPlaybackProgressWorldTimeSec = currentWorldTimeSec;
+	mbPreviewPlaybackHealthy = false;
+	mbPreviewPlaybackStalled = false;
+}
+
+void UVdjmRecordMediaPreviewPlayer::ObservePlaybackProgress(
+	double currentTimeSec,
+	double currentWorldTimeSec)
+{
+	if (not IsValid(mMediaPlayer) || not mbPreviewActive)
+	{
+		return;
+	}
+
+	if (mLastObservedPlaybackTimeSec < 0.0)
+	{
+		mLastObservedPlaybackTimeSec = currentTimeSec;
+		return;
+	}
+
+	const bool bPlaybackTimeMoved =
+		FMath::Abs(currentTimeSec - mLastObservedPlaybackTimeSec) > PreviewPlaybackProgressEpsilonSeconds;
+	mLastObservedPlaybackTimeSec = currentTimeSec;
+
+	if (bPlaybackTimeMoved)
+	{
+		mLastPlaybackProgressWorldTimeSec = currentWorldTimeSec;
+		if (not mbPreviewPlaybackHealthy)
+		{
+			UE_LOG(
+				LogVdjmRecorderCore,
+				Log,
+				TEXT("PreviewPlayer PlaybackHealthy Source=%s Time=%.3f Playing=%s"),
+				*mCurrentSource,
+				currentTimeSec,
+				mMediaPlayer->IsPlaying() ? TEXT("true") : TEXT("false"));
+		}
+		mbPreviewPlaybackHealthy = true;
+		mbPreviewPlaybackStalled = false;
+		return;
+	}
+
+	const double elapsedSinceStartSec = currentWorldTimeSec - mPlaybackWatchdogStartWorldTimeSec;
+	const double elapsedSinceProgressSec = currentWorldTimeSec - mLastPlaybackProgressWorldTimeSec;
+	if (elapsedSinceStartSec >= PreviewPlaybackStartupGraceSeconds &&
+		elapsedSinceProgressSec >= PreviewPlaybackStallSeconds)
+	{
+		MarkPlaybackStalled(FString::Printf(
+			TEXT("Preview playback time is not advancing. Time=%.3f Playing=%s"),
+			currentTimeSec,
+			mMediaPlayer->IsPlaying() ? TEXT("true") : TEXT("false")));
+	}
+}
+
+void UVdjmRecordMediaPreviewPlayer::MarkPlaybackStalled(const FString& reason)
+{
+	if (mbPreviewPlaybackStalled)
+	{
+		return;
+	}
+
+	mbPreviewPlaybackHealthy = false;
+	mbPreviewPlaybackStalled = true;
+	mLastErrorReason = reason;
+
+	UE_LOG(
+		LogVdjmRecorderCore,
+		Warning,
+		TEXT("PreviewPlayer PlaybackStalled Source=%s Reason=%s Closed=%s Preparing=%s Ready=%s Playing=%s"),
+		*mCurrentSource,
+		*reason,
+		IsValid(mMediaPlayer) && mMediaPlayer->IsClosed() ? TEXT("true") : TEXT("false"),
+		IsValid(mMediaPlayer) && mMediaPlayer->IsPreparing() ? TEXT("true") : TEXT("false"),
+		IsValid(mMediaPlayer) && mMediaPlayer->IsReady() ? TEXT("true") : TEXT("false"),
+		IsValid(mMediaPlayer) && mMediaPlayer->IsPlaying() ? TEXT("true") : TEXT("false"));
 }
 
 void UVdjmRecordMediaPreviewPlayer::ResetPreviewState()

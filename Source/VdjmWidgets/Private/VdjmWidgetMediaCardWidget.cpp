@@ -510,6 +510,21 @@ bool UVdjmWidgetMediaCardWidget::IsManagedPreviewOpened() const
 	return mPreviewPlayer != nullptr && mPreviewPlayer->IsPreviewOpened();
 }
 
+bool UVdjmWidgetMediaCardWidget::IsManagedPreviewPlaybackHealthy() const
+{
+	return mPreviewPlayer != nullptr && mPreviewPlayer->IsPreviewPlaybackHealthy();
+}
+
+bool UVdjmWidgetMediaCardWidget::IsManagedPreviewPlaybackPending() const
+{
+	return mPreviewPlayer != nullptr && mPreviewPlayer->IsPreviewPlaybackPending();
+}
+
+bool UVdjmWidgetMediaCardWidget::IsManagedPreviewPlaybackStalled() const
+{
+	return mPreviewPlayer != nullptr && mPreviewPlayer->IsPreviewPlaybackStalled();
+}
+
 FString UVdjmWidgetMediaCardWidget::GetManagedPreviewLastErrorReason() const
 {
 	return mPreviewPlayer != nullptr ? mPreviewPlayer->GetLastErrorReason() : FString();

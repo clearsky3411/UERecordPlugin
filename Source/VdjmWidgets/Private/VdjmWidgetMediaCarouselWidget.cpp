@@ -746,21 +746,47 @@ void UVdjmWidgetMediaCarouselWidget::HandleActivePreviewVerifyTimer()
 		return;
 	}
 
-	if (not activeCard->IsAutoManagingPreviewMedia() || activeCard->IsManagedPreviewOpened())
+	const bool bAutoManaged = activeCard->IsAutoManagingPreviewMedia();
+	const bool bPreviewOpened = activeCard->IsManagedPreviewOpened();
+	const bool bPlaybackHealthy = activeCard->IsManagedPreviewPlaybackHealthy();
+	const bool bPlaybackPending = activeCard->IsManagedPreviewPlaybackPending();
+	const bool bPlaybackStalled = activeCard->IsManagedPreviewPlaybackStalled();
+	if (not bAutoManaged || bPlaybackHealthy)
 	{
 		if (bDebugTraceLayout)
 		{
 			UE_LOG(
 				LogVdjmWidgets,
 				Log,
-				TEXT("VdjmCarousel ActivePreview Ready Reason=%s Attempt=%d Active=%d Card=%s Opened=%s AutoManaged=%s"),
+				TEXT("VdjmCarousel ActivePreview Ready Reason=%s Attempt=%d Active=%d Card=%s Opened=%s Healthy=%s AutoManaged=%s"),
 				*mActivePreviewStartReason.ToString(),
 				mActivePreviewStartAttemptCount,
 				mActiveSourceIndex,
 				*GetNameSafe(activeCard),
-				activeCard->IsManagedPreviewOpened() ? TEXT("true") : TEXT("false"),
-				activeCard->IsAutoManagingPreviewMedia() ? TEXT("true") : TEXT("false"));
+				bPreviewOpened ? TEXT("true") : TEXT("false"),
+				bPlaybackHealthy ? TEXT("true") : TEXT("false"),
+				bAutoManaged ? TEXT("true") : TEXT("false"));
 		}
+		return;
+	}
+
+	if (bPlaybackPending)
+	{
+		if (bDebugTraceLayout)
+		{
+			UE_LOG(
+				LogVdjmWidgets,
+				Log,
+				TEXT("VdjmCarousel ActivePreview Pending Reason=%s Attempt=%d/%d Active=%d Card=%s Opened=%s Stalled=%s"),
+				*mActivePreviewStartReason.ToString(),
+				mActivePreviewStartAttemptCount,
+				ActivePreviewMaxStartAttempts,
+				mActiveSourceIndex,
+				*GetNameSafe(activeCard),
+				bPreviewOpened ? TEXT("true") : TEXT("false"),
+				bPlaybackStalled ? TEXT("true") : TEXT("false"));
+		}
+		ScheduleActivePreviewVerify();
 		return;
 	}
 
@@ -770,18 +796,22 @@ void UVdjmWidgetMediaCarouselWidget::HandleActivePreviewVerifyTimer()
 		UE_LOG(
 			LogVdjmWidgets,
 			Warning,
-			TEXT("VdjmCarousel ActivePreview VerifyFailed Reason=%s Attempt=%d/%d Active=%d Card=%s PreviewActive=%s Error=%s"),
+			TEXT("VdjmCarousel ActivePreview VerifyFailed Reason=%s Attempt=%d/%d Active=%d Card=%s PreviewActive=%s Opened=%s Healthy=%s Stalled=%s Error=%s"),
 			*mActivePreviewStartReason.ToString(),
 			mActivePreviewStartAttemptCount,
 			ActivePreviewMaxStartAttempts,
 			mActiveSourceIndex,
 			*GetNameSafe(activeCard),
 			activeCard->IsManagedPreviewActive() ? TEXT("true") : TEXT("false"),
+			bPreviewOpened ? TEXT("true") : TEXT("false"),
+			bPlaybackHealthy ? TEXT("true") : TEXT("false"),
+			bPlaybackStalled ? TEXT("true") : TEXT("false"),
 			lastErrorReason.IsEmpty() ? TEXT("None") : *lastErrorReason);
 	}
 
 	if (CanRetryActivePreviewStart())
 	{
+		activeCard->StopPreview(true);
 		ScheduleActivePreviewStart(ActivePreviewRetryDelaySeconds);
 	}
 }
