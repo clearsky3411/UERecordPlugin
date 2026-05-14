@@ -1,0 +1,496 @@
+{
+	"schema_version": 1,
+	"meta": {
+		"registry_name": "VdjmMobileUi",
+		"display_name": "VdjmMobileUi Asset Registry",
+		"owner": "vdjm",
+		"description": "Central asset registry for confirmed VdjmMobileUi plugin assets.",
+		"schema_note": "v1 keeps asset management separate from runtime access enforcement."
+	},
+	"defines": {
+		"TYPE_IMAGE": "image",
+		"TYPE_SVG": "svg",
+		"TYPE_WIDGET_BP": "widget_bp",
+		"TYPE_BLUEPRINT": "blueprint",
+		"TYPE_DATA_ASSET": "data_asset",
+		"TYPE_ANIMATION": "animation",
+		"TYPE_SOUND": "sound",
+		"TYPE_MATERIAL": "material",
+		"TYPE_FONT": "font",
+		"TYPE_MAP": "map",
+		"TYPE_LEVEL_SEQUENCE": "level_sequence",
+		"TYPE_MEDIA": "media",
+		"TYPE_SHADER": "shader",
+		"TYPE_RAW_FILE": "raw_file",
+		"TYPE_OTHER": "other",
+		"CLASS_TEXTURE2D": "/Script/Engine.Texture2D",
+		"CLASS_USER_WIDGET": "/Script/UMG.UserWidget",
+		"CLASS_BLUEPRINT": "/Script/Engine.Blueprint",
+		"CLASS_DATA_ASSET": "/Script/Engine.DataAsset",
+		"CLASS_SOUND_BASE": "/Script/Engine.SoundBase",
+		"CLASS_MATERIAL_INTERFACE": "/Script/Engine.MaterialInterface",
+		"CLASS_WORLD": "/Script/Engine.World",
+		"DIR_UI": "UI",
+		"DIR_PREVIEW": "UI/Preview",
+		"DIR_ICONS": "UI/Icons"
+	},
+	"paths": {
+		"roots": {
+			"plugin": {
+				"default_path": ".",
+				"scan": false,
+				"meta": {
+					"purpose": "Plugin root. Usually not scanned because it includes source and tool files."
+				}
+			},
+			"content": {
+				"default_path": "Content",
+				"scan": true,
+				"meta": {
+					"purpose": "Plugin content root."
+				}
+			},
+			"config": {
+				"default_path": "Config",
+				"scan": false,
+				"meta": {
+					"purpose": "Plugin config root."
+				}
+			},
+			"resources": {
+				"default_path": "Resources",
+				"scan": true,
+				"meta": {
+					"purpose": "Plugin resource files."
+				}
+			},
+			"shaders": {
+				"default_path": "Shaders",
+				"scan": true,
+				"meta": {
+					"purpose": "Plugin shader files."
+				}
+			}
+		},
+		"external_paths": {},
+		"defined_roots": [
+			{
+				"key": "preview-ui",
+				"root": "content",
+				"relative_path": "!{DIR_PREVIEW}",
+				"scan": false,
+				"meta": {
+					"purpose": "Preview UI folder shortcut."
+				}
+			},
+			{
+				"key": "icons",
+				"root": "content",
+				"relative_path": "!{DIR_ICONS}",
+				"scan": false,
+				"meta": {
+					"purpose": "Icon folder shortcut."
+				}
+			}
+		]
+	},
+	"virtuals": {
+		"key": "root",
+		"label": "Root",
+		"meta": {
+			"purpose": "Virtual folder root. It is not a physical path."
+		},
+		"children": [
+			{
+				"key": "recorder",
+				"label": "Recorder",
+				"meta": {
+					"purpose": "Recorder feature assets."
+				},
+				"children": [
+					{
+						"key": "loading",
+						"label": "Loading",
+						"meta": {
+							"purpose": "Recorder loading assets."
+						},
+						"children": [
+							{
+								"key": "preview",
+								"label": "Preview Loading",
+								"meta": {
+									"purpose": "Preview loading screen assets."
+								},
+								"children": []
+							}
+						]
+					},
+					{
+						"key": "preview",
+						"label": "Preview",
+						"meta": {
+							"purpose": "Preview gallery and carousel assets."
+						},
+						"children": [
+							{
+								"key": "carousel",
+								"label": "Carousel",
+								"meta": {
+									"purpose": "Carousel card, media, and control assets."
+								},
+								"children": []
+							}
+						]
+					}
+				]
+			},
+			{
+				"key": "vcard",
+				"label": "VCard",
+				"meta": {
+					"purpose": "VCard-facing assets."
+				},
+				"children": [
+					{
+						"key": "icons",
+						"label": "Icons",
+						"meta": {
+							"purpose": "VCard icon assets."
+						},
+						"children": []
+					}
+				]
+			}
+		]
+	},
+	"asset_types": {
+		"image": {
+			"kind": "unreal_asset",
+			"default_class": "!{CLASS_TEXTURE2D}",
+			"extensions": [
+				".png",
+				".jpg",
+				".jpeg",
+				".tga",
+				".bmp",
+				".webp"
+			],
+			"meta": {
+				"purpose": "Texture or image asset."
+			}
+		},
+		"svg": {
+			"kind": "file",
+			"default_class": "",
+			"extensions": [
+				".svg"
+			],
+			"meta": {
+				"purpose": "SVG source file."
+			}
+		},
+		"widget_bp": {
+			"kind": "unreal_asset",
+			"default_class": "!{CLASS_USER_WIDGET}",
+			"extensions": [
+				".uasset"
+			],
+			"meta": {
+				"purpose": "UserWidget blueprint asset."
+			}
+		},
+		"blueprint": {
+			"kind": "unreal_asset",
+			"default_class": "!{CLASS_BLUEPRINT}",
+			"extensions": [
+				".uasset"
+			],
+			"meta": {
+				"purpose": "General blueprint asset."
+			}
+		},
+		"data_asset": {
+			"kind": "unreal_asset",
+			"default_class": "!{CLASS_DATA_ASSET}",
+			"extensions": [
+				".uasset"
+			],
+			"meta": {
+				"purpose": "DataAsset or data-only UObject asset."
+			}
+		},
+		"animation": {
+			"kind": "unreal_asset",
+			"default_class": "",
+			"extensions": [
+				".uasset"
+			],
+			"meta": {
+				"purpose": "Animation asset."
+			}
+		},
+		"sound": {
+			"kind": "unreal_asset",
+			"default_class": "!{CLASS_SOUND_BASE}",
+			"extensions": [
+				".wav",
+				".mp3",
+				".ogg",
+				".flac"
+			],
+			"meta": {
+				"purpose": "Sound or audio asset."
+			}
+		},
+		"material": {
+			"kind": "unreal_asset",
+			"default_class": "!{CLASS_MATERIAL_INTERFACE}",
+			"extensions": [
+				".uasset"
+			],
+			"meta": {
+				"purpose": "Material asset."
+			}
+		},
+		"font": {
+			"kind": "unreal_asset",
+			"default_class": "",
+			"extensions": [
+				".ttf",
+				".otf",
+				".uasset"
+			],
+			"meta": {
+				"purpose": "Font asset or font file."
+			}
+		},
+		"map": {
+			"kind": "unreal_asset",
+			"default_class": "!{CLASS_WORLD}",
+			"extensions": [
+				".umap"
+			],
+			"meta": {
+				"purpose": "Map or world asset."
+			}
+		},
+		"level_sequence": {
+			"kind": "unreal_asset",
+			"default_class": "",
+			"extensions": [
+				".uasset"
+			],
+			"meta": {
+				"purpose": "Level sequence asset."
+			}
+		},
+		"media": {
+			"kind": "file",
+			"default_class": "",
+			"extensions": [
+				".mp4",
+				".mov",
+				".webm"
+			],
+			"meta": {
+				"purpose": "Media file or media asset."
+			}
+		},
+		"shader": {
+			"kind": "file",
+			"default_class": "",
+			"extensions": [
+				".usf",
+				".ush",
+				".hlsl"
+			],
+			"meta": {
+				"purpose": "Shader source file."
+			}
+		},
+		"raw_file": {
+			"kind": "file",
+			"default_class": "",
+			"extensions": [],
+			"meta": {
+				"purpose": "Plain file managed by the registry."
+			}
+		},
+		"other": {
+			"kind": "unknown",
+			"default_class": "",
+			"extensions": [],
+			"meta": {
+				"purpose": "Fallback type for assets that need manual classification."
+			}
+		}
+	},
+	"assets": [
+		{
+			"asset_key": "data_asset:content:Record/Bp_VdjmRecordConfigDataAsset",
+			"type": "!{TYPE_DATA_ASSET}",
+			"root": "content",
+			"relative_path": "Record/Bp_VdjmRecordConfigDataAsset",
+			"importance": "optional",
+			"class": "!{CLASS_DATA_ASSET}",
+			"tags": [
+				"record",
+				"config"
+			],
+			"meta": {
+				"purpose": "Initial scanned plugin asset. Class can be refined after editor registry inspection."
+			}
+		},
+		{
+			"asset_key": "blueprint:content:Recorder/Bp_VdjmRecordTest",
+			"type": "!{TYPE_BLUEPRINT}",
+			"root": "content",
+			"relative_path": "Recorder/Bp_VdjmRecordTest",
+			"importance": "optional",
+			"class": "!{CLASS_BLUEPRINT}",
+			"tags": [
+				"recorder",
+				"test"
+			],
+			"meta": {
+				"purpose": "Initial scanned plugin asset. Class can be refined after editor registry inspection."
+			}
+		},
+		{
+			"asset_key": "widget_bp:content:Ui/VdjmUiCheckBox",
+			"type": "!{TYPE_WIDGET_BP}",
+			"root": "content",
+			"relative_path": "Ui/VdjmUiCheckBox",
+			"importance": "optional",
+			"class": "!{CLASS_USER_WIDGET}",
+			"tags": [
+				"ui",
+				"input"
+			],
+			"meta": {
+				"purpose": "Initial scanned plugin UI widget."
+			}
+		},
+		{
+			"asset_key": "widget_bp:content:Ui/VdjmUiComboBox",
+			"type": "!{TYPE_WIDGET_BP}",
+			"root": "content",
+			"relative_path": "Ui/VdjmUiComboBox",
+			"importance": "optional",
+			"class": "!{CLASS_USER_WIDGET}",
+			"tags": [
+				"ui",
+				"input"
+			],
+			"meta": {
+				"purpose": "Initial scanned plugin UI widget."
+			}
+		},
+		{
+			"asset_key": "widget_bp:content:Ui/VdjmUiIntPoint",
+			"type": "!{TYPE_WIDGET_BP}",
+			"root": "content",
+			"relative_path": "Ui/VdjmUiIntPoint",
+			"importance": "optional",
+			"class": "!{CLASS_USER_WIDGET}",
+			"tags": [
+				"ui",
+				"input"
+			],
+			"meta": {
+				"purpose": "Initial scanned plugin UI widget."
+			}
+		},
+		{
+			"asset_key": "widget_bp:content:Ui/VdjmUiSlider",
+			"type": "!{TYPE_WIDGET_BP}",
+			"root": "content",
+			"relative_path": "Ui/VdjmUiSlider",
+			"importance": "optional",
+			"class": "!{CLASS_USER_WIDGET}",
+			"tags": [
+				"ui",
+				"input"
+			],
+			"meta": {
+				"purpose": "Initial scanned plugin UI widget."
+			}
+		},
+		{
+			"asset_key": "widget_bp:content:Ui/VdjmUiSpinBox",
+			"type": "!{TYPE_WIDGET_BP}",
+			"root": "content",
+			"relative_path": "Ui/VdjmUiSpinBox",
+			"importance": "optional",
+			"class": "!{CLASS_USER_WIDGET}",
+			"tags": [
+				"ui",
+				"input"
+			],
+			"meta": {
+				"purpose": "Initial scanned plugin UI widget."
+			}
+		},
+		{
+			"asset_key": "widget_bp:content:Ui/VdjmUiTextBox",
+			"type": "!{TYPE_WIDGET_BP}",
+			"root": "content",
+			"relative_path": "Ui/VdjmUiTextBox",
+			"importance": "optional",
+			"class": "!{CLASS_USER_WIDGET}",
+			"tags": [
+				"ui",
+				"input"
+			],
+			"meta": {
+				"purpose": "Initial scanned plugin UI widget."
+			}
+		},
+		{
+			"asset_key": "widget_bp:content:Widgets/VdjmUiSlider",
+			"type": "!{TYPE_WIDGET_BP}",
+			"root": "content",
+			"relative_path": "Widgets/VdjmUiSlider",
+			"importance": "optional",
+			"class": "!{CLASS_USER_WIDGET}",
+			"tags": [
+				"ui",
+				"widget"
+			],
+			"meta": {
+				"purpose": "Initial scanned plugin UI widget."
+			}
+		},
+		{
+			"asset_key": "image:resources:Icon128.png",
+			"type": "!{TYPE_IMAGE}",
+			"root": "resources",
+			"relative_path": "Icon128.png",
+			"importance": "optional",
+			"class": "!{CLASS_TEXTURE2D}",
+			"tags": [
+				"plugin",
+				"icon"
+			],
+			"meta": {
+				"purpose": "Plugin icon resource."
+			}
+		},
+		{
+			"asset_key": "shader:shaders:VdjmRecordShader.usf",
+			"type": "!{TYPE_SHADER}",
+			"root": "shaders",
+			"relative_path": "VdjmRecordShader.usf",
+			"importance": "optional",
+			"class": "",
+			"tags": [
+				"recorder",
+				"shader"
+			],
+			"meta": {
+				"purpose": "Recorder shader source."
+			}
+		}
+	],
+	"requirements": []
+}
