@@ -14,6 +14,11 @@ public:
 private:
 	void RegisterAssetTypeActions();
 	void UnregisterAssetTypeActions();
+	void RegisterMenus();
+	void UnregisterMenus();
+	void RegisterAssetRegistryTab();
+	void UnregisterAssetRegistryTab();
+	TSharedRef<class SDockTab> SpawnAssetRegistryTab(const class FSpawnTabArgs& args);
 
 	TArray<TSharedPtr<IAssetTypeActions>> RegisteredAssetTypeActions;
 };
