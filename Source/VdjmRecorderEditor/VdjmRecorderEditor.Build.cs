@@ -21,6 +21,7 @@ public class VdjmRecorderEditor : ModuleRules
                 "ApplicationCore",
                 "AssetTools",
                 "CoreUObject",
+                "DesktopPlatform",
                 "EditorFramework",
                 "Engine",
                 "InputCore",

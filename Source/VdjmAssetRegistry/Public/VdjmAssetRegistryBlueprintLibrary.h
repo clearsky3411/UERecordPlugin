@@ -27,10 +27,31 @@ public:
 	static bool ValidateRegistry(const FVdjmAssetRegistryDocument& registry, TArray<FVdjmAssetRegistryMessage>& outMessages);
 
 	UFUNCTION(BlueprintCallable, Category = "VdjmAssetRegistry")
+	static bool ResolveRegistryRootFullPath(
+		const FVdjmAssetRegistryDocument& registry,
+		const FString& rootKey,
+		FString& outFullPath,
+		TArray<FVdjmAssetRegistryMessage>& outMessages);
+
+	UFUNCTION(BlueprintCallable, Category = "VdjmAssetRegistry")
 	static bool ScanDefaultRegistry(
 		const bool bRegisterDiscoveredAssets,
 		const bool bSaveAfterScan,
 		FVdjmAssetRegistryDocument& outRegistry,
+		FVdjmAssetRegistryScanResult& outScanResult,
+		TArray<FVdjmAssetRegistryMessage>& outMessages);
+
+	UFUNCTION(BlueprintCallable, Category = "VdjmAssetRegistry")
+	static bool ScanDefaultRegistryWithRequest(
+		const FVdjmAssetRegistryScanRequest& scanRequest,
+		FVdjmAssetRegistryDocument& outRegistry,
+		FVdjmAssetRegistryScanResult& outScanResult,
+		TArray<FVdjmAssetRegistryMessage>& outMessages);
+
+	UFUNCTION(BlueprintCallable, Category = "VdjmAssetRegistry")
+	static bool ScanRegistryWithRequest(
+		const FVdjmAssetRegistryScanRequest& scanRequest,
+		FVdjmAssetRegistryDocument& registry,
 		FVdjmAssetRegistryScanResult& outScanResult,
 		TArray<FVdjmAssetRegistryMessage>& outMessages);
 

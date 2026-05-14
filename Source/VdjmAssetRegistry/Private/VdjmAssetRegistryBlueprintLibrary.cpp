@@ -21,7 +21,9 @@ namespace
 	struct FVdjmAssetRegistryScanRoot
 	{
 		FString Key;
-		FString FullPath;
+		FString RootFullPath;
+		FString ScanFullPath;
+		FString ScopeRelativePath;
 		bool bDefinedRoot = false;
 	};
 
@@ -1209,7 +1211,7 @@ namespace
 			FString fullPath;
 			if (ResolveRootFullPath(registry, root.Key, fullPath, outMessages))
 			{
-				scanRoots.Add({ root.Key, fullPath, false });
+				scanRoots.Add({ root.Key, fullPath, fullPath, FString(), false });
 			}
 		}
 		for (const FVdjmAssetRegistryPathRoot& root : registry.ExternalPaths)
@@ -1222,7 +1224,7 @@ namespace
 			FString fullPath;
 			if (ResolveRootFullPath(registry, root.Key, fullPath, outMessages))
 			{
-				scanRoots.Add({ root.Key, fullPath, false });
+				scanRoots.Add({ root.Key, fullPath, fullPath, FString(), false });
 			}
 		}
 		for (const FVdjmAssetRegistryDefinedRoot& root : registry.DefinedRoots)
@@ -1235,15 +1237,92 @@ namespace
 			FString fullPath;
 			if (ResolveRootFullPath(registry, root.Key, fullPath, outMessages))
 			{
-				scanRoots.Add({ root.Key, fullPath, true });
+				scanRoots.Add({ root.Key, fullPath, fullPath, FString(), true });
 			}
 		}
 
 		scanRoots.Sort([](const FVdjmAssetRegistryScanRoot& lhs, const FVdjmAssetRegistryScanRoot& rhs)
 		{
-			return lhs.FullPath.Len() > rhs.FullPath.Len();
+			return lhs.ScanFullPath.Len() > rhs.ScanFullPath.Len();
 		});
 		return scanRoots;
+	}
+
+	TArray<FVdjmAssetRegistryScanRoot> BuildRequestedScanRoots(
+		const FVdjmAssetRegistryDocument& registry,
+		const FVdjmAssetRegistryScanRequest& scanRequest,
+		TArray<FVdjmAssetRegistryMessage>& outMessages)
+	{
+		if (scanRequest.RootKey.IsEmpty())
+		{
+			if (!scanRequest.bUseEnabledRoots)
+			{
+				AddMessage(outMessages, EVdjmAssetRegistryMessageSeverity::Error, TEXT("scan_root_empty"), TEXT("scan_request"), TEXT("Scan request needs a root key or enabled root scanning."));
+				return TArray<FVdjmAssetRegistryScanRoot>();
+			}
+			return BuildScanRoots(registry, outMessages);
+		}
+
+		FString rootFullPath;
+		if (!ResolveRootFullPath(registry, scanRequest.RootKey, rootFullPath, outMessages))
+		{
+			return TArray<FVdjmAssetRegistryScanRoot>();
+		}
+
+		const FString relativePath = NormalizePathString(scanRequest.RelativePath);
+		if (IsParentPathBlocked(relativePath))
+		{
+			AddMessage(outMessages, EVdjmAssetRegistryMessageSeverity::Error, TEXT("scan_relative_parent_path"), scanRequest.RootKey, TEXT("Scan request relative_path cannot contain '..'."));
+			return TArray<FVdjmAssetRegistryScanRoot>();
+		}
+
+		FString scanFullPath = relativePath.IsEmpty() ? rootFullPath : FPaths::Combine(rootFullPath, relativePath);
+		scanFullPath = FPaths::ConvertRelativePathToFull(scanFullPath);
+		FPaths::NormalizeDirectoryName(scanFullPath);
+
+		TArray<FVdjmAssetRegistryScanRoot> scanRoots;
+		scanRoots.Add({
+			scanRequest.RootKey,
+			rootFullPath,
+			scanFullPath,
+			relativePath,
+			FindDefinedRoot(registry, scanRequest.RootKey) != nullptr
+		});
+		return scanRoots;
+	}
+
+	bool IsAssetInScanRootScope(
+		const FVdjmAssetRegistryAssetEntry& asset,
+		const FVdjmAssetRegistryScanRoot& scanRoot)
+	{
+		if (asset.Root != scanRoot.Key)
+		{
+			return false;
+		}
+
+		const FString scopeRelativePath = NormalizePathString(scanRoot.ScopeRelativePath);
+		if (scopeRelativePath.IsEmpty())
+		{
+			return true;
+		}
+
+		const FString assetRelativePath = NormalizePathString(asset.RelativePath);
+		return assetRelativePath == scopeRelativePath
+			|| assetRelativePath.StartsWith(scopeRelativePath + TEXT("/"));
+	}
+
+	bool IsAssetInAnyScanRootScope(
+		const FVdjmAssetRegistryAssetEntry& asset,
+		const TArray<FVdjmAssetRegistryScanRoot>& scanRoots)
+	{
+		for (const FVdjmAssetRegistryScanRoot& scanRoot : scanRoots)
+		{
+			if (IsAssetInScanRootScope(asset, scanRoot))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 }
 
@@ -1437,9 +1516,34 @@ bool UVdjmAssetRegistryBlueprintLibrary::ValidateRegistry(const FVdjmAssetRegist
 	return !HasError(outMessages);
 }
 
+bool UVdjmAssetRegistryBlueprintLibrary::ResolveRegistryRootFullPath(
+	const FVdjmAssetRegistryDocument& registry,
+	const FString& rootKey,
+	FString& outFullPath,
+	TArray<FVdjmAssetRegistryMessage>& outMessages)
+{
+	outMessages.Reset();
+	outFullPath.Reset();
+	return ResolveRootFullPath(registry, rootKey, outFullPath, outMessages);
+}
+
 bool UVdjmAssetRegistryBlueprintLibrary::ScanDefaultRegistry(
 	const bool bRegisterDiscoveredAssets,
 	const bool bSaveAfterScan,
+	FVdjmAssetRegistryDocument& outRegistry,
+	FVdjmAssetRegistryScanResult& outScanResult,
+	TArray<FVdjmAssetRegistryMessage>& outMessages)
+{
+	FVdjmAssetRegistryScanRequest scanRequest;
+	scanRequest.bRegisterDiscoveredAssets = bRegisterDiscoveredAssets;
+	scanRequest.bSaveAfterScan = bSaveAfterScan;
+	scanRequest.bUseEnabledRoots = true;
+	scanRequest.bCheckMissingRegisteredAssets = true;
+	return ScanDefaultRegistryWithRequest(scanRequest, outRegistry, outScanResult, outMessages);
+}
+
+bool UVdjmAssetRegistryBlueprintLibrary::ScanDefaultRegistryWithRequest(
+	const FVdjmAssetRegistryScanRequest& scanRequest,
 	FVdjmAssetRegistryDocument& outRegistry,
 	FVdjmAssetRegistryScanResult& outScanResult,
 	TArray<FVdjmAssetRegistryMessage>& outMessages)
@@ -1452,19 +1556,31 @@ bool UVdjmAssetRegistryBlueprintLibrary::ScanDefaultRegistry(
 		return false;
 	}
 
+	return ScanRegistryWithRequest(scanRequest, outRegistry, outScanResult, outMessages);
+}
+
+bool UVdjmAssetRegistryBlueprintLibrary::ScanRegistryWithRequest(
+	const FVdjmAssetRegistryScanRequest& scanRequest,
+	FVdjmAssetRegistryDocument& registry,
+	FVdjmAssetRegistryScanResult& outScanResult,
+	TArray<FVdjmAssetRegistryMessage>& outMessages)
+{
+	outMessages.Reset();
+	outScanResult = FVdjmAssetRegistryScanResult();
+
 	TArray<FVdjmAssetRegistryMessage> scanMessages;
-	const TArray<FVdjmAssetRegistryScanRoot> scanRoots = BuildScanRoots(outRegistry, scanMessages);
+	const TArray<FVdjmAssetRegistryScanRoot> scanRoots = BuildRequestedScanRoots(registry, scanRequest, scanMessages);
 	outMessages.Append(scanMessages);
 	if (scanRoots.Num() <= 0)
 	{
-		AddMessage(outMessages, EVdjmAssetRegistryMessageSeverity::Warning, TEXT("scan_root_empty"), TEXT("paths"), TEXT("No scan-enabled root was found."));
+		AddMessage(outMessages, EVdjmAssetRegistryMessageSeverity::Warning, TEXT("scan_root_empty"), TEXT("paths"), TEXT("No scan root was found."));
 		return !HasError(outMessages);
 	}
 
 	TMap<FString, int32> assetIndexByKey;
-	for (int32 assetIndex = 0; assetIndex < outRegistry.Assets.Num(); ++assetIndex)
+	for (int32 assetIndex = 0; assetIndex < registry.Assets.Num(); ++assetIndex)
 	{
-		FVdjmAssetRegistryAssetEntry& asset = outRegistry.Assets[assetIndex];
+		FVdjmAssetRegistryAssetEntry& asset = registry.Assets[assetIndex];
 		asset.AssetKey = MakeAssetKey(asset.Type, asset.Root, asset.RelativePath);
 		assetIndexByKey.Add(asset.AssetKey, assetIndex);
 	}
@@ -1473,14 +1589,14 @@ bool UVdjmAssetRegistryBlueprintLibrary::ScanDefaultRegistry(
 	TSet<FString> seenFiles;
 	for (const FVdjmAssetRegistryScanRoot& scanRoot : scanRoots)
 	{
-		if (!FPaths::DirectoryExists(scanRoot.FullPath))
+		if (!FPaths::DirectoryExists(scanRoot.ScanFullPath))
 		{
-			AddMessage(outMessages, EVdjmAssetRegistryMessageSeverity::Warning, TEXT("scan_root_missing"), scanRoot.Key, FString::Printf(TEXT("Scan root '%s' does not exist."), *scanRoot.FullPath));
+			AddMessage(outMessages, EVdjmAssetRegistryMessageSeverity::Warning, TEXT("scan_root_missing"), scanRoot.Key, FString::Printf(TEXT("Scan root '%s' does not exist."), *scanRoot.ScanFullPath));
 			continue;
 		}
 
 		TArray<FString> filePaths;
-		IFileManager::Get().FindFilesRecursive(filePaths, *scanRoot.FullPath, TEXT("*.*"), true, false);
+		IFileManager::Get().FindFilesRecursive(filePaths, *scanRoot.ScanFullPath, TEXT("*.*"), true, false);
 		for (FString filePath : filePaths)
 		{
 			filePath = FPaths::ConvertRelativePathToFull(filePath);
@@ -1498,9 +1614,9 @@ bool UVdjmAssetRegistryBlueprintLibrary::ScanDefaultRegistry(
 
 			FVdjmAssetRegistryAssetEntry scannedAsset;
 			scannedAsset.Root = scanRoot.Key;
-			scannedAsset.RelativePath = MakeRelativeAssetPathForFile(scanRoot.FullPath, filePath);
+			scannedAsset.RelativePath = MakeRelativeAssetPathForFile(scanRoot.RootFullPath, filePath);
 			scannedAsset.Type = classPath.IsEmpty() ? InferTypeFromExtension(extension) : InferTypeFromClassPath(classPath, extension);
-			scannedAsset.Class = classPath.IsEmpty() ? GetDefaultClassForType(outRegistry, scannedAsset.Type) : classPath;
+			scannedAsset.Class = classPath.IsEmpty() ? GetDefaultClassForType(registry, scannedAsset.Type) : classPath;
 			scannedAsset.Importance = TEXT("optional");
 			scannedAsset.Meta.Add(TEXT("source"), TEXT("scan"));
 			scannedAsset.AssetKey = MakeAssetKey(scannedAsset.Type, scannedAsset.Root, scannedAsset.RelativePath);
@@ -1508,7 +1624,7 @@ bool UVdjmAssetRegistryBlueprintLibrary::ScanDefaultRegistry(
 
 			if (int32* existingIndex = assetIndexByKey.Find(scannedAsset.AssetKey))
 			{
-				FVdjmAssetRegistryAssetEntry& existingAsset = outRegistry.Assets[*existingIndex];
+				FVdjmAssetRegistryAssetEntry& existingAsset = registry.Assets[*existingIndex];
 				bool bUpdated = false;
 				if (existingAsset.Class.IsEmpty() && !scannedAsset.Class.IsEmpty())
 				{
@@ -1531,30 +1647,35 @@ bool UVdjmAssetRegistryBlueprintLibrary::ScanDefaultRegistry(
 					++outScanResult.UnchangedAssetCount;
 				}
 			}
-			else if (bRegisterDiscoveredAssets)
+			else if (scanRequest.bRegisterDiscoveredAssets)
 			{
-				outRegistry.Assets.Add(scannedAsset);
-				assetIndexByKey.Add(scannedAsset.AssetKey, outRegistry.Assets.Num() - 1);
+				registry.Assets.Add(scannedAsset);
+				assetIndexByKey.Add(scannedAsset.AssetKey, registry.Assets.Num() - 1);
 				++outScanResult.AddedAssetCount;
 				outScanResult.AddedAssetKeys.Add(scannedAsset.AssetKey);
 			}
 		}
 	}
 
-	for (const FVdjmAssetRegistryAssetEntry& asset : outRegistry.Assets)
+	for (const FVdjmAssetRegistryAssetEntry& asset : registry.Assets)
 	{
+		if (!scanRequest.bCheckMissingRegisteredAssets || !IsAssetInAnyScanRootScope(asset, scanRoots))
+		{
+			continue;
+		}
+
 		const FString assetKey = MakeAssetKey(asset.Type, asset.Root, asset.RelativePath);
-		if (!discoveredKeys.Contains(assetKey) && !AssetEntryPhysicalExists(outRegistry, asset, outMessages))
+		if (!discoveredKeys.Contains(assetKey) && !AssetEntryPhysicalExists(registry, asset, outMessages))
 		{
 			++outScanResult.MissingRegisteredAssetCount;
 			outScanResult.MissingAssetKeys.Add(assetKey);
 		}
 	}
 
-	if (bRegisterDiscoveredAssets && bSaveAfterScan)
+	if (scanRequest.bRegisterDiscoveredAssets && scanRequest.bSaveAfterScan)
 	{
 		TArray<FVdjmAssetRegistryMessage> saveMessages;
-		SaveDefaultRegistry(outRegistry, saveMessages);
+		SaveDefaultRegistry(registry, saveMessages);
 		outMessages.Append(saveMessages);
 	}
 

@@ -1,13 +1,18 @@
 #include "SVdjmAssetRegistryPanel.h"
 
+#include "DesktopPlatformModule.h"
+#include "Framework/Application/SlateApplication.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "HAL/PlatformProcess.h"
+#include "IDesktopPlatform.h"
+#include "Misc/Paths.h"
 #include "VdjmAssetRegistryBlueprintLibrary.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScrollBox.h"
 #include "Widgets/Layout/SSeparator.h"
+#include "Widgets/Layout/SSplitter.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/SHeaderRow.h"
@@ -51,6 +56,15 @@ namespace
 		default:
 			return FSlateColor(FLinearColor(0.55f, 0.75f, 1.0f, 1.0f));
 		}
+	}
+
+	bool ParseBoolText(const FString& value)
+	{
+		const FString normalizedValue = value.TrimStartAndEnd().ToLower();
+		return normalizedValue == TEXT("true")
+			|| normalizedValue == TEXT("1")
+			|| normalizedValue == TEXT("yes")
+			|| normalizedValue == TEXT("y");
 	}
 
 	class SVdjmAssetRegistryAssetTableRow : public SMultiColumnTableRow<TSharedPtr<FVdjmAssetRegistryEditorAssetRow>>
@@ -110,6 +124,55 @@ namespace
 
 	private:
 		TSharedPtr<FVdjmAssetRegistryEditorAssetRow> Item;
+	};
+
+	class SVdjmAssetRegistryRootTableRow : public SMultiColumnTableRow<TSharedPtr<FVdjmAssetRegistryEditorRootRow>>
+	{
+	public:
+		SLATE_BEGIN_ARGS(SVdjmAssetRegistryRootTableRow) {}
+			SLATE_ARGUMENT(TSharedPtr<FVdjmAssetRegistryEditorRootRow>, Item)
+		SLATE_END_ARGS()
+
+		void Construct(const FArguments& inArgs, const TSharedRef<STableViewBase>& ownerTable)
+		{
+			Item = inArgs._Item;
+			SMultiColumnTableRow<TSharedPtr<FVdjmAssetRegistryEditorRootRow>>::Construct(
+				FSuperRowType::FArguments().Padding(1.0f),
+				ownerTable);
+		}
+
+		virtual TSharedRef<SWidget> GenerateWidgetForColumn(const FName& columnName) override
+		{
+			FString text;
+			if (Item.IsValid())
+			{
+				if (columnName == TEXT("Kind"))
+				{
+					text = Item->Kind;
+				}
+				else if (columnName == TEXT("Key"))
+				{
+					text = Item->Key;
+				}
+				else if (columnName == TEXT("Path"))
+				{
+					text = Item->Kind == TEXT("defined")
+						? FString::Printf(TEXT("%s/%s"), *Item->Root, *Item->RelativePath)
+						: (Item->WinPath.IsEmpty() ? Item->DefaultPath : Item->WinPath);
+				}
+				else if (columnName == TEXT("Scan"))
+				{
+					text = Item->bScanText;
+				}
+			}
+
+			return SNew(STextBlock)
+				.Text(FText::FromString(text))
+				.ToolTipText(FText::FromString(text));
+		}
+
+	private:
+		TSharedPtr<FVdjmAssetRegistryEditorRootRow> Item;
 	};
 
 	class SVdjmAssetRegistryMessageTableRow : public SMultiColumnTableRow<TSharedPtr<FVdjmAssetRegistryMessage>>
@@ -202,6 +265,24 @@ void SVdjmAssetRegistryPanel::Construct(const FArguments& inArgs)
 			+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
 			[
 				SNew(SButton)
+				.Text(LOCTEXT("PickScanFolder", "Pick Folder"))
+				.OnClicked(this, &SVdjmAssetRegistryPanel::HandlePickScanFolderClicked)
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("ScanFolder", "Scan Folder"))
+				.OnClicked(this, &SVdjmAssetRegistryPanel::HandleScanFolderClicked)
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
+			[
+				SNew(SButton)
+				.Text(LOCTEXT("ScanFolderRegister", "Folder + Register"))
+				.OnClicked(this, &SVdjmAssetRegistryPanel::HandleScanFolderRegisterClicked)
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(2.0f)
+			[
+				SNew(SButton)
 				.Text(LOCTEXT("Save", "Save"))
 				.OnClicked(this, &SVdjmAssetRegistryPanel::HandleSaveClicked)
 			]
@@ -251,6 +332,31 @@ void SVdjmAssetRegistryPanel::Construct(const FArguments& inArgs)
 				SNew(SEditableTextBox)
 				.HintText(LOCTEXT("ImportanceFilterHint", "Importance filter"))
 				.OnTextChanged(this, &SVdjmAssetRegistryPanel::HandleImportanceFilterChanged)
+			]
+		]
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(6.0f, 2.0f)
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("ScanScopeLabel", "Scan Scope"))
+			]
+			+ SHorizontalBox::Slot().FillWidth(0.28f).Padding(2.0f)
+			[
+				SNew(SEditableTextBox)
+				.HintText(LOCTEXT("ScanRootKeyHint", "root key"))
+				.Text(this, &SVdjmAssetRegistryPanel::GetScanRootKeyText)
+				.OnTextCommitted(this, &SVdjmAssetRegistryPanel::HandleScanRootKeyCommitted)
+			]
+			+ SHorizontalBox::Slot().FillWidth(0.72f).Padding(2.0f)
+			[
+				SNew(SEditableTextBox)
+				.HintText(LOCTEXT("ScanRelativePathHint", "relative folder under root"))
+				.Text(this, &SVdjmAssetRegistryPanel::GetScanRelativePathText)
+				.OnTextCommitted(this, &SVdjmAssetRegistryPanel::HandleScanRelativePathCommitted)
 			]
 		]
 		+ SVerticalBox::Slot()
@@ -345,7 +451,134 @@ void SVdjmAssetRegistryPanel::Construct(const FArguments& inArgs)
 					SNew(SSeparator)
 				]
 				+ SVerticalBox::Slot()
-				.FillHeight(0.45f)
+				.FillHeight(0.34f)
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 2.0f)
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("RootSettings", "Root Settings"))
+					]
+					+ SVerticalBox::Slot().AutoHeight()
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().Padding(1.0f)
+						[
+							SNew(SButton)
+							.Text(LOCTEXT("AddRoot", "Add Root"))
+							.OnClicked(this, &SVdjmAssetRegistryPanel::HandleAddRootClicked)
+						]
+						+ SHorizontalBox::Slot().AutoWidth().Padding(1.0f)
+						[
+							SNew(SButton)
+							.Text(LOCTEXT("AddExternalRoot", "Add External"))
+							.OnClicked(this, &SVdjmAssetRegistryPanel::HandleAddExternalRootClicked)
+						]
+						+ SHorizontalBox::Slot().AutoWidth().Padding(1.0f)
+						[
+							SNew(SButton)
+							.Text(LOCTEXT("AddDefinedRoot", "Add Defined"))
+							.OnClicked(this, &SVdjmAssetRegistryPanel::HandleAddDefinedRootClicked)
+						]
+						+ SHorizontalBox::Slot().AutoWidth().Padding(1.0f)
+						[
+							SNew(SButton)
+							.Text(LOCTEXT("RemoveRoot", "Remove"))
+							.OnClicked(this, &SVdjmAssetRegistryPanel::HandleRemoveRootClicked)
+						]
+					]
+					+ SVerticalBox::Slot()
+					.FillHeight(0.45f)
+					[
+						SAssignNew(RootListView, SListView<TSharedPtr<FVdjmAssetRegistryEditorRootRow>>)
+						.ListItemsSource(&RootRows)
+						.SelectionMode(ESelectionMode::Single)
+						.OnGenerateRow(this, &SVdjmAssetRegistryPanel::GenerateRootRow)
+						.OnSelectionChanged(this, &SVdjmAssetRegistryPanel::HandleRootSelectionChanged)
+						.HeaderRow
+						(
+							SNew(SHeaderRow)
+							+ SHeaderRow::Column(TEXT("Kind")).DefaultLabel(LOCTEXT("RootKind", "Kind")).FillWidth(0.18f)
+							+ SHeaderRow::Column(TEXT("Key")).DefaultLabel(LOCTEXT("RootKey", "Key")).FillWidth(0.22f)
+							+ SHeaderRow::Column(TEXT("Path")).DefaultLabel(LOCTEXT("RootPath", "Path")).FillWidth(0.46f)
+							+ SHeaderRow::Column(TEXT("Scan")).DefaultLabel(LOCTEXT("RootScan", "Scan")).FillWidth(0.14f)
+						)
+					]
+					+ SVerticalBox::Slot()
+					.FillHeight(0.55f)
+					[
+						SNew(SScrollBox)
+						+ SScrollBox::Slot()
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+							[
+								SNew(SEditableTextBox)
+								.HintText(LOCTEXT("RootKindHint", "kind"))
+								.IsReadOnly(true)
+								.Text(this, &SVdjmAssetRegistryPanel::GetSelectedRootKindText)
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+							[
+								SNew(SEditableTextBox)
+								.HintText(LOCTEXT("RootKeyHint", "key"))
+								.Text(this, &SVdjmAssetRegistryPanel::GetSelectedRootKeyText)
+								.OnTextCommitted(this, &SVdjmAssetRegistryPanel::HandleSelectedRootKeyCommitted)
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+							[
+								SNew(SEditableTextBox)
+								.HintText(LOCTEXT("RootBaseHint", "defined base root"))
+								.Text(this, &SVdjmAssetRegistryPanel::GetSelectedRootBaseText)
+								.OnTextCommitted(this, &SVdjmAssetRegistryPanel::HandleSelectedRootBaseCommitted)
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+							[
+								SNew(SEditableTextBox)
+								.HintText(LOCTEXT("RootRelativeHint", "defined relative path"))
+								.Text(this, &SVdjmAssetRegistryPanel::GetSelectedRootRelativePathText)
+								.OnTextCommitted(this, &SVdjmAssetRegistryPanel::HandleSelectedRootRelativePathCommitted)
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+							[
+								SNew(SEditableTextBox)
+								.HintText(LOCTEXT("RootDefaultPathHint", "default path"))
+								.Text(this, &SVdjmAssetRegistryPanel::GetSelectedRootDefaultPathText)
+								.OnTextCommitted(this, &SVdjmAssetRegistryPanel::HandleSelectedRootDefaultPathCommitted)
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+							[
+								SNew(SEditableTextBox)
+								.HintText(LOCTEXT("RootWinPathHint", "win path"))
+								.Text(this, &SVdjmAssetRegistryPanel::GetSelectedRootWinPathText)
+								.OnTextCommitted(this, &SVdjmAssetRegistryPanel::HandleSelectedRootWinPathCommitted)
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+							[
+								SNew(SEditableTextBox)
+								.HintText(LOCTEXT("RootAndroidPathHint", "android path"))
+								.Text(this, &SVdjmAssetRegistryPanel::GetSelectedRootAndroidPathText)
+								.OnTextCommitted(this, &SVdjmAssetRegistryPanel::HandleSelectedRootAndroidPathCommitted)
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+							[
+								SNew(SEditableTextBox)
+								.HintText(LOCTEXT("RootIosPathHint", "ios path"))
+								.Text(this, &SVdjmAssetRegistryPanel::GetSelectedRootIosPathText)
+								.OnTextCommitted(this, &SVdjmAssetRegistryPanel::HandleSelectedRootIosPathCommitted)
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 1.0f)
+							[
+								SNew(SEditableTextBox)
+								.HintText(LOCTEXT("RootScanHint", "scan true/false"))
+								.Text(this, &SVdjmAssetRegistryPanel::GetSelectedRootScanText)
+								.OnTextCommitted(this, &SVdjmAssetRegistryPanel::HandleSelectedRootScanCommitted)
+							]
+						]
+					]
+				]
+				+ SVerticalBox::Slot()
+				.FillHeight(0.24f)
 				[
 					SNew(SScrollBox)
 					+ SScrollBox::Slot()
@@ -356,7 +589,7 @@ void SVdjmAssetRegistryPanel::Construct(const FArguments& inArgs)
 					]
 				]
 				+ SVerticalBox::Slot()
-				.FillHeight(0.55f)
+				.FillHeight(0.42f)
 				[
 					SAssignNew(MessageListView, SListView<TSharedPtr<FVdjmAssetRegistryMessage>>)
 					.ListItemsSource(&MessageRows)
@@ -412,7 +645,9 @@ FReply SVdjmAssetRegistryPanel::HandleValidateClicked()
 FReply SVdjmAssetRegistryPanel::HandleScanClicked()
 {
 	TArray<FVdjmAssetRegistryMessage> messages;
-	UVdjmAssetRegistryBlueprintLibrary::ScanDefaultRegistry(false, false, Registry, LastScanResult, messages);
+	FVdjmAssetRegistryScanRequest scanRequest;
+	scanRequest.bUseEnabledRoots = true;
+	UVdjmAssetRegistryBlueprintLibrary::ScanRegistryWithRequest(scanRequest, Registry, LastScanResult, messages);
 	SetStatus(FString::Printf(
 		TEXT("Scanned %d files. Missing registered assets: %d."),
 		LastScanResult.ScannedFileCount,
@@ -425,10 +660,75 @@ FReply SVdjmAssetRegistryPanel::HandleScanClicked()
 FReply SVdjmAssetRegistryPanel::HandleScanRegisterClicked()
 {
 	TArray<FVdjmAssetRegistryMessage> messages;
-	UVdjmAssetRegistryBlueprintLibrary::ScanDefaultRegistry(true, false, Registry, LastScanResult, messages);
+	FVdjmAssetRegistryScanRequest scanRequest;
+	scanRequest.bRegisterDiscoveredAssets = true;
+	scanRequest.bUseEnabledRoots = true;
+	UVdjmAssetRegistryBlueprintLibrary::ScanRegistryWithRequest(scanRequest, Registry, LastScanResult, messages);
 	SetStatus(FString::Printf(
 		TEXT("Scanned %d files. Added %d, updated %d. Save to persist."),
 		LastScanResult.ScannedFileCount,
+		LastScanResult.AddedAssetCount,
+		LastScanResult.UpdatedAssetCount));
+	SetMessages(messages);
+	RefreshAll();
+	return FReply::Handled();
+}
+
+FReply SVdjmAssetRegistryPanel::HandlePickScanFolderClicked()
+{
+	IDesktopPlatform* desktopPlatform = FDesktopPlatformModule::Get();
+	if (desktopPlatform == nullptr)
+	{
+		SetStatus(TEXT("Desktop platform module is not available."));
+		return FReply::Handled();
+	}
+
+	FString folderPath;
+	const void* parentWindowHandle = FSlateApplication::IsInitialized()
+		? FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr)
+		: nullptr;
+	if (!desktopPlatform->OpenDirectoryDialog(parentWindowHandle, TEXT("Select Vdjm registry scan folder"), FString(), folderPath))
+	{
+		return FReply::Handled();
+	}
+
+	if (TryApplyFolderToScanRequest(folderPath))
+	{
+		SetStatus(FString::Printf(TEXT("Scan scope set to %s:%s."), *ScanRootKey, *ScanRelativePath));
+	}
+	return FReply::Handled();
+}
+
+FReply SVdjmAssetRegistryPanel::HandleScanFolderClicked()
+{
+	TArray<FVdjmAssetRegistryMessage> messages;
+	UVdjmAssetRegistryBlueprintLibrary::ScanRegistryWithRequest(
+		MakeCurrentScanRequest(false),
+		Registry,
+		LastScanResult,
+		messages);
+	SetStatus(FString::Printf(
+		TEXT("Scanned folder %s:%s. Missing scoped assets: %d."),
+		*ScanRootKey,
+		*ScanRelativePath,
+		LastScanResult.MissingRegisteredAssetCount));
+	SetMessages(messages);
+	RefreshAll();
+	return FReply::Handled();
+}
+
+FReply SVdjmAssetRegistryPanel::HandleScanFolderRegisterClicked()
+{
+	TArray<FVdjmAssetRegistryMessage> messages;
+	UVdjmAssetRegistryBlueprintLibrary::ScanRegistryWithRequest(
+		MakeCurrentScanRequest(true),
+		Registry,
+		LastScanResult,
+		messages);
+	SetStatus(FString::Printf(
+		TEXT("Scanned folder %s:%s. Added %d, updated %d. Save to persist."),
+		*ScanRootKey,
+		*ScanRelativePath,
 		LastScanResult.AddedAssetCount,
 		LastScanResult.UpdatedAssetCount));
 	SetMessages(messages);
@@ -485,11 +785,81 @@ FReply SVdjmAssetRegistryPanel::HandleRemoveSelectedClicked()
 	return FReply::Handled();
 }
 
+FReply SVdjmAssetRegistryPanel::HandleAddRootClicked()
+{
+	FVdjmAssetRegistryPathRoot newRoot;
+	newRoot.Key = FString::Printf(TEXT("root_%d"), Registry.Roots.Num() + 1);
+	newRoot.DefaultPath = TEXT("Content");
+	newRoot.bScan = true;
+	Registry.Roots.Add(newRoot);
+	SetStatus(TEXT("Added project root. Edit fields and Save to persist."));
+	RefreshAll();
+	return FReply::Handled();
+}
+
+FReply SVdjmAssetRegistryPanel::HandleAddExternalRootClicked()
+{
+	FVdjmAssetRegistryPathRoot newRoot;
+	newRoot.Key = FString::Printf(TEXT("external_%d"), Registry.ExternalPaths.Num() + 1);
+	newRoot.bScan = true;
+	Registry.ExternalPaths.Add(newRoot);
+	SetStatus(TEXT("Added external root. Pick or enter an absolute path, then Save."));
+	RefreshAll();
+	return FReply::Handled();
+}
+
+FReply SVdjmAssetRegistryPanel::HandleAddDefinedRootClicked()
+{
+	FVdjmAssetRegistryDefinedRoot newRoot;
+	newRoot.Key = FString::Printf(TEXT("defined_%d"), Registry.DefinedRoots.Num() + 1);
+	newRoot.Root = Registry.Roots.Num() > 0 ? Registry.Roots[0].Key : FString();
+	newRoot.bScan = true;
+	Registry.DefinedRoots.Add(newRoot);
+	SetStatus(TEXT("Added defined root. Set base root/relative path and Save."));
+	RefreshAll();
+	return FReply::Handled();
+}
+
+FReply SVdjmAssetRegistryPanel::HandleRemoveRootClicked()
+{
+	if (!SelectedRootRow.IsValid())
+	{
+		SetStatus(TEXT("No selected root entry."));
+		return FReply::Handled();
+	}
+
+	const FString rootKey = SelectedRootRow->Key;
+	if (SelectedRootRow->Kind == TEXT("root") && Registry.Roots.IsValidIndex(SelectedRootRow->SourceIndex))
+	{
+		Registry.Roots.RemoveAt(SelectedRootRow->SourceIndex);
+	}
+	else if (SelectedRootRow->Kind == TEXT("external") && Registry.ExternalPaths.IsValidIndex(SelectedRootRow->SourceIndex))
+	{
+		Registry.ExternalPaths.RemoveAt(SelectedRootRow->SourceIndex);
+	}
+	else if (SelectedRootRow->Kind == TEXT("defined") && Registry.DefinedRoots.IsValidIndex(SelectedRootRow->SourceIndex))
+	{
+		Registry.DefinedRoots.RemoveAt(SelectedRootRow->SourceIndex);
+	}
+	SelectedRootRow.Reset();
+	SetStatus(FString::Printf(TEXT("Removed root %s. Save to persist."), *rootKey));
+	RefreshAll();
+	return FReply::Handled();
+}
+
 TSharedRef<ITableRow> SVdjmAssetRegistryPanel::GenerateAssetRow(
 	TSharedPtr<FVdjmAssetRegistryEditorAssetRow> item,
 	const TSharedRef<STableViewBase>& ownerTable)
 {
 	return SNew(SVdjmAssetRegistryAssetTableRow, ownerTable)
+		.Item(item);
+}
+
+TSharedRef<ITableRow> SVdjmAssetRegistryPanel::GenerateRootRow(
+	TSharedPtr<FVdjmAssetRegistryEditorRootRow> item,
+	const TSharedRef<STableViewBase>& ownerTable)
+{
+	return SNew(SVdjmAssetRegistryRootTableRow, ownerTable)
 		.Item(item);
 }
 
@@ -506,13 +876,28 @@ void SVdjmAssetRegistryPanel::HandleAssetSelectionChanged(TSharedPtr<FVdjmAssetR
 	SelectedRow = item;
 }
 
+void SVdjmAssetRegistryPanel::HandleRootSelectionChanged(TSharedPtr<FVdjmAssetRegistryEditorRootRow> item, ESelectInfo::Type selectInfo)
+{
+	SelectedRootRow = item;
+	if (SelectedRootRow.IsValid())
+	{
+		ScanRootKey = SelectedRootRow->Key;
+		ScanRelativePath = FString();
+	}
+}
+
 void SVdjmAssetRegistryPanel::RefreshAll()
 {
 	RefreshAssetRows();
+	RefreshRootRows();
 	RefreshSummary();
 	if (AssetListView.IsValid())
 	{
 		AssetListView->RequestListRefresh();
+	}
+	if (RootListView.IsValid())
+	{
+		RootListView->RequestListRefresh();
 	}
 	if (MessageListView.IsValid())
 	{
@@ -541,6 +926,53 @@ void SVdjmAssetRegistryPanel::RefreshAssetRows()
 		row->Importance = asset.Importance;
 		row->Class = asset.Class;
 		AssetRows.Add(row);
+	}
+}
+
+void SVdjmAssetRegistryPanel::RefreshRootRows()
+{
+	RootRows.Reset();
+	for (int32 rootIndex = 0; rootIndex < Registry.Roots.Num(); ++rootIndex)
+	{
+		const FVdjmAssetRegistryPathRoot& root = Registry.Roots[rootIndex];
+		TSharedPtr<FVdjmAssetRegistryEditorRootRow> row = MakeShared<FVdjmAssetRegistryEditorRootRow>();
+		row->SourceIndex = rootIndex;
+		row->Kind = TEXT("root");
+		row->Key = root.Key;
+		row->DefaultPath = root.DefaultPath;
+		row->WinPath = root.WinPath;
+		row->AndroidPath = root.AndroidPath;
+		row->IosPath = root.IosPath;
+		row->bScanText = root.bScan ? TEXT("true") : TEXT("false");
+		RootRows.Add(row);
+	}
+
+	for (int32 rootIndex = 0; rootIndex < Registry.ExternalPaths.Num(); ++rootIndex)
+	{
+		const FVdjmAssetRegistryPathRoot& root = Registry.ExternalPaths[rootIndex];
+		TSharedPtr<FVdjmAssetRegistryEditorRootRow> row = MakeShared<FVdjmAssetRegistryEditorRootRow>();
+		row->SourceIndex = rootIndex;
+		row->Kind = TEXT("external");
+		row->Key = root.Key;
+		row->DefaultPath = root.DefaultPath;
+		row->WinPath = root.WinPath;
+		row->AndroidPath = root.AndroidPath;
+		row->IosPath = root.IosPath;
+		row->bScanText = root.bScan ? TEXT("true") : TEXT("false");
+		RootRows.Add(row);
+	}
+
+	for (int32 rootIndex = 0; rootIndex < Registry.DefinedRoots.Num(); ++rootIndex)
+	{
+		const FVdjmAssetRegistryDefinedRoot& root = Registry.DefinedRoots[rootIndex];
+		TSharedPtr<FVdjmAssetRegistryEditorRootRow> row = MakeShared<FVdjmAssetRegistryEditorRootRow>();
+		row->SourceIndex = rootIndex;
+		row->Kind = TEXT("defined");
+		row->Key = root.Key;
+		row->Root = root.Root;
+		row->RelativePath = root.RelativePath;
+		row->bScanText = root.bScan ? TEXT("true") : TEXT("false");
+		RootRows.Add(row);
 	}
 }
 
@@ -628,6 +1060,100 @@ void SVdjmAssetRegistryPanel::ApplySelectedField(const FString& fieldName, const
 	RefreshAll();
 }
 
+void SVdjmAssetRegistryPanel::ApplySelectedRootField(const FString& fieldName, const FString& value)
+{
+	if (!SelectedRootRow.IsValid())
+	{
+		SetStatus(TEXT("No selected root entry."));
+		return;
+	}
+
+	FString trimmedValue = value;
+	trimmedValue.TrimStartAndEndInline();
+	if (SelectedRootRow->Kind == TEXT("root") && Registry.Roots.IsValidIndex(SelectedRootRow->SourceIndex))
+	{
+		FVdjmAssetRegistryPathRoot& root = Registry.Roots[SelectedRootRow->SourceIndex];
+		if (fieldName == TEXT("key"))
+		{
+			root.Key = trimmedValue;
+			ScanRootKey = root.Key;
+		}
+		else if (fieldName == TEXT("default_path"))
+		{
+			root.DefaultPath = trimmedValue;
+		}
+		else if (fieldName == TEXT("win_path"))
+		{
+			root.WinPath = trimmedValue;
+		}
+		else if (fieldName == TEXT("android_path"))
+		{
+			root.AndroidPath = trimmedValue;
+		}
+		else if (fieldName == TEXT("ios_path"))
+		{
+			root.IosPath = trimmedValue;
+		}
+		else if (fieldName == TEXT("scan"))
+		{
+			root.bScan = ParseBoolText(trimmedValue);
+		}
+	}
+	else if (SelectedRootRow->Kind == TEXT("external") && Registry.ExternalPaths.IsValidIndex(SelectedRootRow->SourceIndex))
+	{
+		FVdjmAssetRegistryPathRoot& root = Registry.ExternalPaths[SelectedRootRow->SourceIndex];
+		if (fieldName == TEXT("key"))
+		{
+			root.Key = trimmedValue;
+			ScanRootKey = root.Key;
+		}
+		else if (fieldName == TEXT("default_path"))
+		{
+			root.DefaultPath = trimmedValue;
+		}
+		else if (fieldName == TEXT("win_path"))
+		{
+			root.WinPath = trimmedValue;
+		}
+		else if (fieldName == TEXT("android_path"))
+		{
+			root.AndroidPath = trimmedValue;
+		}
+		else if (fieldName == TEXT("ios_path"))
+		{
+			root.IosPath = trimmedValue;
+		}
+		else if (fieldName == TEXT("scan"))
+		{
+			root.bScan = ParseBoolText(trimmedValue);
+		}
+	}
+	else if (SelectedRootRow->Kind == TEXT("defined") && Registry.DefinedRoots.IsValidIndex(SelectedRootRow->SourceIndex))
+	{
+		FVdjmAssetRegistryDefinedRoot& root = Registry.DefinedRoots[SelectedRootRow->SourceIndex];
+		if (fieldName == TEXT("key"))
+		{
+			root.Key = trimmedValue;
+			ScanRootKey = root.Key;
+		}
+		else if (fieldName == TEXT("base_root"))
+		{
+			root.Root = trimmedValue;
+		}
+		else if (fieldName == TEXT("relative_path"))
+		{
+			root.RelativePath = trimmedValue;
+		}
+		else if (fieldName == TEXT("scan"))
+		{
+			root.bScan = ParseBoolText(trimmedValue);
+		}
+	}
+
+	SetStatus(FString::Printf(TEXT("Updated root %s. Save to persist."), *fieldName));
+	RefreshAll();
+}
+
 bool SVdjmAssetRegistryPanel::PassesFilter(const FVdjmAssetRegistryAssetEntry& asset) const
 {
 	const FString virtualPath = StripVirtualToken(asset.VirtualPath);
@@ -653,6 +1179,78 @@ bool SVdjmAssetRegistryPanel::PassesFilter(const FVdjmAssetRegistryAssetEntry& a
 		return false;
 	}
 	return true;
+}
+
+bool SVdjmAssetRegistryPanel::TryApplyFolderToScanRequest(const FString& folderPath)
+{
+	FString normalizedFolderPath = FPaths::ConvertRelativePathToFull(folderPath);
+	FPaths::NormalizeDirectoryName(normalizedFolderPath);
+
+	FString bestRootKey;
+	FString bestRootPath;
+	for (const TSharedPtr<FVdjmAssetRegistryEditorRootRow>& rootRow : RootRows)
+	{
+		if (!rootRow.IsValid())
+		{
+			continue;
+		}
+
+		FString rootPath;
+		if (!TryResolveRootPath(rootRow->Key, rootPath))
+		{
+			continue;
+		}
+
+		if (normalizedFolderPath == rootPath || normalizedFolderPath.StartsWith(rootPath + TEXT("/")))
+		{
+			if (rootPath.Len() > bestRootPath.Len())
+			{
+				bestRootKey = rootRow->Key;
+				bestRootPath = rootPath;
+			}
+		}
+	}
+
+	if (bestRootKey.IsEmpty())
+	{
+		SetStatus(TEXT("Selected folder is outside registered roots. Add an external root first."));
+		return false;
+	}
+
+	FString relativePath = normalizedFolderPath;
+	FPaths::MakePathRelativeTo(relativePath, *bestRootPath);
+	FPaths::NormalizeFilename(relativePath);
+	relativePath.RemoveFromStart(TEXT("./"));
+	if (relativePath == TEXT("."))
+	{
+		relativePath.Reset();
+	}
+	ScanRootKey = bestRootKey;
+	ScanRelativePath = relativePath;
+	return true;
+}
+
+bool SVdjmAssetRegistryPanel::TryResolveRootPath(const FString& rootKey, FString& outFullPath) const
+{
+	TArray<FVdjmAssetRegistryMessage> messages;
+	if (!UVdjmAssetRegistryBlueprintLibrary::ResolveRegistryRootFullPath(Registry, rootKey, outFullPath, messages))
+	{
+		return false;
+	}
+	FPaths::NormalizeDirectoryName(outFullPath);
+	return true;
+}
+
+FVdjmAssetRegistryScanRequest SVdjmAssetRegistryPanel::MakeCurrentScanRequest(bool bRegisterDiscoveredAssets) const
+{
+	FVdjmAssetRegistryScanRequest scanRequest;
+	scanRequest.bRegisterDiscoveredAssets = bRegisterDiscoveredAssets;
+	scanRequest.bSaveAfterScan = false;
+	scanRequest.bUseEnabledRoots = ScanRootKey.IsEmpty();
+	scanRequest.bCheckMissingRegisteredAssets = true;
+	scanRequest.RootKey = ScanRootKey;
+	scanRequest.RelativePath = ScanRelativePath;
+	return scanRequest;
 }
 
 FString SVdjmAssetRegistryPanel::GetSelectedAssetField(const FString& fieldName) const
@@ -701,6 +1299,48 @@ FString SVdjmAssetRegistryPanel::GetSelectedMetaPurposeText() const
 	return purpose != nullptr ? *purpose : FString();
 }
 
+FString SVdjmAssetRegistryPanel::GetSelectedRootField(const FString& fieldName) const
+{
+	if (!SelectedRootRow.IsValid())
+	{
+		return FString();
+	}
+
+	if (SelectedRootRow->Kind == TEXT("root") && Registry.Roots.IsValidIndex(SelectedRootRow->SourceIndex))
+	{
+		const FVdjmAssetRegistryPathRoot& root = Registry.Roots[SelectedRootRow->SourceIndex];
+		if (fieldName == TEXT("kind")) return SelectedRootRow->Kind;
+		if (fieldName == TEXT("key")) return root.Key;
+		if (fieldName == TEXT("default_path")) return root.DefaultPath;
+		if (fieldName == TEXT("win_path")) return root.WinPath;
+		if (fieldName == TEXT("android_path")) return root.AndroidPath;
+		if (fieldName == TEXT("ios_path")) return root.IosPath;
+		if (fieldName == TEXT("scan")) return root.bScan ? TEXT("true") : TEXT("false");
+	}
+	else if (SelectedRootRow->Kind == TEXT("external") && Registry.ExternalPaths.IsValidIndex(SelectedRootRow->SourceIndex))
+	{
+		const FVdjmAssetRegistryPathRoot& root = Registry.ExternalPaths[SelectedRootRow->SourceIndex];
+		if (fieldName == TEXT("kind")) return SelectedRootRow->Kind;
+		if (fieldName == TEXT("key")) return root.Key;
+		if (fieldName == TEXT("default_path")) return root.DefaultPath;
+		if (fieldName == TEXT("win_path")) return root.WinPath;
+		if (fieldName == TEXT("android_path")) return root.AndroidPath;
+		if (fieldName == TEXT("ios_path")) return root.IosPath;
+		if (fieldName == TEXT("scan")) return root.bScan ? TEXT("true") : TEXT("false");
+	}
+	else if (SelectedRootRow->Kind == TEXT("defined") && Registry.DefinedRoots.IsValidIndex(SelectedRootRow->SourceIndex))
+	{
+		const FVdjmAssetRegistryDefinedRoot& root = Registry.DefinedRoots[SelectedRootRow->SourceIndex];
+		if (fieldName == TEXT("kind")) return SelectedRootRow->Kind;
+		if (fieldName == TEXT("key")) return root.Key;
+		if (fieldName == TEXT("base_root")) return root.Root;
+		if (fieldName == TEXT("relative_path")) return root.RelativePath;
+		if (fieldName == TEXT("scan")) return root.bScan ? TEXT("true") : TEXT("false");
+	}
+
+	return FString();
+}
+
 FString SVdjmAssetRegistryPanel::NormalizeVirtualPathInput(const FString& value) const
 {
 	FString trimmedValue = value;
@@ -720,6 +1360,16 @@ FText SVdjmAssetRegistryPanel::GetStatusText() const
 FText SVdjmAssetRegistryPanel::GetSummaryText() const
 {
 	return FText::FromString(SummaryText);
+}
+
+FText SVdjmAssetRegistryPanel::GetScanRootKeyText() const
+{
+	return FText::FromString(ScanRootKey);
+}
+
+FText SVdjmAssetRegistryPanel::GetScanRelativePathText() const
+{
+	return FText::FromString(ScanRelativePath);
 }
 
 FText SVdjmAssetRegistryPanel::GetSelectedTypeText() const
@@ -752,6 +1402,51 @@ FText SVdjmAssetRegistryPanel::GetSelectedPurposeText() const
 	return FText::FromString(GetSelectedMetaPurposeText());
 }
 
+FText SVdjmAssetRegistryPanel::GetSelectedRootKindText() const
+{
+	return FText::FromString(GetSelectedRootField(TEXT("kind")));
+}
+
+FText SVdjmAssetRegistryPanel::GetSelectedRootKeyText() const
+{
+	return FText::FromString(GetSelectedRootField(TEXT("key")));
+}
+
+FText SVdjmAssetRegistryPanel::GetSelectedRootBaseText() const
+{
+	return FText::FromString(GetSelectedRootField(TEXT("base_root")));
+}
+
+FText SVdjmAssetRegistryPanel::GetSelectedRootRelativePathText() const
+{
+	return FText::FromString(GetSelectedRootField(TEXT("relative_path")));
+}
+
+FText SVdjmAssetRegistryPanel::GetSelectedRootDefaultPathText() const
+{
+	return FText::FromString(GetSelectedRootField(TEXT("default_path")));
+}
+
+FText SVdjmAssetRegistryPanel::GetSelectedRootWinPathText() const
+{
+	return FText::FromString(GetSelectedRootField(TEXT("win_path")));
+}
+
+FText SVdjmAssetRegistryPanel::GetSelectedRootAndroidPathText() const
+{
+	return FText::FromString(GetSelectedRootField(TEXT("android_path")));
+}
+
+FText SVdjmAssetRegistryPanel::GetSelectedRootIosPathText() const
+{
+	return FText::FromString(GetSelectedRootField(TEXT("ios_path")));
+}
+
+FText SVdjmAssetRegistryPanel::GetSelectedRootScanText() const
+{
+	return FText::FromString(GetSelectedRootField(TEXT("scan")));
+}
+
 void SVdjmAssetRegistryPanel::HandleSearchTextChanged(const FText& text)
 {
 	SearchText = text.ToString();
@@ -774,6 +1469,16 @@ void SVdjmAssetRegistryPanel::HandleImportanceFilterChanged(const FText& text)
 {
 	ImportanceFilter = text.ToString();
 	RefreshAll();
+}
+
+void SVdjmAssetRegistryPanel::HandleScanRootKeyCommitted(const FText& text, ETextCommit::Type commitType)
+{
+	ScanRootKey = text.ToString().TrimStartAndEnd();
+}
+
+void SVdjmAssetRegistryPanel::HandleScanRelativePathCommitted(const FText& text, ETextCommit::Type commitType)
+{
+	ScanRelativePath = text.ToString().TrimStartAndEnd();
 }
 
 void SVdjmAssetRegistryPanel::HandleSelectedTypeCommitted(const FText& text, ETextCommit::Type commitType)
@@ -804,6 +1509,46 @@ void SVdjmAssetRegistryPanel::HandleSelectedTagsCommitted(const FText& text, ETe
 void SVdjmAssetRegistryPanel::HandleSelectedPurposeCommitted(const FText& text, ETextCommit::Type commitType)
 {
 	ApplySelectedField(TEXT("purpose"), text.ToString());
+}
+
+void SVdjmAssetRegistryPanel::HandleSelectedRootKeyCommitted(const FText& text, ETextCommit::Type commitType)
+{
+	ApplySelectedRootField(TEXT("key"), text.ToString());
+}
+
+void SVdjmAssetRegistryPanel::HandleSelectedRootBaseCommitted(const FText& text, ETextCommit::Type commitType)
+{
+	ApplySelectedRootField(TEXT("base_root"), text.ToString());
+}
+
+void SVdjmAssetRegistryPanel::HandleSelectedRootRelativePathCommitted(const FText& text, ETextCommit::Type commitType)
+{
+	ApplySelectedRootField(TEXT("relative_path"), text.ToString());
+}
+
+void SVdjmAssetRegistryPanel::HandleSelectedRootDefaultPathCommitted(const FText& text, ETextCommit::Type commitType)
+{
+	ApplySelectedRootField(TEXT("default_path"), text.ToString());
+}
+
+void SVdjmAssetRegistryPanel::HandleSelectedRootWinPathCommitted(const FText& text, ETextCommit::Type commitType)
+{
+	ApplySelectedRootField(TEXT("win_path"), text.ToString());
+}
+
+void SVdjmAssetRegistryPanel::HandleSelectedRootAndroidPathCommitted(const FText& text, ETextCommit::Type commitType)
+{
+	ApplySelectedRootField(TEXT("android_path"), text.ToString());
+}
+
+void SVdjmAssetRegistryPanel::HandleSelectedRootIosPathCommitted(const FText& text, ETextCommit::Type commitType)
+{
+	ApplySelectedRootField(TEXT("ios_path"), text.ToString());
+}
+
+void SVdjmAssetRegistryPanel::HandleSelectedRootScanCommitted(const FText& text, ETextCommit::Type commitType)
+{
+	ApplySelectedRootField(TEXT("scan"), text.ToString());
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -247,3 +247,28 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "VdjmAssetRegistry")
 	TArray<FString> MissingAssetKeys;
 };
+
+USTRUCT(BlueprintType)
+struct VDJMASSETREGISTRY_API FVdjmAssetRegistryScanRequest
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "VdjmAssetRegistry")
+	bool bRegisterDiscoveredAssets = false;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "VdjmAssetRegistry")
+	bool bSaveAfterScan = false;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "VdjmAssetRegistry")
+	bool bUseEnabledRoots = true;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "VdjmAssetRegistry")
+	bool bCheckMissingRegisteredAssets = true;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "VdjmAssetRegistry")
+	FString RootKey;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "VdjmAssetRegistry")
+	FString RelativePath;
+};
