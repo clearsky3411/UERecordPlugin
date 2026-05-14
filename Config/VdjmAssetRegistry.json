@@ -30,6 +30,7 @@
 		"CLASS_SOUND_BASE": "/Script/Engine.SoundBase",
 		"CLASS_MATERIAL_INTERFACE": "/Script/Engine.MaterialInterface",
 		"CLASS_WORLD": "/Script/Engine.World",
+		"CLASS_VCARD_DESCRIPTOR_REGISTRY": "/Script/VdjmVcard.VcardDescriptorRegistryDataAsset",
 		"DIR_UI": "UI",
 		"DIR_PREVIEW": "UI/Preview",
 		"DIR_ICONS": "UI/Icons"
@@ -158,6 +159,30 @@
 							"purpose": "VCard icon assets."
 						},
 						"children": []
+					},
+					{
+						"key": "descriptors",
+						"label": "Descriptors",
+						"meta": {
+							"purpose": "VCard descriptor registry and composition data assets."
+						},
+						"children": []
+					},
+					{
+						"key": "background",
+						"label": "Background",
+						"meta": {
+							"purpose": "VCard background preset and runtime upload assets."
+						},
+						"children": []
+					},
+					{
+						"key": "motion",
+						"label": "Motion",
+						"meta": {
+							"purpose": "VCard motion preset, upload, and analysis assets."
+						},
+						"children": []
 					}
 				]
 			}
@@ -217,6 +242,16 @@
 			],
 			"meta": {
 				"purpose": "DataAsset or data-only UObject asset."
+			}
+		},
+		"vcard_descriptor_registry": {
+			"kind": "unreal_asset",
+			"default_class": "!{CLASS_VCARD_DESCRIPTOR_REGISTRY}",
+			"extensions": [
+				".uasset"
+			],
+			"meta": {
+				"purpose": "VCard descriptor registry DataAsset."
 			}
 		},
 		"animation": {
