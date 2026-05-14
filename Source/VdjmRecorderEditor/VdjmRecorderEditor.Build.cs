@@ -10,6 +10,7 @@ public class VdjmRecorderEditor : ModuleRules
             new string[]
             {
                 "Core",
+                "VdjmAssetRegistry",
                 "VdjmRecorder"
             }
         );
