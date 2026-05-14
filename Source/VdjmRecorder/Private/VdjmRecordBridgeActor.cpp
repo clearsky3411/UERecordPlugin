@@ -1208,7 +1208,7 @@ bool AVdjmRecordBridgeActor::DbcValidInitializeComplete() const
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mEnvResolver->DbcIsValidEnvResolverInit() == false"));
 		return false;
 	}
-	
+
 	if (mRecordPipeline == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mRecordPipeline == nullptr"));
@@ -1219,7 +1219,7 @@ bool AVdjmRecordBridgeActor::DbcValidInitializeComplete() const
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mRecordPipeline->DbcIsValidPipelineInit() == false"));
 		return false;
 	}
-	
+
 	if (mRecordResource == nullptr)
 	{
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mRecordResource == nullptr"));
@@ -1230,7 +1230,7 @@ bool AVdjmRecordBridgeActor::DbcValidInitializeComplete() const
 		UE_LOG(LogVdjmRecorderCore, Error, TEXT("AVdjmRecordBridgeActor::DbcValidInitializeComplete - mRecordResource->DbcIsValidResourceInit() == false"));
 		return false;
 	}
-	
+
 	return true;
 }
 

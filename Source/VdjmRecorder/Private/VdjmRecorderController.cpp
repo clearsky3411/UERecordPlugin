@@ -477,7 +477,7 @@ void UVdjmRecorderController::Tick(float DeltaTime)
 {
 	//UE_UNUSED(DeltaTime);
 	(void)DeltaTime;
-	
+
 	if (!bHasPendingOptionRequest)
 	{
 		return;
