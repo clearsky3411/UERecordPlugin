@@ -4,6 +4,8 @@
 #include "VdjmAndroid/VdjmRecoderAndroidEncoder.h"
 
 #if PLATFORM_ANDROID || defined(__RESHARPER__)
+#include "Android/AndroidApplication.h"
+#include "Android/AndroidJNI.h"
 #include <media/NdkMediaCodec.h>
 #include <media/NdkMediaFormat.h>
 #include <media/NdkMediaMuxer.h>
@@ -21,6 +23,7 @@
 #include "ISubmixBufferListener.h"
 #include "Sound/SoundSubmix.h"
 #include "VdjmAndroid/VdjmAndroidCore.h"
+#include "VdjmRecordTypes.h"
 
 #include "VdjmAndroid/VdjmAndroidEncoderBackendOpenGL.h"
 #include "VdjmAndroid/VdjmAndroidEncoderBackendVulkan.h"
@@ -31,6 +34,102 @@ namespace
 	static constexpr const char* VdjmMimeAvc = "video/avc";
 	static constexpr int32 VdjmColorFormatSurface = 0x7F000789; // COLOR_FormatSurface
 	static constexpr int64 VdjmDrainTimeoutUs = 10000;
+
+	FString NormalizeAndroidOutputPathForIo(const FString& inOutputPath)
+	{
+		FString outputPath = inOutputPath;
+		outputPath.TrimStartAndEndInline();
+		FPaths::NormalizeFilename(outputPath);
+		VdjmRecordUtils::FilePaths::StripEmbeddedWindowsAbsolutePathInline(outputPath);
+
+		FString baseDir = VdjmRecordUtils::FilePaths::GetPlatformRecordBaseDir(EVdjmRecordEnvPlatform::EAndroid);
+		FPaths::NormalizeFilename(baseDir);
+		while (baseDir.EndsWith(TEXT("/")))
+		{
+			baseDir.LeftChopInline(1, EAllowShrinking::No);
+		}
+
+		if (FPaths::IsRelative(outputPath))
+		{
+			outputPath = FPaths::ConvertRelativePathToFull(outputPath);
+			FPaths::NormalizeFilename(outputPath);
+		}
+
+		outputPath = VdjmRecordUtils::FilePaths::NormalizeCandidateOutputPath(outputPath, baseDir);
+
+		return outputPath;
+	}
+
+	void ScanAndroidMediaFile(const FString& inOutputPath)
+	{
+		const FString outputPath = NormalizeAndroidOutputPathForIo(inOutputPath);
+		if (outputPath.IsEmpty())
+		{
+			return;
+		}
+
+		JNIEnv* env = FAndroidApplication::GetJavaEnv();
+		if (env == nullptr)
+		{
+			UE_LOG(LogVdjmRecorderCore, Warning,
+				TEXT("ScanAndroidMediaFile - Failed to get JNI environment. Path=%s"),
+				*outputPath);
+			return;
+		}
+
+		jobject activity = FAndroidApplication::GetGameActivityThis();
+		if (activity == nullptr)
+		{
+			UE_LOG(LogVdjmRecorderCore, Warning,
+				TEXT("ScanAndroidMediaFile - GameActivity is null. Path=%s"),
+				*outputPath);
+			return;
+		}
+
+		jclass stringClass = env->FindClass("java/lang/String");
+		jclass mediaScannerClass = env->FindClass("android/media/MediaScannerConnection");
+		if (stringClass == nullptr || mediaScannerClass == nullptr)
+		{
+			UE_LOG(LogVdjmRecorderCore, Warning,
+				TEXT("ScanAndroidMediaFile - Failed to find Java classes. Path=%s"),
+				*outputPath);
+			return;
+		}
+
+		jmethodID scanFileMethod = env->GetStaticMethodID(
+			mediaScannerClass,
+			"scanFile",
+			"(Landroid/content/Context;[Ljava/lang/String;[Ljava/lang/String;Landroid/media/MediaScannerConnection$OnScanCompletedListener;)V");
+		if (scanFileMethod == nullptr)
+		{
+			UE_LOG(LogVdjmRecorderCore, Warning,
+				TEXT("ScanAndroidMediaFile - Failed to find MediaScannerConnection.scanFile. Path=%s"),
+				*outputPath);
+			env->DeleteLocalRef(stringClass);
+			env->DeleteLocalRef(mediaScannerClass);
+			return;
+		}
+
+		jobjectArray paths = env->NewObjectArray(1, stringClass, nullptr);
+		jobjectArray mimeTypes = env->NewObjectArray(1, stringClass, nullptr);
+		jstring pathString = env->NewStringUTF(TCHAR_TO_UTF8(*outputPath));
+		jstring mimeTypeString = env->NewStringUTF("video/mp4");
+
+		env->SetObjectArrayElement(paths, 0, pathString);
+		env->SetObjectArrayElement(mimeTypes, 0, mimeTypeString);
+		env->CallStaticVoidMethod(mediaScannerClass, scanFileMethod, activity, paths, mimeTypes, nullptr);
+
+		env->DeleteLocalRef(pathString);
+		env->DeleteLocalRef(mimeTypeString);
+		env->DeleteLocalRef(paths);
+		env->DeleteLocalRef(mimeTypes);
+		env->DeleteLocalRef(stringClass);
+		env->DeleteLocalRef(mediaScannerClass);
+
+		UE_LOG(LogVdjmRecorderCore, Log,
+			TEXT("ScanAndroidMediaFile - Requested media scan. Path=%s"),
+			*outputPath);
+	}
 }
 
 class FVdjmAndroidAudioCaptureBridge final : public ISubmixBufferListener
@@ -261,6 +360,7 @@ bool FVdjmAndroidRecordSession::Start()
 
 bool FVdjmAndroidRecordSession::VideoInit()
 {
+	mConfig.VideoConfig.OutputFilePath = NormalizeAndroidOutputPathForIo(mConfig.VideoConfig.OutputFilePath);
 	mOutputFd = open(TCHAR_TO_UTF8(*mConfig.VideoConfig.OutputFilePath), O_RDWR | O_CREAT | O_TRUNC, 0644);
 	if (mOutputFd < 0)
 	{
@@ -483,7 +583,7 @@ void FVdjmAndroidRecordSession::Stop()
 		mMuxerStarted = false;
 	}
 	
-	const FString FinalOutputPath = FPaths::ConvertRelativePathToFull(mConfig.VideoConfig.OutputFilePath);
+	const FString FinalOutputPath = NormalizeAndroidOutputPathForIo(mConfig.VideoConfig.OutputFilePath);
 	const int64 OutputFileSize = IFileManager::Get().FileSize(*FinalOutputPath);
 
 	UE_LOG(LogTemp, Warning,
@@ -495,6 +595,12 @@ void FVdjmAndroidRecordSession::Stop()
 	{
 		UE_LOG(LogTemp, Error,
 			TEXT("FVdjmAndroidRecordSession::Stop - Recorded output file is missing or empty."));
+	}
+	else
+	{
+		UE_LOG(LogVdjmRecorderCore, Log,
+			TEXT("FVdjmAndroidRecordSession::Stop - Media file is ready for metadata/postprocess publish. Path=%s"),
+			*FinalOutputPath);
 	}
 	
 	mRunning = false;
@@ -1064,6 +1170,7 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoder(const FString& outputFilePath, i
 	mConfig.VideoConfig.VideoHeight = height;
 	mConfig.VideoConfig.VideoBitrate = bitrate;
 	mConfig.VideoConfig.VideoFPS = framerate;
+	mConfig.TargetPlatform = EVdjmRecordEnvPlatform::EAndroid;
 	mConfig.VideoConfig.GraphicBackend =  IsVulkanRHI() ? EVdjmAndroidGraphicBackend::EVulkan : 
 	(IsOpenGlESRHI() ? EVdjmAndroidGraphicBackend::EOpenGL : 
 		EVdjmAndroidGraphicBackend::EUnknown);
@@ -1088,7 +1195,7 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoderExtended(const TWeakObjectPtr<UVd
 		}
 
 		FVdjmAndroidEncoderSnapshot snapshot;
-		if (!BuildSnapshotFromResource(*androidRecordRes, snapshot))
+		if (not BuildSnapshotFromResource(*androidRecordRes, snapshot))
 		{
 			UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderImpl::InitializeEncoderExtended - Failed to build snapshot from resource."));
 			return false;
@@ -1108,78 +1215,57 @@ bool FVdjmAndroidEncoderImpl::InitializeEncoderExtended(const TWeakObjectPtr<UVd
 bool FVdjmAndroidEncoderImpl::BuildSnapshotFromResource(const UVdjmRecordAndroidResource& androidRecordResource,
 	FVdjmAndroidEncoderSnapshot& outSnapshot) const
 {
-	outSnapshot.Clear();
+	if (not androidRecordResource.BuildEncoderSnapshot(outSnapshot))
+	{
+		UE_LOG(LogVdjmRecorderCore, Error, TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Failed to build common encoder snapshot."));
+		return false;
+	}
 
-	outSnapshot.VideoConfig.OutputFilePath = androidRecordResource.FinalFilePath;
-	outSnapshot.VideoConfig.VideoWidth = androidRecordResource.OriginResolution.X;
-	outSnapshot.VideoConfig.VideoHeight = androidRecordResource.OriginResolution.Y;
-	outSnapshot.VideoConfig.VideoBitrate = androidRecordResource.FinalBitrate;
-	outSnapshot.VideoConfig.VideoFPS = androidRecordResource.FinalFrameRate;
+	outSnapshot.TargetPlatform = EVdjmRecordEnvPlatform::EAndroid;
 	outSnapshot.VideoConfig.GraphicBackend = IsVulkanRHI()
 		? EVdjmAndroidGraphicBackend::EVulkan
 		: (IsOpenGlESRHI() ? EVdjmAndroidGraphicBackend::EOpenGL : EVdjmAndroidGraphicBackend::EUnknown);
-	outSnapshot.VideoConfig.MimeType = DefaultMimeType;
 
-	if (androidRecordResource.LinkedResolver.IsValid())
+	FString resolvedMimeType = outSnapshot.VideoConfig.MimeType.IsEmpty()
+		? DefaultMimeType
+		: outSnapshot.VideoConfig.MimeType.ToLower();
+	if (resolvedMimeType == TEXT("video/mp4"))
 	{
-		const UVdjmRecordEnvResolver* resolver = androidRecordResource.LinkedResolver.Get();
-		if (const FVdjmEncoderInitRequestVideo* videoConfig = resolver->TryGetResolvedVideoConfig())
-		{
-			FString resolvedMimeType = videoConfig->MimeType.IsEmpty() ? DefaultMimeType : videoConfig->MimeType;
-			resolvedMimeType = resolvedMimeType.ToLower();
-			if (resolvedMimeType == TEXT("video/mp4"))
-			{
-				UE_LOG(LogVdjmRecorderCore, Warning,
-					TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Received container mime '%s'. Converting to codec mime '%s'."),
-					*resolvedMimeType,
-					*DefaultMimeType);
-				resolvedMimeType = DefaultMimeType;
-			}
-			else if (resolvedMimeType != TEXT("video/avc"))
-			{
-				UE_LOG(LogVdjmRecorderCore, Warning,
-					TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Unsupported video mime for Android encoder: %s. Forcing %s."),
-					*resolvedMimeType,
-					*DefaultMimeType);
-				resolvedMimeType = DefaultMimeType;
-			}
-			outSnapshot.VideoConfig.MimeType = resolvedMimeType;
-			outSnapshot.VideoConfig.VideoIntervalSec = FMath::Max(1, videoConfig->KeyframeInterval);
-		}
-		if (const FVdjmEncoderInitRequestAudio* audioConfig = resolver->TryGetResolvedAudioConfig())
-		{
-			outSnapshot.AudioConfig.bEnableAudio = audioConfig->bEnableInternalAudioCapture;
-			outSnapshot.AudioConfig.AudioSampleRate = audioConfig->SampleRate;
-			outSnapshot.AudioConfig.AudioChannelCount = audioConfig->ChannelCount;
-			outSnapshot.AudioConfig.AudioBitrate = audioConfig->Bitrate;
-			outSnapshot.AudioConfig.AudioAacProfile = audioConfig->AacProfile;
-			FString resolvedAudioMimeType = audioConfig->AudioMimeType.IsEmpty()
-				? TEXT("audio/mp4a-latm")
-				: audioConfig->AudioMimeType.ToLower();
-			if (resolvedAudioMimeType == TEXT("audio/aac"))
-			{
-				UE_LOG(LogVdjmRecorderCore, Warning,
-					TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Converting audio mime '%s' to '%s'."),
-					*resolvedAudioMimeType,
-					TEXT("audio/mp4a-latm"));
-				resolvedAudioMimeType = TEXT("audio/mp4a-latm");
-			}
-			else if (resolvedAudioMimeType != TEXT("audio/mp4a-latm"))
-			{
-				UE_LOG(LogVdjmRecorderCore, Warning,
-					TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Unsupported audio mime for Android encoder: %s. Forcing audio/mp4a-latm."),
-					*resolvedAudioMimeType);
-				resolvedAudioMimeType = TEXT("audio/mp4a-latm");
-			}
-			outSnapshot.AudioConfig.AudioMimeType = resolvedAudioMimeType;
-			outSnapshot.AudioConfig.AudioSourceId = audioConfig->SourceSubMixName.ToString();
-		}
-		if (const FVdjmEncoderInitRequestRuntimePolicy* runtimePolicy = resolver->TryGetResolvedRuntimePolicyConfig())
-		{
-			outSnapshot.AudioConfig.bAudioRequired = runtimePolicy->bRequireAVSync;
-			outSnapshot.AudioConfig.AudioDriftToleranceMs = runtimePolicy->AllowedDriftMs;
-		}
-		}
+		UE_LOG(LogVdjmRecorderCore, Warning,
+			TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Received container mime '%s'. Converting to codec mime '%s'."),
+			*resolvedMimeType,
+			*DefaultMimeType);
+		resolvedMimeType = DefaultMimeType;
+	}
+	else if (resolvedMimeType != TEXT("video/avc"))
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning,
+			TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Unsupported video mime for Android encoder: %s. Forcing %s."),
+			*resolvedMimeType,
+			*DefaultMimeType);
+		resolvedMimeType = DefaultMimeType;
+	}
+	outSnapshot.VideoConfig.MimeType = resolvedMimeType;
+
+	FString resolvedAudioMimeType = outSnapshot.AudioConfig.AudioMimeType.IsEmpty()
+		? TEXT("audio/mp4a-latm")
+		: outSnapshot.AudioConfig.AudioMimeType.ToLower();
+	if (resolvedAudioMimeType == TEXT("audio/aac"))
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning,
+			TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Converting audio mime '%s' to '%s'."),
+			*resolvedAudioMimeType,
+			TEXT("audio/mp4a-latm"));
+		resolvedAudioMimeType = TEXT("audio/mp4a-latm");
+	}
+	else if (resolvedAudioMimeType != TEXT("audio/mp4a-latm"))
+	{
+		UE_LOG(LogVdjmRecorderCore, Warning,
+			TEXT("FVdjmAndroidEncoderImpl::BuildSnapshotFromResource - Unsupported audio mime for Android encoder: %s. Forcing audio/mp4a-latm."),
+			*resolvedAudioMimeType);
+		resolvedAudioMimeType = TEXT("audio/mp4a-latm");
+	}
+	outSnapshot.AudioConfig.AudioMimeType = resolvedAudioMimeType;
 
 	if (outSnapshot.VideoConfig.VideoIntervalSec <= 0)
 	{

@@ -4,7 +4,6 @@
 #include "Tickable.h"
 #include "UObject/Object.h"
 #include "VdjmRecordTypes.h"
-#include "VdjmRecordEventNode.h"
 #include "VdjmRecorderSessionTypes.h"
 #include "VdjmRecordEventManager.generated.h"
 
@@ -13,6 +12,204 @@ class UVdjmRecordEventBase;
 class UVdjmRecordEventFlowDataAsset;
 class UVdjmRecordEventFlowRuntime;
 class UVdjmRecordResource;
+struct FVdjmRecordEventResult;
+
+USTRUCT(BlueprintType)
+struct VDJMRECORDER_API FVdjmRecordFlowHandle
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recorder|EventManager")
+	int64 Value = INDEX_NONE;
+
+	static FVdjmRecordFlowHandle MakeInvalid()
+	{
+		return FVdjmRecordFlowHandle();
+	}
+
+	bool IsValid() const
+	{
+		return Value >= 0;
+	}
+
+	friend bool operator==(const FVdjmRecordFlowHandle& Left, const FVdjmRecordFlowHandle& Right)
+	{
+		return Left.Value == Right.Value;
+	}
+};
+
+FORCEINLINE uint32 GetTypeHash(const FVdjmRecordFlowHandle& FlowHandle)
+{
+	return GetTypeHash(FlowHandle.Value);
+}
+
+USTRUCT(BlueprintType)
+struct VDJMRECORDER_API FVdjmRecordFlowSessionHandle
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recorder|EventManager")
+	int64 Value = INDEX_NONE;
+
+	static FVdjmRecordFlowSessionHandle MakeInvalid()
+	{
+		return FVdjmRecordFlowSessionHandle();
+	}
+
+	bool IsValid() const
+	{
+		return Value >= 0;
+	}
+
+	friend bool operator==(const FVdjmRecordFlowSessionHandle& Left, const FVdjmRecordFlowSessionHandle& Right)
+	{
+		return Left.Value == Right.Value;
+	}
+};
+
+FORCEINLINE uint32 GetTypeHash(const FVdjmRecordFlowSessionHandle& SessionHandle)
+{
+	return GetTypeHash(SessionHandle.Value);
+}
+
+USTRUCT(BlueprintType)
+struct VDJMRECORDER_API FVdjmRecordEventRuntimeHandle
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recorder|EventManager")
+	int64 Value = INDEX_NONE;
+
+	static FVdjmRecordEventRuntimeHandle MakeInvalid()
+	{
+		return FVdjmRecordEventRuntimeHandle();
+	}
+
+	static FVdjmRecordEventRuntimeHandle MakeTerminalSink()
+	{
+		FVdjmRecordEventRuntimeHandle RuntimeHandle;
+		RuntimeHandle.Value = 0;
+		return RuntimeHandle;
+	}
+
+	bool IsValid() const
+	{
+		return Value >= 0;
+	}
+
+	bool IsTerminalSink() const
+	{
+		return Value == 0;
+	}
+
+	friend bool operator==(const FVdjmRecordEventRuntimeHandle& Left, const FVdjmRecordEventRuntimeHandle& Right)
+	{
+		return Left.Value == Right.Value;
+	}
+};
+
+FORCEINLINE uint32 GetTypeHash(const FVdjmRecordEventRuntimeHandle& RuntimeHandle)
+{
+	return GetTypeHash(RuntimeHandle.Value);
+}
+
+UENUM(BlueprintType)
+enum class EVdjmRecordEventEdgeKind : uint8
+{
+	ENext,
+	EJump,
+	ESignal,
+	ETerminal
+};
+
+UENUM(BlueprintType)
+enum class EVdjmRecordEventEdgeState : uint8
+{
+	EAdvance,
+	ERepeat,
+	EDiscard
+};
+
+enum class EVdjmRecordFlowControlAction : uint8
+{
+	ENone,
+	EResume,
+	EPause,
+	EStop,
+	EAbort,
+	EFail
+};
+
+enum class EVdjmRecordFlowStepDisposition : uint8
+{
+	EContinue,
+	EYield,
+	EFinishSuccess,
+	EFinishAbort,
+	EFinishFailure
+};
+
+struct FVdjmRecordFlowStepContext
+{
+public:
+	FVdjmRecordFlowHandle FlowHandle = FVdjmRecordFlowHandle::MakeInvalid();
+	AVdjmRecordBridgeActor* BridgeActor = nullptr;
+	const TArray<TObjectPtr<UVdjmRecordEventBase>>* Events = nullptr;
+	int32* CurrentIndex = nullptr;
+	float* NextExecutableTime = nullptr;
+	float CurrentTimeSeconds = 0.0f;
+
+	bool IsValid() const
+	{
+		return FlowHandle.IsValid() && Events != nullptr && CurrentIndex != nullptr;
+	}
+};
+
+struct FVdjmRecordFlowStepResult
+{
+public:
+	EVdjmRecordFlowStepDisposition Disposition = EVdjmRecordFlowStepDisposition::EContinue;
+	EVdjmRecordFlowControlAction FlowControlAction = EVdjmRecordFlowControlAction::ENone;
+	float WaitSeconds = 0.0f;
+	bool bDidExecuteEvent = false;
+};
+
+USTRUCT(BlueprintType)
+struct VDJMRECORDER_API FVdjmRecordObservedEdge
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recorder|EventManager")
+	FVdjmRecordFlowHandle FlowHandle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recorder|EventManager")
+	FVdjmRecordEventRuntimeHandle FromHandle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recorder|EventManager")
+	FVdjmRecordEventRuntimeHandle ToHandle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recorder|EventManager")
+	EVdjmRecordEventEdgeKind EdgeKind = EVdjmRecordEventEdgeKind::ENext;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recorder|EventManager")
+	EVdjmRecordEventEdgeState EdgeState = EVdjmRecordEventEdgeState::EAdvance;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recorder|EventManager")
+	FName ChannelKey = NAME_None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recorder|EventManager")
+	EVdjmRecordEventResultType TerminalReason = EVdjmRecordEventResultType::ESuccess;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recorder|EventManager")
+	FName RequestedByTag = NAME_None;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recorder|EventManager")
+	FString RequestedByClassName;
+};
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
 	FVdjmRecordManagerChainEvent,
@@ -23,10 +220,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
 	EVdjmRecordBridgeInitStep,
 	CurrentStep);
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
-	FVdjmRecordManagerFlowFinished,
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
+	FVdjmRecordManagerFlowSessionFinished,
 	UVdjmRecordEventManager*,
 	EventManager,
+	FVdjmRecordFlowSessionHandle,
+	SessionHandle,
 	UVdjmRecordEventFlowDataAsset*,
 	FlowAsset,
 	EVdjmRecordEventResultType,
@@ -42,6 +241,104 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
 	CurrentState,
 	double,
 	TransitionSeconds);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(
+	FVdjmRecordManagerFlowSignalBroadcast,
+	UVdjmRecordEventManager*,
+	EventManager,
+	FName,
+	SignalTag,
+	FVdjmRecordEventSignalRoute,
+	SignalRoute,
+	FVdjmRecordFlowSessionHandle,
+	SessionHandle);
+
+DECLARE_DYNAMIC_DELEGATE_FourParams(
+	FVdjmRecordFlowSignalCallback,
+	UVdjmRecordEventManager*,
+	EventManager,
+	FName,
+	SignalTag,
+	FVdjmRecordEventSignalRoute,
+	SignalRoute,
+	FVdjmRecordFlowSessionHandle,
+	SessionHandle);
+
+UENUM(BlueprintType)
+enum class EVdjmRecordSubgraphBranchCaseCondition : uint8
+{
+	EAlways UMETA(DisplayName = "Always", ToolTip = "항상 매칭됩니다. 배열 마지막에 두면 else case처럼 동작합니다."),
+	EWhenBranchInactive UMETA(DisplayName = "When Branch Inactive", ToolTip = "이 branch가 현재 실행 중인 subgraph session을 가지지 않을 때만 매칭됩니다."),
+	EWhenBranchActive UMETA(DisplayName = "When Branch Active", ToolTip = "이 branch가 이미 실행 중인 subgraph session을 가질 때만 매칭됩니다.")
+};
+
+UENUM(BlueprintType)
+enum class EVdjmRecordSubgraphBranchDuplicatePolicy : uint8
+{
+	EIgnoreAndSucceed UMETA(DisplayName = "Ignore And Succeed", ToolTip = "이미 실행 중이면 아무 것도 하지 않고 성공 처리합니다."),
+	EStartNewSession UMETA(DisplayName = "Start New Session", ToolTip = "이미 실행 중이어도 새 subgraph session을 시작합니다."),
+	EEmitSignalToActiveSession UMETA(DisplayName = "Emit Signal To Active Session", ToolTip = "이미 실행 중인 session에 ForwardSignalTag 또는 현재 signal을 전달합니다."),
+	ERestartActiveSession UMETA(DisplayName = "Restart Active Session", ToolTip = "이미 실행 중인 session을 종료하고 새 subgraph session을 시작합니다."),
+	EFailIfDuplicate UMETA(DisplayName = "Fail If Duplicate", ToolTip = "이미 실행 중이면 branch 실행을 실패 처리합니다.")
+};
+
+USTRUCT(BlueprintType)
+struct VDJMRECORDER_API FVdjmRecordSubgraphBranchCase
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|EventManager|SubgraphBranch", meta = (ToolTip = "작성/디버그용 case 이름입니다. 실행 순서는 배열 인덱스를 따릅니다."))
+	FName CaseTag = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|EventManager|SubgraphBranch", meta = (ToolTip = "이 case가 매칭될 조건입니다. BranchCases[0]부터 순서대로 검사하고 첫 매칭 case만 실행합니다."))
+	EVdjmRecordSubgraphBranchCaseCondition MatchCondition = EVdjmRecordSubgraphBranchCaseCondition::EAlways;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|EventManager|SubgraphBranch", meta = (ToolTip = "매칭되었을 때 시작할 subgraph tag입니다."))
+	FName SubgraphTag = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|EventManager|SubgraphBranch", meta = (ToolTip = "동일 branch가 이미 실행 중일 때의 처리 정책입니다. 실행 중이 아니면 subgraph를 새 session으로 시작합니다."))
+	EVdjmRecordSubgraphBranchDuplicatePolicy DuplicatePolicy = EVdjmRecordSubgraphBranchDuplicatePolicy::EIgnoreAndSucceed;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|EventManager|SubgraphBranch", meta = (ToolTip = "DuplicatePolicy가 EmitSignalToActiveSession일 때 active session으로 전달할 signal입니다. None이면 원래 signal을 전달합니다."))
+	FName ForwardSignalTag = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|EventManager|SubgraphBranch", meta = (ToolTip = "subgraph session 시작 전에 해당 runtime node 상태를 초기화할지 정합니다."))
+	bool bResetRuntimeStates = true;
+};
+
+USTRUCT(BlueprintType)
+struct VDJMRECORDER_API FVdjmRecordSubgraphSignalBranch
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|EventManager|SubgraphBranch", meta = (ToolTip = "branch rule 식별자입니다. None이면 SignalTag를 key로 사용합니다. 같은 key를 다시 등록하면 교체할 수 있습니다."))
+	FName BranchTag = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|EventManager|SubgraphBranch", meta = (ToolTip = "이 signal이 broadcast될 때 branch case 검사를 시작합니다."))
+	FName SignalTag = NAME_None;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|EventManager|SubgraphBranch", meta = (ToolTip = "subgraph를 포함한 EventFlow DataAsset입니다. Node에서 None이면 현재 main flow asset을 사용해 등록합니다."))
+	TObjectPtr<UVdjmRecordEventFlowDataAsset> FlowAsset = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|EventManager|SubgraphBranch", meta = (TitleProperty = "CaseTag", ToolTip = "if/else-if/else처럼 0번부터 검사할 case 목록입니다. 첫 매칭 case만 실행됩니다."))
+	TArray<FVdjmRecordSubgraphBranchCase> BranchCases;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|EventManager|SubgraphBranch")
+	bool bEnabled = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Recorder|EventManager|SubgraphBranch", meta = (ToolTip = "true면 한 번 매칭되어 실행된 뒤 branch rule을 manager에서 제거합니다."))
+	bool bTriggerOnce = false;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recorder|EventManager|SubgraphBranch")
+	FVdjmRecordFlowSessionHandle ActiveSessionHandle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Recorder|EventManager|SubgraphBranch")
+	FName LastMatchedCaseTag = NAME_None;
+
+	bool bIsDispatching = false;
+};
 
 UCLASS(BlueprintType)
 class VDJMRECORDER_API UVdjmRecordEventManager : public UObject, public FTickableGameObject
@@ -77,13 +374,81 @@ public:
 	bool StartEventFlowFromJsonString(const FString& InJsonString, FString& OutError, bool bResetRuntimeStates = true);
 
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool StartEventFlowSession(
+		UVdjmRecordEventFlowDataAsset* InFlowAsset,
+		FVdjmRecordFlowSessionHandle& OutSessionHandle,
+		bool bResetRuntimeStates = true);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager|Subgraph")
+	bool StartEventSubgraphSession(
+		UVdjmRecordEventFlowDataAsset* flowAsset,
+		FName subgraphTag,
+		FVdjmRecordFlowSessionHandle& outSessionHandle,
+		bool bResetRuntimeStates = true);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool StartEventFlowSessionFromJsonString(
+		const FString& InJsonString,
+		FVdjmRecordFlowSessionHandle& OutSessionHandle,
+		FString& OutError,
+		bool bResetRuntimeStates = true);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
 	void StopEventFlow();
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool RequestStopEventFlow();
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool RequestPauseEventFlow();
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool RequestResumeEventFlow();
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool RequestAbortEventFlow();
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool RequestFailEventFlow();
 
 	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
 	bool IsEventFlowRunning() const;
 
 	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
+	bool IsEventFlowPaused() const;
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager|Debug")
+	FString GetEventFlowDebugString() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool EmitFlowSignalToSession(FVdjmRecordFlowSessionHandle SessionHandle, FName InSignalTag);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool RequestStopEventFlowSession(FVdjmRecordFlowSessionHandle SessionHandle);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool RequestPauseEventFlowSession(FVdjmRecordFlowSessionHandle SessionHandle);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool RequestResumeEventFlowSession(FVdjmRecordFlowSessionHandle SessionHandle);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool RequestAbortEventFlowSession(FVdjmRecordFlowSessionHandle SessionHandle);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool RequestFailEventFlowSession(FVdjmRecordFlowSessionHandle SessionHandle);
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
+	bool IsEventFlowSessionRunning(FVdjmRecordFlowSessionHandle SessionHandle) const;
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
+	bool IsEventFlowSessionPaused(FVdjmRecordFlowSessionHandle SessionHandle) const;
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
 	UVdjmRecordEventFlowDataAsset* GetActiveFlowAsset() const;
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
+	UVdjmRecordEventFlowDataAsset* GetCurrentOrMainFlowAsset() const;
 
 	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
 	UVdjmRecordEventFlowRuntime* GetActiveFlowRuntime() const;
@@ -106,14 +471,95 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
 	int32 FindNextEventIndex(const UVdjmRecordEventBase* SourceEvent, TSubclassOf<UVdjmRecordEventBase> TargetClass, FName TargetTag) const;
 
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool EmitFlowSignal(FName InSignalTag);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool EmitFlowSignalByRoute(FName InSignalTag, FVdjmRecordEventSignalRoute InSignalRoute);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager|Signal")
+	bool BindFlowSignal(
+		FName signalTag,
+		UObject* listenerObject,
+		const FVdjmRecordFlowSignalCallback& callback);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager|Signal")
+	bool UnbindFlowSignal(FName signalTag, UObject* listenerObject);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager|Signal")
+	int32 UnbindFlowSignalsForObject(UObject* listenerObject);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager|Subgraph")
+	bool RegisterSubgraphSignalBranch(
+		const FVdjmRecordSubgraphSignalBranch& branch,
+		FString& outErrorReason,
+		bool bReplaceExisting = true);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager|Subgraph")
+	bool UnregisterSubgraphSignalBranch(FName branchTag);
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager|Subgraph")
+	int32 UnregisterSubgraphSignalBranchesForSignal(FName signalTag);
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager|Subgraph")
+	int32 GetRegisteredSubgraphSignalBranchCount() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool ConsumeFlowSignal(FName InSignalTag);
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
+	bool HasPendingFlowSignal(FName InSignalTag) const;
+
+	bool RequestCurrentFlowConditionForSignal(FName signalTag, EVdjmRecordEventConditionMode conditionMode);
+	bool RequestCurrentFlowConditionForBridgeInit(EVdjmRecordEventConditionMode conditionMode);
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
+	FVdjmRecordFlowHandle GetCurrentFlowHandle() const;
+
+	UFUNCTION(BlueprintPure, Category = "Recorder|EventManager")
+	FVdjmRecordObservedEdge GetCurrentObservedEdge() const;
+
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventManager")
+	bool RequestObservedEdgeDirective(
+		EVdjmRecordEventEdgeKind InEdgeKind,
+		EVdjmRecordEventEdgeState InEdgeState,
+		const UVdjmRecordEventBase* InDestinationEvent = nullptr,
+		FName InChannelKey = NAME_None,
+		EVdjmRecordEventResultType InTerminalReason = EVdjmRecordEventResultType::ESuccess);
+
+	UObject* FindRuntimeObjectSlot(FName InSlotKey) const;
+	bool SetRuntimeObjectSlot(FName InSlotKey, UObject* InObject);
+	bool ClearRuntimeObjectSlot(FName InSlotKey);
+	FName GetCurrentRuntimeWidgetSlotKey() const;
+	bool MoveRuntimeWidgetStackCursorBy(int32 cursorDelta, FName& outSlotKey);
+	bool SetRuntimeWidgetStackCursor(FName slotKey);
+	bool StepRuntimeWidgetStackCursorAfterLower(FName slotKey);
+	bool CollectRuntimeWidgetSlotKeysForLower(int32 lowerCount, TArray<FName>& outSlotKeys);
+
+	FVdjmRecordFlowHandle FindOrCreateChildFlowHandle(UVdjmRecordEventBase* OwnerEvent);
+	bool PushActiveFlow(FVdjmRecordFlowHandle FlowHandle);
+	void PopActiveFlow(FVdjmRecordFlowHandle FlowHandle);
+	FVdjmRecordEventResult ExecuteEventInFlow(UVdjmRecordEventBase* EventNode, AVdjmRecordBridgeActor* BridgeActor, FVdjmRecordFlowHandle FlowHandle);
+	FVdjmRecordFlowStepResult ExecuteFlowStep(const FVdjmRecordFlowStepContext& stepContext);
+	FVdjmRecordFlowStepResult ExecuteFlowLoop(const FVdjmRecordFlowStepContext& stepContext, int32 maxStepCount = 64);
+	void ObserveEventResult(
+		UVdjmRecordEventBase* SourceEvent,
+		const FVdjmRecordEventResult& Result,
+		FVdjmRecordFlowHandle FlowHandle,
+		const UVdjmRecordEventBase* DestinationEvent = nullptr);
+	EVdjmRecordFlowControlAction ConsumePendingFlowControlRequest(FVdjmRecordFlowHandle FlowHandle);
+
 	UPROPERTY(BlueprintAssignable, Category = "Recorder|EventManager")
 	FVdjmRecordManagerChainEvent OnManagerObservedChainEvent;
 
 	UPROPERTY(BlueprintAssignable, Category = "Recorder|EventManager")
-	FVdjmRecordManagerFlowFinished OnEventFlowFinished;
+	FVdjmRecordManagerFlowSessionFinished OnEventFlowSessionFinished;
 
 	UPROPERTY(BlueprintAssignable, Category = "Recorder|EventManager")
 	FVdjmRecordManagerSessionStateChanged OnSessionStateChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "Recorder|EventManager|Signal")
+	FVdjmRecordManagerFlowSignalBroadcast OnFlowSignalBroadcast;
 
 protected:
 	virtual UWorld* GetWorld() const override;
@@ -122,12 +568,240 @@ protected:
 	virtual TStatId GetStatId() const override;
 
 private:
+	struct FVdjmRecordPendingEdgeDirective
+	{
+	public:
+		bool bIsSet = false;
+		bool bHasExplicitFromHandle = false;
+		bool bHasExplicitToHandle = false;
+		EVdjmRecordEventEdgeKind EdgeKind = EVdjmRecordEventEdgeKind::ENext;
+		EVdjmRecordEventEdgeState EdgeState = EVdjmRecordEventEdgeState::EAdvance;
+		FName ChannelKey = NAME_None;
+		EVdjmRecordEventResultType TerminalReason = EVdjmRecordEventResultType::ESuccess;
+		const UVdjmRecordEventBase* DestinationEvent = nullptr;
+		FVdjmRecordEventRuntimeHandle ExplicitFromHandle;
+		FVdjmRecordEventRuntimeHandle ExplicitToHandle;
+		FName RequestedByTag = NAME_None;
+		FString RequestedByClassName;
+
+		void Reset()
+		{
+			bIsSet = false;
+			bHasExplicitFromHandle = false;
+			bHasExplicitToHandle = false;
+			EdgeKind = EVdjmRecordEventEdgeKind::ENext;
+			EdgeState = EVdjmRecordEventEdgeState::EAdvance;
+			ChannelKey = NAME_None;
+			TerminalReason = EVdjmRecordEventResultType::ESuccess;
+			DestinationEvent = nullptr;
+			ExplicitFromHandle = FVdjmRecordEventRuntimeHandle::MakeInvalid();
+			ExplicitToHandle = FVdjmRecordEventRuntimeHandle::MakeInvalid();
+			RequestedByTag = NAME_None;
+			RequestedByClassName.Reset();
+		}
+	};
+
+	struct FVdjmRecordPendingFlowControlRequest
+	{
+	public:
+		EVdjmRecordFlowControlAction Action = EVdjmRecordFlowControlAction::ENone;
+
+		bool IsSet() const
+		{
+			return Action != EVdjmRecordFlowControlAction::ENone;
+		}
+
+		void Reset()
+		{
+			Action = EVdjmRecordFlowControlAction::ENone;
+		}
+	};
+
+	struct FVdjmRecordFlowSignalListener
+	{
+	public:
+		FName SignalTag = NAME_None;
+		TWeakObjectPtr<UObject> ListenerObject;
+		FVdjmRecordFlowSignalCallback Callback;
+
+		bool IsListenerValid() const
+		{
+			return not SignalTag.IsNone() && ListenerObject.IsValid() && Callback.IsBound();
+		}
+	};
+
+	enum class EVdjmRecordFlowConditionKind : uint8
+	{
+		ENone,
+		ESignal,
+		EBridgeInit
+	};
+
+	struct FVdjmRecordFlowConditionState
+	{
+	public:
+		EVdjmRecordFlowConditionKind ConditionKind = EVdjmRecordFlowConditionKind::ENone;
+		EVdjmRecordEventConditionMode ConditionMode = EVdjmRecordEventConditionMode::ERunning;
+		FName SignalTag = NAME_None;
+
+		bool IsActive() const
+		{
+			return ConditionKind != EVdjmRecordFlowConditionKind::ENone;
+		}
+
+		void Reset()
+		{
+			ConditionKind = EVdjmRecordFlowConditionKind::ENone;
+			ConditionMode = EVdjmRecordEventConditionMode::ERunning;
+			SignalTag = NAME_None;
+		}
+	};
+
+	struct FVdjmRecordFlowExecutionState
+	{
+	public:
+		FVdjmRecordFlowHandle FlowHandle = FVdjmRecordFlowHandle::MakeInvalid();
+		FVdjmRecordFlowHandle ParentFlowHandle = FVdjmRecordFlowHandle::MakeInvalid();
+		TWeakObjectPtr<UVdjmRecordEventBase> OwnerEvent;
+		int32 CurrentIndex = INDEX_NONE;
+		float NextExecutableTime = 0.0f;
+		TMap<const UVdjmRecordEventBase*, FVdjmRecordEventRuntimeHandle> RuntimeEventHandles;
+		FVdjmRecordPendingEdgeDirective PendingEdgeDirective;
+		FVdjmRecordPendingFlowControlRequest PendingFlowControlRequest;
+		FVdjmRecordFlowConditionState ActiveCondition;
+		FVdjmRecordObservedEdge LastObservedEdge;
+		bool bHasObservedEdge = false;
+		bool bPaused = false;
+	};
+
+	struct FVdjmRecordEventExecutionContext
+	{
+	public:
+		FVdjmRecordFlowSessionHandle SessionHandle = FVdjmRecordFlowSessionHandle::MakeInvalid();
+		FVdjmRecordFlowHandle FlowHandle = FVdjmRecordFlowHandle::MakeInvalid();
+		TWeakObjectPtr<UVdjmRecordEventBase> EventNode;
+		FVdjmRecordEventRuntimeHandle RuntimeHandle = FVdjmRecordEventRuntimeHandle::MakeInvalid();
+	};
+
+	struct FVdjmRecordFlowSession
+	{
+	public:
+		FVdjmRecordFlowSessionHandle SessionHandle = FVdjmRecordFlowSessionHandle::MakeInvalid();
+		FVdjmRecordFlowSessionHandle ParentSessionHandle = FVdjmRecordFlowSessionHandle::MakeInvalid();
+		TWeakObjectPtr<UVdjmRecordEventFlowDataAsset> ActiveFlowAsset;
+		TObjectPtr<UVdjmRecordEventFlowRuntime> ActiveFlowRuntime;
+		FVdjmRecordFlowHandle RootFlowHandle = FVdjmRecordFlowHandle::MakeInvalid();
+		TMap<FVdjmRecordFlowHandle, FVdjmRecordFlowExecutionState> FlowExecutionStates;
+		TMap<const UVdjmRecordEventBase*, FVdjmRecordFlowHandle> ChildFlowHandles;
+		TArray<FVdjmRecordFlowHandle> ActiveFlowStack;
+		TArray<FVdjmRecordEventExecutionContext> EventExecutionContextStack;
+		TMap<FName, int32> PendingFlowSignals;
+		TMap<FName, FVdjmRecordEventRuntimeHandle> LastSignalProducerHandles;
+		TMap<FName, TWeakObjectPtr<UObject>> RuntimeObjectSlots;
+		TArray<FName> RuntimeWidgetSlotStack;
+		int32 RuntimeWidgetStackCursor = INDEX_NONE;
+		bool bFlowRunning = false;
+	};
+
 	void TickEventFlow();
+	void TickFlowConditions(FVdjmRecordFlowSessionHandle sessionHandle);
+	void TickFlowSession(FVdjmRecordFlowSessionHandle SessionHandle);
 	void ResetFlowRuntimeStates();
 	void FinishFlow(EVdjmRecordEventResultType FinalResultType);
+	void FinishFlowSession(FVdjmRecordFlowSessionHandle SessionHandle, EVdjmRecordEventResultType FinalResultType);
+	void ResetFlowSignals();
+	void ResetFlowExecutionStates();
 	void ApplySessionStateByBridgeSnapshot();
 	void ResetSessionState(EVdjmRecorderSessionState NewState);
 	void TransitionSessionState(EVdjmRecorderSessionState NewState, const FString& InErrorMessage = FString());
+	FVdjmRecordFlowSessionHandle CreateFlowSessionHandle();
+	FVdjmRecordFlowHandle CreateFlowHandle();
+	bool StartEventFlowSessionRuntime(
+		UVdjmRecordEventFlowRuntime* InFlowRuntime,
+		FVdjmRecordFlowSessionHandle& OutSessionHandle,
+		bool bResetRuntimeStates = true,
+		FVdjmRecordFlowSessionHandle ParentSessionHandle = FVdjmRecordFlowSessionHandle::MakeInvalid());
+	bool StartEventSubgraphSessionInternal(
+		UVdjmRecordEventFlowDataAsset* flowAsset,
+		FName subgraphTag,
+		FVdjmRecordFlowSessionHandle& outSessionHandle,
+		bool bResetRuntimeStates,
+		FVdjmRecordFlowSessionHandle parentSessionHandle);
+	FVdjmRecordFlowSession* FindFlowSession(FVdjmRecordFlowSessionHandle SessionHandle);
+	const FVdjmRecordFlowSession* FindFlowSession(FVdjmRecordFlowSessionHandle SessionHandle) const;
+	FVdjmRecordFlowSession& FindOrCreateFlowSession(FVdjmRecordFlowSessionHandle SessionHandle);
+	FVdjmRecordFlowSession* FindCurrentFlowSession();
+	const FVdjmRecordFlowSession* FindCurrentFlowSession() const;
+	FVdjmRecordFlowSession* FindMainFlowSession();
+	const FVdjmRecordFlowSession* FindMainFlowSession() const;
+	FVdjmRecordFlowSession* FindFlowSessionByFlowHandle(FVdjmRecordFlowHandle FlowHandle);
+	const FVdjmRecordFlowSession* FindFlowSessionByFlowHandle(FVdjmRecordFlowHandle FlowHandle) const;
+	FVdjmRecordFlowSession* ResolveFlowSessionForGeneralAccess();
+	const FVdjmRecordFlowSession* ResolveFlowSessionForGeneralAccess() const;
+	bool PushActiveSession(FVdjmRecordFlowSessionHandle SessionHandle);
+	void PopActiveSession(FVdjmRecordFlowSessionHandle SessionHandle);
+	void ResetFlowSession(FVdjmRecordFlowSession& FlowSession);
+	FVdjmRecordFlowExecutionState* FindFlowExecutionState(FVdjmRecordFlowHandle FlowHandle);
+	const FVdjmRecordFlowExecutionState* FindFlowExecutionState(FVdjmRecordFlowHandle FlowHandle) const;
+	FVdjmRecordFlowExecutionState& FindOrCreateFlowExecutionState(FVdjmRecordFlowHandle FlowHandle, UVdjmRecordEventBase* OwnerEvent = nullptr);
+	void RegisterRuntimeWidgetSlot(FVdjmRecordFlowSession& flowSession, FName slotKey);
+	void UnregisterRuntimeWidgetSlot(FVdjmRecordFlowSession& flowSession, FName slotKey);
+	void ClampRuntimeWidgetStackCursor(FVdjmRecordFlowSession& flowSession) const;
+	FVdjmRecordEventRuntimeHandle FindOrCreateRuntimeEventHandle(FVdjmRecordFlowHandle FlowHandle, const UVdjmRecordEventBase* EventNode);
+	FVdjmRecordObservedEdge BuildObservedEdgeFromResult(
+		UVdjmRecordEventBase* SourceEvent,
+		const FVdjmRecordEventResult& Result,
+		FVdjmRecordFlowHandle FlowHandle,
+		const UVdjmRecordEventBase* DestinationEvent);
+	FVdjmRecordObservedEdge ApplyPendingEdgeDirective(
+		const FVdjmRecordObservedEdge& DefaultEdge,
+		FVdjmRecordFlowHandle FlowHandle);
+	void ClearFlowCondition(FVdjmRecordFlowHandle flowHandle);
+	bool DoesSessionHavePendingSignal(const FVdjmRecordFlowSession& flowSession, FName signalTag) const;
+	bool DoesCompiledManifestHaveFutureSignalWaiter(const FVdjmRecordFlowSession& flowSession, FName signalTag) const;
+	bool ResumeFlowConditionsForSignal(FVdjmRecordFlowSession& flowSession, FName signalTag);
+	bool ResumeFlowConditionsForSignal(FName signalTag);
+	bool ResumeFlowConditionsForBridgeInit();
+	bool ResumeFlowFromCompiledSignalManifest(FVdjmRecordFlowSession& flowSession, FName signalTag);
+	bool ResumeFlowFromCompiledSignalManifest(FVdjmRecordFlowSession& flowSession);
+	bool ResumeFlowFromCompiledSignalManifest(FName signalTag);
+	bool RequestFlowControl(EVdjmRecordFlowControlAction Action);
+	bool RequestFlowControl(FVdjmRecordFlowSessionHandle SessionHandle, EVdjmRecordFlowControlAction Action);
+	bool EmitFlowSignalToSessionInternal(
+		FVdjmRecordFlowSessionHandle sessionHandle,
+		FName signalTag,
+		FVdjmRecordEventSignalRoute signalRoute);
+	void BroadcastFlowSignal(
+		FName signalTag,
+		FVdjmRecordEventSignalRoute signalRoute,
+		FVdjmRecordFlowSessionHandle sessionHandle);
+	void DispatchFlowSignalListeners(
+		FName signalTag,
+		FVdjmRecordEventSignalRoute signalRoute,
+		FVdjmRecordFlowSessionHandle sessionHandle);
+	void CleanupInvalidFlowSignalListeners();
+	void DispatchSubgraphSignalBranches(
+		FName signalTag,
+		FVdjmRecordEventSignalRoute signalRoute,
+		FVdjmRecordFlowSessionHandle sessionHandle);
+	bool ExecuteSubgraphBranchCase(
+		FVdjmRecordSubgraphSignalBranch& branch,
+		const FVdjmRecordSubgraphBranchCase& branchCase,
+		FName signalTag,
+		FVdjmRecordEventSignalRoute signalRoute,
+		FVdjmRecordFlowSessionHandle sourceSessionHandle);
+	bool DoesSubgraphBranchCaseMatch(
+		const FVdjmRecordSubgraphSignalBranch& branch,
+		const FVdjmRecordSubgraphBranchCase& branchCase) const;
+	bool IsSubgraphBranchSessionActive(const FVdjmRecordSubgraphSignalBranch& branch) const;
+	FName ResolveSubgraphBranchKey(const FVdjmRecordSubgraphSignalBranch& branch) const;
+	void CleanupSubgraphBranchesForFinishedSession(FVdjmRecordFlowSessionHandle sessionHandle);
+	void ApplyFlowControlRequestToFlowChain(FVdjmRecordFlowHandle FlowHandle, EVdjmRecordFlowControlAction Action);
+	EVdjmRecordFlowControlAction MergeFlowControlAction(
+		EVdjmRecordFlowControlAction CurrentAction,
+		EVdjmRecordFlowControlAction RequestedAction) const;
+	int32 FindNextExecutableEventIndex(const TArray<TObjectPtr<UVdjmRecordEventBase>>& Events, int32 StartIndex) const;
+	int32 FindEventIndexByTag(const TArray<TObjectPtr<UVdjmRecordEventBase>>& events, FName eventTag) const;
 
 	UFUNCTION()
 	void HandleBridgeChainEvent(AVdjmRecordBridgeActor* InBridgeActor, EVdjmRecordBridgeInitStep PrevStep, EVdjmRecordBridgeInitStep CurrentStep);
@@ -142,15 +816,22 @@ private:
 
 	TWeakObjectPtr<UWorld> CachedWorld;
 	TWeakObjectPtr<AVdjmRecordBridgeActor> WeakBridgeActor;
-	TWeakObjectPtr<UVdjmRecordEventFlowDataAsset> ActiveFlowAsset;
 	UPROPERTY(Transient)
-	TObjectPtr<UVdjmRecordEventFlowRuntime> ActiveFlowRuntime;
+	TArray<TObjectPtr<UVdjmRecordEventFlowRuntime>> FlowRuntimeKeepAlive;
 
-	int32 CurrentFlowIndex = INDEX_NONE;
-	float NextExecutableTime = 0.0f;
-	bool bFlowRunning = false;
 	bool bPendingFinalization = false;
 	EVdjmRecorderSessionState CurrentSessionState = EVdjmRecorderSessionState::ENew;
 	double LastSessionTransitionSeconds = 0.0;
 	FString LastSessionError;
+	FVdjmRecordFlowSessionHandle MainSessionHandle = FVdjmRecordFlowSessionHandle::MakeInvalid();
+	TMap<FVdjmRecordFlowSessionHandle, FVdjmRecordFlowSession> FlowSessions;
+	TArray<FVdjmRecordFlowSessionHandle> ActiveSessionStack;
+	TMap<FName, int32> GlobalPendingFlowSignals;
+	TMap<FName, FVdjmRecordEventRuntimeHandle> GlobalLastSignalProducerHandles;
+	TArray<FVdjmRecordFlowSignalListener> FlowSignalListeners;
+	UPROPERTY(Transient)
+	TArray<FVdjmRecordSubgraphSignalBranch> SubgraphSignalBranches;
+	int64 NextFlowSessionHandleValue = 1;
+	int64 NextFlowHandleValue = 1;
+	int64 NextRuntimeEventHandleValue = 1;
 };

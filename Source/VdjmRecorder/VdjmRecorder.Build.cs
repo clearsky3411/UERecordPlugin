@@ -15,6 +15,8 @@ public class VdjmRecorder : ModuleRules
                 "RenderCore", // for recorder
                 "RHI",        // for recorder
                 "Projects", 	// for recorder
+                "MediaAssets",
+                "UMG",
             }
         );
 
