@@ -26,6 +26,11 @@
 			"LoadingPhase": "Default"
 		},
 		{
+			"Name": "VdjmAssetRegistry",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
 			"Name": "VdjmRecorderEditor",
 			"Type": "Editor",
 			"LoadingPhase": "Default"
