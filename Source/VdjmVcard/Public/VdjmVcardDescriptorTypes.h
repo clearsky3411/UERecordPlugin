@@ -34,27 +34,6 @@ enum class EVcardDescriptorRestorePolicy : uint8
 	EPreferSavedThenDefault
 };
 
-UENUM(BlueprintType)
-enum class EVcardBackgroundItemType : uint8
-{
-	EColor,
-	EImage,
-	EVideo,
-	EMaterial,
-	ERuntimeUpload,
-	ECustom
-};
-
-UENUM(BlueprintType)
-enum class EVcardMotionItemType : uint8
-{
-	EPreset,
-	EUploadedVideo,
-	ECapturedRuntime,
-	EExternal,
-	ECustom
-};
-
 USTRUCT(BlueprintType)
 struct VDJMVCARD_API FVcardDescriptorApplyRequest
 {
@@ -180,102 +159,6 @@ public:
 };
 
 USTRUCT(BlueprintType)
-struct VDJMVCARD_API FVcardBackgroundItemData
-{
-	GENERATED_BODY()
-
-public:
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Background")
-	FName ItemId = NAME_None;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Background")
-	FText DisplayName;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Background")
-	EVcardBackgroundItemType BackgroundType = EVcardBackgroundItemType::EColor;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Background")
-	FLinearColor Color = FLinearColor::White;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Background")
-	TSoftObjectPtr<UObject> ImageAsset;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Background")
-	TSoftObjectPtr<UObject> MediaSource;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Background")
-	TSoftObjectPtr<UObject> MaterialAsset;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Background")
-	FSoftObjectPath PayloadPath;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Background")
-	TArray<FName> Tags;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Background")
-	bool bRuntimeGenerated = false;
-};
-
-USTRUCT(BlueprintType)
-struct VDJMVCARD_API FVcardMotionItemData
-{
-	GENERATED_BODY()
-
-public:
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Motion")
-	FName ItemId = NAME_None;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Motion")
-	FText DisplayName;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Motion")
-	EVcardMotionItemType MotionType = EVcardMotionItemType::EPreset;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Motion")
-	TSoftObjectPtr<UObject> Thumbnail;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Motion")
-	TSoftObjectPtr<UObject> MotionDataObject;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Motion")
-	FSoftObjectPath SourceVideoPath;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Motion")
-	FSoftObjectPath AnalysisDataPath;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Motion")
-	TArray<FName> Tags;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Motion")
-	bool bRuntimeGenerated = false;
-};
-
-USTRUCT(BlueprintType)
-struct VDJMVCARD_API FVcardTextFieldDescriptor
-{
-	GENERATED_BODY()
-
-public:
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Text")
-	FName FieldId = NAME_None;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Text")
-	FText Label;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Text")
-	FText Placeholder;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Text")
-	FText DefaultValue;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Text")
-	bool bDefaultEnabled = true;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Text")
-	int32 MaxLength = 128;
-};
-
-USTRUCT(BlueprintType)
 struct VDJMVCARD_API FVcardToolDescriptor
 {
 	GENERATED_BODY()
@@ -344,26 +227,4 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|BottomSheet")
 	bool bAllowTapToggle = true;
-};
-
-USTRUCT(BlueprintType)
-struct VDJMVCARD_API FVcardScreenDescriptor
-{
-	GENERATED_BODY()
-
-public:
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Screen")
-	FName ScreenId = NAME_None;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Screen")
-	TSubclassOf<UUserWidget> ScreenWidgetClass;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Screen")
-	TArray<FVcardWidgetAttachDescriptor> InitialAttachments;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Screen")
-	TArray<FName> InitialSignalTags;
-
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Screen")
-	EVcardDescriptorRestorePolicy RestorePolicy = EVcardDescriptorRestorePolicy::EPreferPreviousThenDefault;
 };

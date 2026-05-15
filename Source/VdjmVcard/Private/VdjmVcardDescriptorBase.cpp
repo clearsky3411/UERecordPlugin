@@ -89,3 +89,23 @@ bool UVcardWidgetCompositionDescriptor::ApplyToWidgetInternal(const FVcardDescri
 
 	return bAnySuccess;
 }
+
+UVcardRootDescriptor::UVcardRootDescriptor()
+{
+	DescriptorId = TEXT("vcard-root");
+}
+
+UVcardStageLobbyDescriptor::UVcardStageLobbyDescriptor()
+{
+	DescriptorId = TEXT("vcard-stage-lobby");
+}
+
+UVcardLobbyDescriptor::UVcardLobbyDescriptor()
+{
+	DescriptorId = TEXT("vcard-lobby");
+}
+
+UVcardStageDescriptor::UVcardStageDescriptor()
+{
+	DescriptorId = TEXT("vcard-stage");
+}

@@ -82,3 +82,75 @@ protected:
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor")
 	bool bStopOnFirstFailure = true;
 };
+
+/**
+ * Root descriptor for bootstrapping the V-card root widget.
+ *
+ * Responsibility:
+ * - Hold optional root-level attachments such as initial stage/modal layers.
+ *
+ * Must not:
+ * - Create the root widget; AVcardUiRegistryActor owns that bootstrap step.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
+class VDJMVCARD_API UVcardRootDescriptor : public UVcardWidgetCompositionDescriptor
+{
+	GENERATED_BODY()
+
+public:
+	UVcardRootDescriptor();
+};
+
+/**
+ * Stage-lobby descriptor for lobby content placed into a root/stage slot.
+ *
+ * Responsibility:
+ * - Compose lobby widgets into the host slot that invoked it.
+ *
+ * Must not:
+ * - Know concrete background/motion domain item structures.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
+class VDJMVCARD_API UVcardStageLobbyDescriptor : public UVcardWidgetCompositionDescriptor
+{
+	GENERATED_BODY()
+
+public:
+	UVcardStageLobbyDescriptor();
+};
+
+/**
+ * Lobby descriptor for composing the V-card lobby stage.
+ *
+ * Responsibility:
+ * - Describe which widgets enter the lobby's named slots.
+ *
+ * Must not:
+ * - Own lobby runtime state such as selected card or preview playback.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
+class VDJMVCARD_API UVcardLobbyDescriptor : public UVcardWidgetCompositionDescriptor
+{
+	GENERATED_BODY()
+
+public:
+	UVcardLobbyDescriptor();
+};
+
+/**
+ * Stage descriptor for a common V-card stage layout.
+ *
+ * Responsibility:
+ * - Compose widgets into a stage host's named slots.
+ *
+ * Must not:
+ * - Own concrete domain choices such as background or motion item data.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
+class VDJMVCARD_API UVcardStageDescriptor : public UVcardWidgetCompositionDescriptor
+{
+	GENERATED_BODY()
+
+public:
+	UVcardStageDescriptor();
+};
