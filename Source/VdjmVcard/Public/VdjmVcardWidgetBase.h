@@ -7,6 +7,8 @@
 #include "VdjmVcardWidgetBase.generated.h"
 
 class UVcardDescriptorRegistryDataAsset;
+class UVcardDescriptorBase;
+class AVcardUiRegistryActor;
 
 /**
  * Minimal base for V-card UMG widgets.
@@ -28,6 +30,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Widget")
 	void ApplyVcardDescriptorContext(UVcardDescriptorRegistryDataAsset* descriptorRegistry, UObject* contextObject);
 	virtual void ApplyVcardWidgetAttachment_Implementation(const FVcardWidgetAttachDescriptor& attachmentDescriptor, UObject* payloadData) override;
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Widget")
+	bool EnsureDescriptorRegistry(FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Widget")
+	UVcardDescriptorRegistryDataAsset* LoadDefaultDescriptorRegistry();
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Widget")
+	bool ApplyDescriptorById(FName descriptorId, FVcardDescriptorApplyResult& outResult);
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Widget")
+	bool ApplyDescriptorToNamedSlot(FName slotName, FName descriptorId, FVcardDescriptorApplyResult& outResult);
 
 	UFUNCTION(BlueprintPure, Category = "Vcard|Widget")
 	UVcardDescriptorRegistryDataAsset* GetDescriptorRegistry() const { return mDescriptorRegistry.Get(); }
@@ -43,6 +53,13 @@ protected:
 	void BP_OnVcardDescriptorContextApplied(UVcardDescriptorRegistryDataAsset* descriptorRegistry, UObject* contextObject);
 	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|Widget")
 	void BP_OnVcardAttachmentApplied(const FVcardWidgetAttachDescriptor& attachmentDescriptor, UObject* payloadData);
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Widget")
+	TSoftObjectPtr<UVcardDescriptorRegistryDataAsset> DefaultDescriptorRegistryAsset;
+
+private:
+	AVcardUiRegistryActor* FindWorldRegistryActor() const;
+	bool ApplyDescriptorInternal(FName invocationSlotName, FName descriptorId, FVcardDescriptorApplyResult& outResult);
 
 private:
 	UPROPERTY(Transient)

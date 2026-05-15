@@ -51,6 +51,15 @@ bool UVcardDescriptorBase::ApplyToWidgetInternal(const FVcardDescriptorApplyRequ
 
 bool UVcardWidgetCompositionDescriptor::ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult)
 {
+	if (Attachments.Num() == 0)
+	{
+		UE_LOG(LogVdjmVcard, Verbose, TEXT("Vcard composition descriptor no-op Descriptor=%s Host=%s InvocationSlot=%s"),
+			*DescriptorId.ToString(),
+			*GetNameSafe(request.HostWidget),
+			*request.InvocationSlotName.ToString());
+		return true;
+	}
+
 	bool bAnySuccess = false;
 
 	for (const FVcardWidgetAttachDescriptor& attachmentDescriptor : Attachments)
@@ -78,11 +87,5 @@ bool UVcardWidgetCompositionDescriptor::ApplyToWidgetInternal(const FVcardDescri
 		}
 	}
 
-	if (!bAnySuccess && Attachments.Num() == 0)
-	{
-		outResult.ErrorReason = FString::Printf(TEXT("Descriptor '%s' has no attachments."), *DescriptorId.ToString());
-		return false;
-	}
-
-	return bAnySuccess || Attachments.Num() == 0;
+	return bAnySuccess;
 }

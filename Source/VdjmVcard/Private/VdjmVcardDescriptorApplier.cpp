@@ -194,7 +194,13 @@ bool UVcardDescriptorApplier::ApplyWidgetAttachment(const FVcardDescriptorApplyR
 		return false;
 	}
 
-	if (attachmentDescriptor.TargetSlotName.IsNone())
+	FVcardWidgetAttachDescriptor normalizedAttachment = attachmentDescriptor;
+	if (normalizedAttachment.TargetSlotName.IsNone())
+	{
+		normalizedAttachment.TargetSlotName = request.InvocationSlotName;
+	}
+
+	if (normalizedAttachment.TargetSlotName.IsNone())
 	{
 		outErrorReason = TEXT("Attachment has no target slot name.");
 		return false;
@@ -206,16 +212,16 @@ bool UVcardDescriptorApplier::ApplyWidgetAttachment(const FVcardDescriptorApplyR
 		return false;
 	}
 
-	if (!CreateUserWidgetForHost(request.HostWidget, attachmentDescriptor.WidgetClass, outCreatedWidget, outErrorReason))
+	if (!CreateUserWidgetForHost(request.HostWidget, normalizedAttachment.WidgetClass, outCreatedWidget, outErrorReason))
 	{
 		return false;
 	}
 
-	bool bAttached = AttachWidgetToNamedSlot(request.HostWidget, attachmentDescriptor.TargetSlotName, outCreatedWidget, attachmentDescriptor.OpenPolicy, outErrorReason);
+	bool bAttached = AttachWidgetToNamedSlot(request.HostWidget, normalizedAttachment.TargetSlotName, outCreatedWidget, normalizedAttachment.OpenPolicy, outErrorReason);
 	if (!bAttached)
 	{
 		FString panelErrorReason;
-		bAttached = AttachWidgetToPanel(request.HostWidget, attachmentDescriptor.TargetSlotName, outCreatedWidget, attachmentDescriptor.OpenPolicy, panelErrorReason);
+		bAttached = AttachWidgetToPanel(request.HostWidget, normalizedAttachment.TargetSlotName, outCreatedWidget, normalizedAttachment.OpenPolicy, panelErrorReason);
 		if (!bAttached)
 		{
 			outErrorReason = FString::Printf(TEXT("%s / %s"), *outErrorReason, *panelErrorReason);
@@ -223,14 +229,14 @@ bool UVcardDescriptorApplier::ApplyWidgetAttachment(const FVcardDescriptorApplyR
 		}
 	}
 
-	if (attachmentDescriptor.bAutoApplyPayload && outCreatedWidget->GetClass()->ImplementsInterface(UVcardDescriptorReceiver::StaticClass()))
+	if (normalizedAttachment.bAutoApplyPayload && outCreatedWidget->GetClass()->ImplementsInterface(UVcardDescriptorReceiver::StaticClass()))
 	{
-		IVcardDescriptorReceiver::Execute_ApplyVcardWidgetAttachment(outCreatedWidget, attachmentDescriptor, attachmentDescriptor.PayloadData);
+		IVcardDescriptorReceiver::Execute_ApplyVcardWidgetAttachment(outCreatedWidget, normalizedAttachment, normalizedAttachment.PayloadData);
 	}
 
 	UE_LOG(LogVdjmVcard, Verbose, TEXT("Vcard attachment applied Host=%s Target=%s Widget=%s"),
 		*GetNameSafe(request.HostWidget),
-		*attachmentDescriptor.TargetSlotName.ToString(),
+		*normalizedAttachment.TargetSlotName.ToString(),
 		*GetNameSafe(outCreatedWidget));
 
 	return true;

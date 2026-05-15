@@ -74,6 +74,9 @@ public:
 	TObjectPtr<UObject> SavedStateObject;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Descriptor")
+	FName InvocationSlotName = NAME_None;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Descriptor")
 	FName SourceSignalTag = NAME_None;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Descriptor")
