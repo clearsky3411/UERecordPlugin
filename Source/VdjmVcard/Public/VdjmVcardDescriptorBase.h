@@ -37,8 +37,6 @@ public:
 	FText GetDisplayName() const { return DisplayName; }
 	UFUNCTION(BlueprintPure, Category = "Vcard|Descriptor")
 	FName GetDebugName() const { return DebugName; }
-	UFUNCTION(BlueprintPure, Category = "Vcard|Descriptor")
-	const TArray<FVcardWidgetAttachDescriptor>& GetAttachments() const { return Attachments; }
 
 protected:
 	virtual bool ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult);
@@ -49,11 +47,36 @@ protected:
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "기능에는 영향을 주지 않는 디버그용 이름입니다. DataAsset map key가 실제 lookup 기준입니다."))
 	FName DebugName = NAME_None;
 
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "이 descriptor가 host widget 안에 생성해서 붙일 위젯 목록입니다."))
-	TArray<FVcardWidgetAttachDescriptor> Attachments;
-
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "true면 하나의 attachment가 실패했을 때 즉시 중단합니다."))
 	bool bStopOnFirstFailure = true;
+};
+
+/**
+ * Descriptor for the common one-slot case.
+ *
+ * Responsibility:
+ * - Create one widget and attach it to one named slot or panel on the host widget.
+ *
+ * Must not:
+ * - Own the created widget after attach; UMG slot/panel ownership keeps it alive.
+ * - Compose multiple regions. Use UVcardCompositeDescriptor for that.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
+class VDJMVCARD_API UVcardSingleSlotWidgetDescriptor : public UVcardDescriptorBase
+{
+	GENERATED_BODY()
+
+public:
+	UVcardSingleSlotWidgetDescriptor();
+
+	UFUNCTION(BlueprintPure, Category = "Vcard|Descriptor")
+	FVcardWidgetAttachDescriptor GetSlotAttachment() const { return SlotAttachment; }
+
+protected:
+	virtual bool ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult) override;
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "TargetSlotName에 WidgetClass를 생성해서 붙이는 단일 슬롯 설정입니다."))
+	FVcardWidgetAttachDescriptor SlotAttachment;
 };
 
 /**
@@ -71,8 +94,41 @@ class VDJMVCARD_API UVcardWidgetCompositionDescriptor : public UVcardDescriptorB
 	GENERATED_BODY()
 
 public:
+	UFUNCTION(BlueprintPure, Category = "Vcard|Descriptor")
+	const TArray<FVcardWidgetAttachDescriptor>& GetAttachments() const { return Attachments; }
+
 protected:
 	virtual bool ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult) override;
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "이 descriptor가 host widget 안에 생성해서 붙일 위젯 목록입니다."))
+	TArray<FVcardWidgetAttachDescriptor> Attachments;
+};
+
+/**
+ * Descriptor that runs child descriptors in order.
+ *
+ * Responsibility:
+ * - Group small descriptors into one reusable descriptor entry.
+ *
+ * Must not:
+ * - Store runtime screen state. It only forwards the same apply request to its children.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
+class VDJMVCARD_API UVcardCompositeDescriptor : public UVcardDescriptorBase
+{
+	GENERATED_BODY()
+
+public:
+	UVcardCompositeDescriptor();
+
+	UFUNCTION(BlueprintPure, Category = "Vcard|Descriptor")
+	TArray<UVcardDescriptorBase*> GetChildDescriptorList() const;
+
+protected:
+	virtual bool ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult) override;
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Instanced, Category = "Vcard|Descriptor", meta = (ToolTip = "순서대로 실행할 하위 descriptor입니다. 보통 SingleSlot descriptor들을 묶을 때 사용합니다."))
+	TArray<TObjectPtr<UVcardDescriptorBase>> ChildDescriptors;
 };
 
 /**

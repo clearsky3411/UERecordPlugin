@@ -62,9 +62,44 @@ bool UVcardDescriptorBase::GenerateWidgetsIntoNamedSlots(
 
 bool UVcardDescriptorBase::ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult)
 {
+	UE_LOG(LogVdjmVcard, Verbose, TEXT("Vcard descriptor no-op DebugName=%s Host=%s FallbackSlot=%s"),
+		*DebugName.ToString(),
+		*GetNameSafe(request.NamedSlotHostWidget),
+		*request.FallbackTargetSlotName.ToString());
+	return true;
+}
+
+UVcardSingleSlotWidgetDescriptor::UVcardSingleSlotWidgetDescriptor()
+{
+	DebugName = TEXT("vcard-single-slot");
+}
+
+bool UVcardSingleSlotWidgetDescriptor::ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult)
+{
+	UUserWidget* createdWidget = nullptr;
+	FString errorReason;
+	const bool bApplied = UVcardDescriptorApplier::ApplyWidgetAttachment(request, SlotAttachment, createdWidget, errorReason);
+	if (bApplied)
+	{
+		outResult.CreatedWidgets.Add(createdWidget);
+		return true;
+	}
+
+	UE_LOG(LogVdjmVcard, Warning, TEXT("Vcard single-slot descriptor failed Descriptor=%s Target=%s WidgetClass=%s Reason=%s"),
+		*DebugName.ToString(),
+		*SlotAttachment.TargetSlotName.ToString(),
+		*GetNameSafe(*SlotAttachment.WidgetClass),
+		*errorReason);
+
+	outResult.ErrorReason = errorReason;
+	return false;
+}
+
+bool UVcardWidgetCompositionDescriptor::ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult)
+{
 	if (Attachments.Num() == 0)
 	{
-		UE_LOG(LogVdjmVcard, Verbose, TEXT("Vcard descriptor no-op DebugName=%s Host=%s FallbackSlot=%s"),
+		UE_LOG(LogVdjmVcard, Verbose, TEXT("Vcard composition descriptor no-op DebugName=%s Host=%s FallbackSlot=%s"),
 			*DebugName.ToString(),
 			*GetNameSafe(request.NamedSlotHostWidget),
 			*request.FallbackTargetSlotName.ToString());
@@ -102,9 +137,95 @@ bool UVcardDescriptorBase::ApplyToWidgetInternal(const FVcardDescriptorApplyRequ
 	return bAnySuccess;
 }
 
-bool UVcardWidgetCompositionDescriptor::ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult)
+UVcardCompositeDescriptor::UVcardCompositeDescriptor()
 {
-	return Super::ApplyToWidgetInternal(request, outResult);
+	DebugName = TEXT("vcard-composite");
+}
+
+TArray<UVcardDescriptorBase*> UVcardCompositeDescriptor::GetChildDescriptorList() const
+{
+	TArray<UVcardDescriptorBase*> childDescriptorList;
+	childDescriptorList.Reserve(ChildDescriptors.Num());
+
+	for (UVcardDescriptorBase* childDescriptor : ChildDescriptors)
+	{
+		if (IsValid(childDescriptor))
+		{
+			childDescriptorList.Add(childDescriptor);
+		}
+	}
+
+	return childDescriptorList;
+}
+
+bool UVcardCompositeDescriptor::ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult)
+{
+	if (ChildDescriptors.Num() == 0)
+	{
+		UE_LOG(LogVdjmVcard, Verbose, TEXT("Vcard composite descriptor no-op DebugName=%s Host=%s FallbackSlot=%s"),
+			*DebugName.ToString(),
+			*GetNameSafe(request.NamedSlotHostWidget),
+			*request.FallbackTargetSlotName.ToString());
+		return true;
+	}
+
+	bool bAnySuccess = false;
+
+	for (int32 childIndex = 0; childIndex < ChildDescriptors.Num(); ++childIndex)
+	{
+		UVcardDescriptorBase* childDescriptor = ChildDescriptors[childIndex];
+		if (!IsValid(childDescriptor) || childDescriptor == this)
+		{
+			outResult.ErrorReason = FString::Printf(TEXT("Composite child descriptor is invalid. Descriptor=%s Index=%d"),
+				*DebugName.ToString(),
+				childIndex);
+			UE_LOG(LogVdjmVcard, Warning, TEXT("Vcard composite child skipped Descriptor=%s Index=%d Reason=%s"),
+				*DebugName.ToString(),
+				childIndex,
+				*outResult.ErrorReason);
+
+			if (bStopOnFirstFailure)
+			{
+				return false;
+			}
+
+			continue;
+		}
+
+		FVcardDescriptorApplyResult childResult;
+		const bool bApplied = childDescriptor->ApplyToWidget(request, childResult);
+		if (bApplied)
+		{
+			bAnySuccess = true;
+			for (UUserWidget* createdWidget : childResult.CreatedWidgets)
+			{
+				if (IsValid(createdWidget))
+				{
+					outResult.CreatedWidgets.Add(createdWidget);
+				}
+			}
+			continue;
+		}
+
+		outResult.ErrorReason = childResult.ErrorReason.IsEmpty()
+			? FString::Printf(TEXT("Composite child descriptor failed. Descriptor=%s Child=%s Index=%d"),
+				*DebugName.ToString(),
+				*GetNameSafe(childDescriptor),
+				childIndex)
+			: childResult.ErrorReason;
+		UE_LOG(LogVdjmVcard, Warning, TEXT("Vcard composite child failed Descriptor=%s Child=%s Index=%d Reason=%s"),
+			*DebugName.ToString(),
+			*GetNameSafe(childDescriptor),
+			childIndex,
+			*outResult.ErrorReason);
+
+		if (bStopOnFirstFailure)
+		{
+			return false;
+		}
+	}
+
+	return bAnySuccess;
 }
 
 UVcardRootDescriptor::UVcardRootDescriptor()
