@@ -150,6 +150,60 @@ public:
 };
 
 /**
+ * Preview lobby descriptor for composing PreviewLobby.Top/Carousel/Bottom.
+ *
+ * Responsibility:
+ * - Group descriptor fragments used by the preview lobby shell.
+ *
+ * Must not:
+ * - Create or own the root Stage itself.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
+class VDJMVCARD_API UVcardPreviewLobbyDescriptor : public UVcardCompositeDescriptor
+{
+	GENERATED_BODY()
+
+public:
+	UVcardPreviewLobbyDescriptor();
+};
+
+/**
+ * Creator lobby descriptor for composing CreatorLobby.Top/Tools/ToolContents.
+ *
+ * Responsibility:
+ * - Group descriptor fragments used by the creator lobby shell.
+ *
+ * Must not:
+ * - Own the selected tool state.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
+class VDJMVCARD_API UVcardCreatorLobbyDescriptor : public UVcardCompositeDescriptor
+{
+	GENERATED_BODY()
+
+public:
+	UVcardCreatorLobbyDescriptor();
+};
+
+/**
+ * Tool option content descriptor for composing toolOptNameArray/toolOptContentMain.
+ *
+ * Responsibility:
+ * - Group descriptor fragments used by option-driven tool content panels.
+ *
+ * Must not:
+ * - Force tools that do not need option names to use this shell.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
+class VDJMVCARD_API UVcardToolOptContentDescriptor : public UVcardCompositeDescriptor
+{
+	GENERATED_BODY()
+
+public:
+	UVcardToolOptContentDescriptor();
+};
+
+/**
  * Stage-lobby descriptor for lobby content placed into a root/stage slot.
  *
  * Responsibility:

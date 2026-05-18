@@ -233,6 +233,21 @@ UVcardRootDescriptor::UVcardRootDescriptor()
 	DebugName = TEXT("vcard-root");
 }
 
+UVcardPreviewLobbyDescriptor::UVcardPreviewLobbyDescriptor()
+{
+	DebugName = TEXT("vcard-preview-lobby");
+}
+
+UVcardCreatorLobbyDescriptor::UVcardCreatorLobbyDescriptor()
+{
+	DebugName = TEXT("vcard-creator-lobby");
+}
+
+UVcardToolOptContentDescriptor::UVcardToolOptContentDescriptor()
+{
+	DebugName = TEXT("vcard-tool-opt-content");
+}
+
 UVcardStageLobbyDescriptor::UVcardStageLobbyDescriptor()
 {
 	DebugName = TEXT("vcard-stage-lobby");

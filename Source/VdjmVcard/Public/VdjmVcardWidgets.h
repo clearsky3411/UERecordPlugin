@@ -118,6 +118,67 @@ protected:
 };
 
 /**
+ * Creator lobby screen shell.
+ *
+ * Responsibility:
+ * - Provide stable slot names for creator top controls, tool buttons, and tool content area.
+ *
+ * Must not:
+ * - Hard-code concrete background/motion/text editor panels.
+ */
+UCLASS(BlueprintType, Blueprintable)
+class VDJMVCARD_API UVcardCreatorLobbyWidget : public UVcardScreenWidgetBase
+{
+	GENERATED_BODY()
+
+public:
+	UFUNCTION(BlueprintPure, Category = "Vcard|CreatorLobby")
+	FName GetTopSlotName() const { return TopSlotName; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|CreatorLobby")
+	FName GetToolsSlotName() const { return ToolsSlotName; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|CreatorLobby")
+	FName GetToolContentsSlotName() const { return ToolContentsSlotName; }
+
+protected:
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|CreatorLobby")
+	FName TopSlotName = TEXT("Top");
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|CreatorLobby")
+	FName ToolsSlotName = TEXT("Tools");
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|CreatorLobby")
+	FName ToolContentsSlotName = TEXT("ToolContents");
+};
+
+/**
+ * Tool option content shell.
+ *
+ * Responsibility:
+ * - Provide optional tool option-name region and main tool-content region.
+ *
+ * Must not:
+ * - Assume every tool uses option names. Tools can bypass this shell and fill CreatorLobby.ToolContents directly.
+ */
+UCLASS(BlueprintType, Blueprintable)
+class VDJMVCARD_API UVcardToolOptContentWidget : public UVcardWidgetBase
+{
+	GENERATED_BODY()
+
+public:
+	UFUNCTION(BlueprintPure, Category = "Vcard|ToolOptContent")
+	FName GetToolOptNameArraySlotName() const { return ToolOptNameArraySlotName; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|ToolOptContent")
+	FName GetToolOptContentMainSlotName() const { return ToolOptContentMainSlotName; }
+
+protected:
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|ToolOptContent")
+	FName ToolOptNameArraySlotName = TEXT("toolOptNameArray");
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|ToolOptContent")
+	FName ToolOptContentMainSlotName = TEXT("toolOptContentMain");
+};
+
+/**
  * Background editor screen shell.
  *
  * Responsibility:
@@ -126,7 +187,7 @@ protected:
  * Must not:
  * - Hard-code specific preset/upload panels.
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType, Blueprintable, meta = (DeprecatedNode, DeprecationMessage = "Use UVcardCreatorLobbyWidget. This class keeps old Background WBP parents loadable during migration."))
 class VDJMVCARD_API UVcardBackgroundWidget : public UVcardScreenWidgetBase
 {
 	GENERATED_BODY()
@@ -169,7 +230,7 @@ protected:
  * Must not:
  * - Implement concrete background preset logic.
  */
-UCLASS(BlueprintType, Blueprintable)
+UCLASS(BlueprintType, Blueprintable, meta = (DeprecatedNode, DeprecationMessage = "Use UVcardToolOptContentWidget or a direct content widget under UVcardCreatorLobbyWidget.ToolContents."))
 class VDJMVCARD_API UVcardBackgroundBottomWidget : public UVcardWidgetBase
 {
 	GENERATED_BODY()
