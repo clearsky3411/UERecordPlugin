@@ -56,10 +56,8 @@ bool UVcardRootWidget::CloseModal(FString& outErrorReason)
 FVcardDescriptorApplyRequest UVcardRootWidget::BuildApplyRequest(UObject* previousStateObject, UObject* savedStateObject) const
 {
 	FVcardDescriptorApplyRequest request;
-	request.HostWidget = const_cast<UVcardRootWidget*>(this);
-	request.ContextObject = GetVcardContextObject();
-	request.PreviousStateObject = previousStateObject;
-	request.SavedStateObject = savedStateObject;
+	request.NamedSlotHostWidget = const_cast<UVcardRootWidget*>(this);
+	request.PayloadData = IsValid(savedStateObject) ? savedStateObject : previousStateObject;
 	request.bAllowCreate = true;
 	return request;
 }
@@ -74,8 +72,7 @@ bool UVcardScreenWidgetBase::ApplyCompositionDescriptor(UVcardDescriptorBase* de
 	}
 
 	FVcardDescriptorApplyRequest request;
-	request.HostWidget = this;
-	request.ContextObject = GetVcardContextObject();
+	request.NamedSlotHostWidget = this;
 	request.bAllowCreate = true;
 	return descriptor->ApplyToWidget(request, outResult);
 }
@@ -109,12 +106,11 @@ bool UVcardBackgroundWidget::ApplyBottomDescriptor(UVcardDescriptorBase* descrip
 bool UVcardBackgroundBottomWidget::ApplyBottomSheetDescriptor(const FVcardBottomSheetDescriptor& bottomSheetDescriptor, FVcardDescriptorApplyResult& outResult)
 {
 	outResult = FVcardDescriptorApplyResult();
-	outResult.DescriptorId = bottomSheetDescriptor.DescriptorId;
+	outResult.DescriptorKey = bottomSheetDescriptor.DescriptorKey;
 	mCurrentBottomSheetDescriptor = bottomSheetDescriptor;
 
 	FVcardDescriptorApplyRequest request;
-	request.HostWidget = this;
-	request.ContextObject = GetVcardContextObject();
+	request.NamedSlotHostWidget = this;
 	request.bAllowCreate = true;
 
 	bool bAnySuccess = false;
@@ -168,7 +164,7 @@ void UVcardBackgroundBottomWidget::SetOpenRatio(float openRatio)
 
 	float minRatio = 0.0f;
 	float maxRatio = 1.0f;
-	if (!mCurrentBottomSheetDescriptor.DescriptorId.IsNone())
+	if (!mCurrentBottomSheetDescriptor.DescriptorKey.IsNone())
 	{
 		minRatio = mCurrentBottomSheetDescriptor.MinOpenRatio;
 		maxRatio = mCurrentBottomSheetDescriptor.MaxOpenRatio;
@@ -188,8 +184,8 @@ void UVcardBackgroundBottomWidget::SetOpenRatio(float openRatio)
 
 void UVcardBackgroundBottomWidget::ToggleOpenRatio()
 {
-	const float minRatio = mCurrentBottomSheetDescriptor.DescriptorId.IsNone() ? 0.0f : mCurrentBottomSheetDescriptor.MinOpenRatio;
-	const float maxRatio = mCurrentBottomSheetDescriptor.DescriptorId.IsNone() ? 1.0f : mCurrentBottomSheetDescriptor.MaxOpenRatio;
+	const float minRatio = mCurrentBottomSheetDescriptor.DescriptorKey.IsNone() ? 0.0f : mCurrentBottomSheetDescriptor.MinOpenRatio;
+	const float maxRatio = mCurrentBottomSheetDescriptor.DescriptorKey.IsNone() ? 1.0f : mCurrentBottomSheetDescriptor.MaxOpenRatio;
 	const float targetRatio = FMath::IsNearlyEqual(mOpenRatio, maxRatio) ? minRatio : maxRatio;
 	SetOpenRatio(targetRatio);
 }
@@ -213,7 +209,7 @@ void UVcardTopBarWidget::SetTopBarSignals(FName backSignalTag, FName primarySign
 bool UVcardModalLayerWidget::OpenModalContent(const FVcardWidgetAttachDescriptor& attachmentDescriptor, FVcardDescriptorApplyResult& outResult)
 {
 	outResult = FVcardDescriptorApplyResult();
-	outResult.DescriptorId = attachmentDescriptor.AttachId;
+	outResult.DescriptorKey = attachmentDescriptor.DebugName;
 
 	FVcardWidgetAttachDescriptor normalizedAttachment = attachmentDescriptor;
 	if (normalizedAttachment.TargetSlotName.IsNone())
@@ -222,8 +218,7 @@ bool UVcardModalLayerWidget::OpenModalContent(const FVcardWidgetAttachDescriptor
 	}
 
 	FVcardDescriptorApplyRequest request;
-	request.HostWidget = this;
-	request.ContextObject = GetVcardContextObject();
+	request.NamedSlotHostWidget = this;
 	request.bAllowCreate = true;
 
 	UUserWidget* createdWidget = nullptr;

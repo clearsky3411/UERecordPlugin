@@ -10,8 +10,8 @@
  * Central V-card descriptor registry.
  *
  * Responsibility:
- * - Keep editable V-card descriptors together.
- * - Provide map lookup for runtime calls and array fallback for editor-friendly authoring.
+ * - Keep editable V-card descriptors behind explicit descriptor keys.
+ * - Provide one lookup path for widgets that ask a descriptor to fill their named slots.
  *
  * Must not:
  * - Replace project-level asset registry validation.
@@ -24,15 +24,12 @@ class VDJMVCARD_API UVcardDescriptorRegistryDataAsset : public UDataAsset
 
 public:
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Registry")
-	bool FindDescriptorById(FName descriptorId, UVcardDescriptorBase*& outDescriptor) const;
+	bool FindDescriptorByKey(FName descriptorKey, UVcardDescriptorBase*& outDescriptor) const;
 
 	UFUNCTION(BlueprintPure, Category = "Vcard|Registry")
 	TArray<UVcardDescriptorBase*> GetDescriptorList() const;
 
 protected:
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Instanced, Category = "Vcard|Registry")
-	TArray<TObjectPtr<UVcardDescriptorBase>> Descriptors;
-
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Instanced, Category = "Vcard|Registry")
-	TMap<FName, TObjectPtr<UVcardDescriptorBase>> DescriptorMap;
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Instanced, Category = "Vcard|Registry", meta = (ToolTip = "Key가 descriptor lookup 기준입니다. Widget은 이 key를 helper에 넘겨 자신의 NamedSlot/PanelWidget을 채웁니다."))
+	TMap<FName, TObjectPtr<UVcardDescriptorBase>> DescriptorByKey;
 };

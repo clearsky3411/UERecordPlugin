@@ -5,6 +5,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Kismet/GameplayStatics.h"
 #include "VdjmVcard.h"
+#include "VdjmVcardDescriptorApplier.h"
 #include "VdjmVcardDescriptorBase.h"
 #include "VdjmVcardDescriptorRegistryDataAsset.h"
 #include "VdjmVcardWidgets.h"
@@ -38,12 +39,12 @@ bool AVcardUiRegistryActor::CreateRootWidget(FString& outErrorReason)
 
 	if (APlayerController* playerController = UGameplayStatics::GetPlayerController(world, PlayerIndex))
 	{
-		mRootWidget = CreateWidget<UVcardRootWidget>(playerController, RootWidgetClass);
+		mRootWidget = CreateWidget<UUserWidget>(playerController, RootWidgetClass);
 	}
 
 	if (!IsValid(mRootWidget) && !bRequireOwningPlayer)
 	{
-		mRootWidget = CreateWidget<UVcardRootWidget>(world, RootWidgetClass);
+		mRootWidget = CreateWidget<UUserWidget>(world, RootWidgetClass);
 	}
 
 	if (!IsValid(mRootWidget))
@@ -52,7 +53,11 @@ bool AVcardUiRegistryActor::CreateRootWidget(FString& outErrorReason)
 		return false;
 	}
 
-	mRootWidget->ApplyVcardDescriptorContext(DescriptorRegistry, this);
+	if (UVcardWidgetBase* rootVcardWidget = Cast<UVcardWidgetBase>(mRootWidget))
+	{
+		rootVcardWidget->ApplyVcardDescriptorContext(DescriptorRegistry, this);
+	}
+
 	mRootWidget->AddToViewport(RootZOrder);
 
 	if (bApplyRootDescriptorOnCreate)
@@ -71,9 +76,9 @@ bool AVcardUiRegistryActor::CreateRootWidget(FString& outErrorReason)
 bool AVcardUiRegistryActor::ApplyRootDescriptor(FVcardDescriptorApplyResult& outResult)
 {
 	outResult = FVcardDescriptorApplyResult();
-	outResult.DescriptorId = RootDescriptorId;
+	outResult.DescriptorKey = RootDescriptorKey;
 
-	if (RootDescriptorId.IsNone())
+	if (RootDescriptorKey.IsNone())
 	{
 		outResult.bSuccess = true;
 		return true;
@@ -91,18 +96,26 @@ bool AVcardUiRegistryActor::ApplyRootDescriptor(FVcardDescriptorApplyResult& out
 		return false;
 	}
 
-	UVcardDescriptorBase* rootDescriptor = nullptr;
-	if (!DescriptorRegistry->FindDescriptorById(RootDescriptorId, rootDescriptor) || !IsValid(rootDescriptor))
+	TArray<UUserWidget*> createdWidgets;
+	FString errorReason;
+	const bool bGenerated = UVcardDescriptorApplier::GenerateWidgetsIntoNamedSlotsFromVcardDescriptorDataAsset(
+		mRootWidget,
+		DescriptorRegistry,
+		RootDescriptorKey,
+		this,
+		createdWidgets,
+		errorReason);
+	outResult.bSuccess = bGenerated;
+	for (UUserWidget* createdWidget : createdWidgets)
 	{
-		outResult.ErrorReason = FString::Printf(TEXT("Root descriptor '%s' was not found."), *RootDescriptorId.ToString());
-		return false;
+		if (IsValid(createdWidget))
+		{
+			outResult.CreatedWidgets.Add(createdWidget);
+		}
 	}
 
-	FVcardDescriptorApplyRequest request;
-	request.HostWidget = mRootWidget;
-	request.ContextObject = this;
-	request.bAllowCreate = true;
-	return rootDescriptor->ApplyToWidget(request, outResult);
+	outResult.ErrorReason = errorReason;
+	return bGenerated;
 }
 
 bool AVcardUiRegistryActor::ApplyRegistryToWidget(UVcardWidgetBase* widget, UObject* contextObject)
@@ -116,10 +129,10 @@ bool AVcardUiRegistryActor::ApplyRegistryToWidget(UVcardWidgetBase* widget, UObj
 	return true;
 }
 
-bool AVcardUiRegistryActor::FindDescriptorById(FName descriptorId, UVcardDescriptorBase*& outDescriptor) const
+bool AVcardUiRegistryActor::FindDescriptorByKey(FName descriptorKey, UVcardDescriptorBase*& outDescriptor) const
 {
 	outDescriptor = nullptr;
-	return IsValid(DescriptorRegistry) && DescriptorRegistry->FindDescriptorById(descriptorId, outDescriptor);
+	return IsValid(DescriptorRegistry) && DescriptorRegistry->FindDescriptorByKey(descriptorKey, outDescriptor);
 }
 
 void AVcardUiRegistryActor::BeginPlay()

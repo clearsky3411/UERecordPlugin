@@ -58,7 +58,7 @@ struct VDJMVCARD_API FVcardSelectableItemDescriptor
 	FSoftObjectPath PayloadPath;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Selectable")
-	FName ActionDescriptorId = NAME_None;
+	FName ActionDescriptorKey = NAME_None;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Selectable|Signal")
 	FName ClickSignalTag = NAME_None;

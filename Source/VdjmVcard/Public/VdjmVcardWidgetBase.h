@@ -35,9 +35,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Widget")
 	UVcardDescriptorRegistryDataAsset* LoadDefaultDescriptorRegistry();
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Widget")
-	bool ApplyDescriptorById(FName descriptorId, FVcardDescriptorApplyResult& outResult);
+	bool ApplyDescriptorByKey(FName descriptorKey, FVcardDescriptorApplyResult& outResult);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Widget")
-	bool ApplyDescriptorToNamedSlot(FName slotName, FName descriptorId, FVcardDescriptorApplyResult& outResult);
+	bool ApplyDescriptorToNamedSlot(FName slotName, FName descriptorKey, FVcardDescriptorApplyResult& outResult);
 
 	UFUNCTION(BlueprintPure, Category = "Vcard|Widget")
 	UVcardDescriptorRegistryDataAsset* GetDescriptorRegistry() const { return mDescriptorRegistry.Get(); }
@@ -59,7 +59,7 @@ protected:
 
 private:
 	AVcardUiRegistryActor* FindWorldRegistryActor() const;
-	bool ApplyDescriptorInternal(FName invocationSlotName, FName descriptorId, FVcardDescriptorApplyResult& outResult);
+	bool ApplyDescriptorInternal(FName fallbackTargetSlotName, FName descriptorKey, FVcardDescriptorApplyResult& outResult);
 
 private:
 	UPROPERTY(Transient)

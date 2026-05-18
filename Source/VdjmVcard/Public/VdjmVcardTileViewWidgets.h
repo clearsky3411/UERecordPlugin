@@ -49,7 +49,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Vcard|Tile")
 	FSoftObjectPath GetPayloadPath() const { return PayloadPath; }
 	UFUNCTION(BlueprintPure, Category = "Vcard|Tile")
-	FName GetActionDescriptorId() const { return ActionDescriptorId; }
+	FName GetActionDescriptorKey() const { return ActionDescriptorKey; }
 	UFUNCTION(BlueprintPure, Category = "Vcard|Tile")
 	UVcardDescriptorBase* GetActionDescriptor() const { return ActionDescriptor; }
 	UFUNCTION(BlueprintPure, Category = "Vcard|Tile")
@@ -80,7 +80,7 @@ public:
 	FSoftObjectPath PayloadPath;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Tile")
-	FName ActionDescriptorId = NAME_None;
+	FName ActionDescriptorKey = NAME_None;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Tile")
 	TObjectPtr<UVcardDescriptorBase> ActionDescriptor;

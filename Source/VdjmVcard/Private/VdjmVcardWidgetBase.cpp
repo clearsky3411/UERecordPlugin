@@ -1,6 +1,7 @@
 #include "VdjmVcardWidgetBase.h"
 
 #include "EngineUtils.h"
+#include "VdjmVcardDescriptorApplier.h"
 #include "VdjmVcardDescriptorBase.h"
 #include "VdjmVcardDescriptorRegistryDataAsset.h"
 #include "VdjmVcardUiRegistryActor.h"
@@ -65,14 +66,14 @@ UVcardDescriptorRegistryDataAsset* UVcardWidgetBase::LoadDefaultDescriptorRegist
 	return loadedRegistry;
 }
 
-bool UVcardWidgetBase::ApplyDescriptorById(FName descriptorId, FVcardDescriptorApplyResult& outResult)
+bool UVcardWidgetBase::ApplyDescriptorByKey(FName descriptorKey, FVcardDescriptorApplyResult& outResult)
 {
-	return ApplyDescriptorInternal(NAME_None, descriptorId, outResult);
+	return ApplyDescriptorInternal(NAME_None, descriptorKey, outResult);
 }
 
-bool UVcardWidgetBase::ApplyDescriptorToNamedSlot(FName slotName, FName descriptorId, FVcardDescriptorApplyResult& outResult)
+bool UVcardWidgetBase::ApplyDescriptorToNamedSlot(FName slotName, FName descriptorKey, FVcardDescriptorApplyResult& outResult)
 {
-	return ApplyDescriptorInternal(slotName, descriptorId, outResult);
+	return ApplyDescriptorInternal(slotName, descriptorKey, outResult);
 }
 
 AVcardUiRegistryActor* UVcardWidgetBase::FindWorldRegistryActor() const
@@ -94,10 +95,10 @@ AVcardUiRegistryActor* UVcardWidgetBase::FindWorldRegistryActor() const
 	return nullptr;
 }
 
-bool UVcardWidgetBase::ApplyDescriptorInternal(FName invocationSlotName, FName descriptorId, FVcardDescriptorApplyResult& outResult)
+bool UVcardWidgetBase::ApplyDescriptorInternal(FName fallbackTargetSlotName, FName descriptorKey, FVcardDescriptorApplyResult& outResult)
 {
 	outResult = FVcardDescriptorApplyResult();
-	outResult.DescriptorId = descriptorId;
+	outResult.DescriptorKey = descriptorKey;
 
 	FString errorReason;
 	if (!EnsureDescriptorRegistry(errorReason))
@@ -106,23 +107,49 @@ bool UVcardWidgetBase::ApplyDescriptorInternal(FName invocationSlotName, FName d
 		return false;
 	}
 
-	if (descriptorId.IsNone())
+	if (descriptorKey.IsNone())
 	{
-		outResult.ErrorReason = TEXT("DescriptorId is None.");
+		outResult.ErrorReason = TEXT("Descriptor key is None.");
 		return false;
 	}
 
-	UVcardDescriptorBase* descriptor = nullptr;
-	if (!mDescriptorRegistry->FindDescriptorById(descriptorId, descriptor) || !IsValid(descriptor))
+	UObject* payloadData = IsValid(mContextObject) ? mContextObject.Get() : this;
+	if (fallbackTargetSlotName.IsNone())
 	{
-		outResult.ErrorReason = FString::Printf(TEXT("Descriptor '%s' was not found."), *descriptorId.ToString());
+		TArray<UUserWidget*> createdWidgets;
+		FString applyErrorReason;
+		const bool bGenerated = UVcardDescriptorApplier::GenerateWidgetsIntoNamedSlotsFromVcardDescriptorDataAsset(
+			this,
+			mDescriptorRegistry.Get(),
+			descriptorKey,
+			payloadData,
+			createdWidgets,
+			applyErrorReason);
+		outResult.bSuccess = bGenerated;
+		outResult.ErrorReason = applyErrorReason;
+
+		for (UUserWidget* createdWidget : createdWidgets)
+		{
+			if (IsValid(createdWidget))
+			{
+				outResult.CreatedWidgets.Add(createdWidget);
+			}
+		}
+
+		return bGenerated;
+	}
+
+	UVcardDescriptorBase* descriptor = nullptr;
+	if (!mDescriptorRegistry->FindDescriptorByKey(descriptorKey, descriptor) || !IsValid(descriptor))
+	{
+		outResult.ErrorReason = FString::Printf(TEXT("Descriptor key '%s' was not found."), *descriptorKey.ToString());
 		return false;
 	}
 
 	FVcardDescriptorApplyRequest request;
-	request.HostWidget = this;
-	request.ContextObject = IsValid(mContextObject) ? mContextObject.Get() : this;
-	request.InvocationSlotName = invocationSlotName;
+	request.NamedSlotHostWidget = this;
+	request.FallbackTargetSlotName = fallbackTargetSlotName;
+	request.PayloadData = payloadData;
 	request.bAllowCreate = true;
 	return descriptor->ApplyToWidget(request, outResult);
 }

@@ -4,7 +4,54 @@
 #include "Components/NamedSlot.h"
 #include "Components/PanelWidget.h"
 #include "VdjmVcard.h"
+#include "VdjmVcardDescriptorBase.h"
 #include "VdjmVcardDescriptorReceiver.h"
+#include "VdjmVcardDescriptorRegistryDataAsset.h"
+
+bool UVcardDescriptorApplier::GenerateWidgetsIntoNamedSlotsFromVcardDescriptorDataAsset(
+	UUserWidget* namedSlotHostWidget,
+	UVcardDescriptorRegistryDataAsset* descriptorRegistryDataAsset,
+	FName descriptorKey,
+	UObject* payloadData,
+	TArray<UUserWidget*>& outCreatedWidgets,
+	FString& outErrorReason)
+{
+	outCreatedWidgets.Reset();
+	outErrorReason.Reset();
+
+	if (!IsValid(namedSlotHostWidget))
+	{
+		outErrorReason = TEXT("Named slot host widget is invalid.");
+		return false;
+	}
+
+	if (!IsValid(descriptorRegistryDataAsset))
+	{
+		outErrorReason = TEXT("Descriptor registry data asset is invalid.");
+		return false;
+	}
+
+	if (descriptorKey.IsNone())
+	{
+		outErrorReason = TEXT("Descriptor key is None.");
+		return false;
+	}
+
+	UVcardDescriptorBase* descriptor = nullptr;
+	if (!descriptorRegistryDataAsset->FindDescriptorByKey(descriptorKey, descriptor) || !IsValid(descriptor))
+	{
+		outErrorReason = FString::Printf(TEXT("Descriptor key '%s' was not found."), *descriptorKey.ToString());
+		return false;
+	}
+
+	const bool bGenerated = descriptor->GenerateWidgetsIntoNamedSlots(namedSlotHostWidget, payloadData, outCreatedWidgets, outErrorReason);
+	if (!bGenerated && outErrorReason.IsEmpty())
+	{
+		outErrorReason = FString::Printf(TEXT("Descriptor key '%s' failed without error reason."), *descriptorKey.ToString());
+	}
+
+	return bGenerated;
+}
 
 bool UVcardDescriptorApplier::FindWidgetByName(UUserWidget* hostWidget, FName widgetName, UWidget*& outWidget)
 {
@@ -188,16 +235,16 @@ bool UVcardDescriptorApplier::ApplyWidgetAttachment(const FVcardDescriptorApplyR
 	outCreatedWidget = nullptr;
 	outErrorReason.Reset();
 
-	if (!IsValid(request.HostWidget))
+	if (!IsValid(request.NamedSlotHostWidget))
 	{
-		outErrorReason = TEXT("Apply request has no host widget.");
+		outErrorReason = TEXT("Apply request has no named slot host widget.");
 		return false;
 	}
 
 	FVcardWidgetAttachDescriptor normalizedAttachment = attachmentDescriptor;
 	if (normalizedAttachment.TargetSlotName.IsNone())
 	{
-		normalizedAttachment.TargetSlotName = request.InvocationSlotName;
+		normalizedAttachment.TargetSlotName = request.FallbackTargetSlotName;
 	}
 
 	if (normalizedAttachment.TargetSlotName.IsNone())
@@ -212,16 +259,16 @@ bool UVcardDescriptorApplier::ApplyWidgetAttachment(const FVcardDescriptorApplyR
 		return false;
 	}
 
-	if (!CreateUserWidgetForHost(request.HostWidget, normalizedAttachment.WidgetClass, outCreatedWidget, outErrorReason))
+	if (!CreateUserWidgetForHost(request.NamedSlotHostWidget, normalizedAttachment.WidgetClass, outCreatedWidget, outErrorReason))
 	{
 		return false;
 	}
 
-	bool bAttached = AttachWidgetToNamedSlot(request.HostWidget, normalizedAttachment.TargetSlotName, outCreatedWidget, normalizedAttachment.OpenPolicy, outErrorReason);
+	bool bAttached = AttachWidgetToNamedSlot(request.NamedSlotHostWidget, normalizedAttachment.TargetSlotName, outCreatedWidget, normalizedAttachment.OpenPolicy, outErrorReason);
 	if (!bAttached)
 	{
 		FString panelErrorReason;
-		bAttached = AttachWidgetToPanel(request.HostWidget, normalizedAttachment.TargetSlotName, outCreatedWidget, normalizedAttachment.OpenPolicy, panelErrorReason);
+		bAttached = AttachWidgetToPanel(request.NamedSlotHostWidget, normalizedAttachment.TargetSlotName, outCreatedWidget, normalizedAttachment.OpenPolicy, panelErrorReason);
 		if (!bAttached)
 		{
 			outErrorReason = FString::Printf(TEXT("%s / %s"), *outErrorReason, *panelErrorReason);
@@ -231,11 +278,12 @@ bool UVcardDescriptorApplier::ApplyWidgetAttachment(const FVcardDescriptorApplyR
 
 	if (normalizedAttachment.bAutoApplyPayload && outCreatedWidget->GetClass()->ImplementsInterface(UVcardDescriptorReceiver::StaticClass()))
 	{
-		IVcardDescriptorReceiver::Execute_ApplyVcardWidgetAttachment(outCreatedWidget, normalizedAttachment, normalizedAttachment.PayloadData);
+		UObject* payloadData = IsValid(normalizedAttachment.PayloadData) ? normalizedAttachment.PayloadData.Get() : request.PayloadData.Get();
+		IVcardDescriptorReceiver::Execute_ApplyVcardWidgetAttachment(outCreatedWidget, normalizedAttachment, payloadData);
 	}
 
 	UE_LOG(LogVdjmVcard, Verbose, TEXT("Vcard attachment applied Host=%s Target=%s Widget=%s"),
-		*GetNameSafe(request.HostWidget),
+		*GetNameSafe(request.NamedSlotHostWidget),
 		*normalizedAttachment.TargetSlotName.ToString(),
 		*GetNameSafe(outCreatedWidget));
 

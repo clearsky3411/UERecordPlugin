@@ -6,7 +6,6 @@
 bool UVcardDescriptorBase::ApplyToWidget(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult)
 {
 	outResult = FVcardDescriptorApplyResult();
-	outResult.DescriptorId = DescriptorId;
 
 	FString reason;
 	if (!CanApplyToWidget(request, reason))
@@ -24,39 +23,51 @@ bool UVcardDescriptorBase::CanApplyToWidget(const FVcardDescriptorApplyRequest& 
 {
 	outReason.Reset();
 
-	if (DescriptorId.IsNone())
+	if (!IsValid(request.NamedSlotHostWidget))
 	{
-		outReason = TEXT("DescriptorId is not assigned.");
-		return false;
-	}
-
-	if (!IsValid(request.HostWidget))
-	{
-		outReason = TEXT("Host widget is invalid.");
+		outReason = TEXT("Named slot host widget is invalid.");
 		return false;
 	}
 
 	return true;
 }
 
-bool UVcardDescriptorBase::ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult)
+bool UVcardDescriptorBase::GenerateWidgetsIntoNamedSlots(
+	UUserWidget* namedSlotHostWidget,
+	UObject* payloadData,
+	TArray<UUserWidget*>& outCreatedWidgets,
+	FString& outErrorReason)
 {
-	outResult.ErrorReason = FString::Printf(TEXT("Descriptor '%s' has no native apply implementation."), *DescriptorId.ToString());
-	UE_LOG(LogVdjmVcard, Warning, TEXT("Vcard descriptor apply skipped Descriptor=%s Host=%s Reason=%s"),
-		*DescriptorId.ToString(),
-		*GetNameSafe(request.HostWidget),
-		*outResult.ErrorReason);
-	return false;
+	outCreatedWidgets.Reset();
+	outErrorReason.Reset();
+
+	FVcardDescriptorApplyRequest request;
+	request.NamedSlotHostWidget = namedSlotHostWidget;
+	request.PayloadData = payloadData;
+	request.bAllowCreate = true;
+
+	FVcardDescriptorApplyResult result;
+	const bool bGenerated = ApplyToWidget(request, result);
+	for (UUserWidget* createdWidget : result.CreatedWidgets)
+	{
+		if (IsValid(createdWidget))
+		{
+			outCreatedWidgets.Add(createdWidget);
+		}
+	}
+
+	outErrorReason = result.ErrorReason;
+	return bGenerated;
 }
 
-bool UVcardWidgetCompositionDescriptor::ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult)
+bool UVcardDescriptorBase::ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult)
 {
 	if (Attachments.Num() == 0)
 	{
-		UE_LOG(LogVdjmVcard, Verbose, TEXT("Vcard composition descriptor no-op Descriptor=%s Host=%s InvocationSlot=%s"),
-			*DescriptorId.ToString(),
-			*GetNameSafe(request.HostWidget),
-			*request.InvocationSlotName.ToString());
+		UE_LOG(LogVdjmVcard, Verbose, TEXT("Vcard descriptor no-op DebugName=%s Host=%s FallbackSlot=%s"),
+			*DebugName.ToString(),
+			*GetNameSafe(request.NamedSlotHostWidget),
+			*request.FallbackTargetSlotName.ToString());
 		return true;
 	}
 
@@ -74,10 +85,11 @@ bool UVcardWidgetCompositionDescriptor::ApplyToWidgetInternal(const FVcardDescri
 			continue;
 		}
 
-		UE_LOG(LogVdjmVcard, Warning, TEXT("Vcard composition attachment failed Descriptor=%s Attach=%s Target=%s Reason=%s"),
-			*DescriptorId.ToString(),
-			*attachmentDescriptor.AttachId.ToString(),
+		UE_LOG(LogVdjmVcard, Warning, TEXT("Vcard descriptor attachment failed Descriptor=%s Attachment=%s Target=%s WidgetClass=%s Reason=%s"),
+			*DebugName.ToString(),
+			*attachmentDescriptor.DebugName.ToString(),
 			*attachmentDescriptor.TargetSlotName.ToString(),
+			*GetNameSafe(*attachmentDescriptor.WidgetClass),
 			*errorReason);
 
 		outResult.ErrorReason = errorReason;
@@ -90,22 +102,27 @@ bool UVcardWidgetCompositionDescriptor::ApplyToWidgetInternal(const FVcardDescri
 	return bAnySuccess;
 }
 
+bool UVcardWidgetCompositionDescriptor::ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult)
+{
+	return Super::ApplyToWidgetInternal(request, outResult);
+}
+
 UVcardRootDescriptor::UVcardRootDescriptor()
 {
-	DescriptorId = TEXT("vcard-root");
+	DebugName = TEXT("vcard-root");
 }
 
 UVcardStageLobbyDescriptor::UVcardStageLobbyDescriptor()
 {
-	DescriptorId = TEXT("vcard-stage-lobby");
+	DebugName = TEXT("vcard-stage-lobby");
 }
 
 UVcardLobbyDescriptor::UVcardLobbyDescriptor()
 {
-	DescriptorId = TEXT("vcard-lobby");
+	DebugName = TEXT("vcard-lobby");
 }
 
 UVcardStageDescriptor::UVcardStageDescriptor()
 {
-	DescriptorId = TEXT("vcard-stage");
+	DebugName = TEXT("vcard-stage");
 }

@@ -9,14 +9,14 @@
  * Base object for descriptor-driven V-card UI composition.
  *
  * Responsibility:
- * - Carry the intent for a UI placement/setup operation.
- * - Provide one entry point that can choose default, previous runtime, or saved state inputs.
+ * - Carry the rules for generating widgets into a host widget's named slots or panels.
+ * - Provide the default descriptor behavior used by Blueprint helpers.
  *
  * Must not:
  * - Contain final visual layout; widgets own their actual NamedSlot positions.
  * - Own long-lived screen state or undo/redo stacks.
  */
-UCLASS(Abstract, BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
 class VDJMVCARD_API UVcardDescriptorBase : public UObject
 {
 	GENERATED_BODY()
@@ -26,33 +26,34 @@ public:
 	bool ApplyToWidget(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Descriptor")
 	virtual bool CanApplyToWidget(const FVcardDescriptorApplyRequest& request, FString& outReason) const;
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Descriptor")
+	virtual bool GenerateWidgetsIntoNamedSlots(
+		UUserWidget* namedSlotHostWidget,
+		UObject* payloadData,
+		TArray<UUserWidget*>& outCreatedWidgets,
+		FString& outErrorReason);
 
-	UFUNCTION(BlueprintPure, Category = "Vcard|Descriptor")
-	FName GetDescriptorId() const { return DescriptorId; }
 	UFUNCTION(BlueprintPure, Category = "Vcard|Descriptor")
 	FText GetDisplayName() const { return DisplayName; }
 	UFUNCTION(BlueprintPure, Category = "Vcard|Descriptor")
-	EVcardDescriptorApplyTiming GetApplyTiming() const { return ApplyTiming; }
+	FName GetDebugName() const { return DebugName; }
 	UFUNCTION(BlueprintPure, Category = "Vcard|Descriptor")
-	EVcardDescriptorRestorePolicy GetRestorePolicy() const { return RestorePolicy; }
+	const TArray<FVcardWidgetAttachDescriptor>& GetAttachments() const { return Attachments; }
 
 protected:
 	virtual bool ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult);
 
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor")
-	FName DescriptorId = NAME_None;
-
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor")
 	FText DisplayName;
 
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor")
-	EVcardDescriptorApplyTiming ApplyTiming = EVcardDescriptorApplyTiming::EImmediate;
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "기능에는 영향을 주지 않는 디버그용 이름입니다. DataAsset map key가 실제 lookup 기준입니다."))
+	FName DebugName = NAME_None;
 
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor")
-	EVcardDescriptorRestorePolicy RestorePolicy = EVcardDescriptorRestorePolicy::EPreferPreviousThenDefault;
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "이 descriptor가 host widget 안에 생성해서 붙일 위젯 목록입니다."))
+	TArray<FVcardWidgetAttachDescriptor> Attachments;
 
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor")
-	FName DebugTag = NAME_None;
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "true면 하나의 attachment가 실패했을 때 즉시 중단합니다."))
+	bool bStopOnFirstFailure = true;
 };
 
 /**
@@ -70,17 +71,8 @@ class VDJMVCARD_API UVcardWidgetCompositionDescriptor : public UVcardDescriptorB
 	GENERATED_BODY()
 
 public:
-	UFUNCTION(BlueprintPure, Category = "Vcard|Descriptor")
-	const TArray<FVcardWidgetAttachDescriptor>& GetAttachments() const { return Attachments; }
-
 protected:
 	virtual bool ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult) override;
-
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor")
-	TArray<FVcardWidgetAttachDescriptor> Attachments;
-
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Descriptor")
-	bool bStopOnFirstFailure = true;
 };
 
 /**

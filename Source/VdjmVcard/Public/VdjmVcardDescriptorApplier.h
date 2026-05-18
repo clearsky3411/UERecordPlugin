@@ -8,6 +8,7 @@
 class UNamedSlot;
 class UPanelWidget;
 class UWidget;
+class UVcardDescriptorRegistryDataAsset;
 
 /**
  * Common named-slot/panel composition helper for V-card descriptors.
@@ -27,6 +28,14 @@ class VDJMVCARD_API UVcardDescriptorApplier : public UBlueprintFunctionLibrary
 	GENERATED_BODY()
 
 public:
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Descriptor")
+	static bool GenerateWidgetsIntoNamedSlotsFromVcardDescriptorDataAsset(
+		UUserWidget* namedSlotHostWidget,
+		UVcardDescriptorRegistryDataAsset* descriptorRegistryDataAsset,
+		FName descriptorKey,
+		UObject* payloadData,
+		TArray<UUserWidget*>& outCreatedWidgets,
+		FString& outErrorReason);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Descriptor")
 	static bool FindWidgetByName(UUserWidget* hostWidget, FName widgetName, UWidget*& outWidget);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Descriptor")

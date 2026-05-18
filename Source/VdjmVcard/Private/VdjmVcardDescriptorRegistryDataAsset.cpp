@@ -1,28 +1,19 @@
 #include "VdjmVcardDescriptorRegistryDataAsset.h"
 
-bool UVcardDescriptorRegistryDataAsset::FindDescriptorById(FName descriptorId, UVcardDescriptorBase*& outDescriptor) const
+bool UVcardDescriptorRegistryDataAsset::FindDescriptorByKey(FName descriptorKey, UVcardDescriptorBase*& outDescriptor) const
 {
 	outDescriptor = nullptr;
 
-	if (descriptorId.IsNone())
+	if (descriptorKey.IsNone())
 	{
 		return false;
 	}
 
-	if (const TObjectPtr<UVcardDescriptorBase>* mappedDescriptor = DescriptorMap.Find(descriptorId))
+	if (const TObjectPtr<UVcardDescriptorBase>* mappedDescriptor = DescriptorByKey.Find(descriptorKey))
 	{
 		outDescriptor = mappedDescriptor->Get();
 		if (IsValid(outDescriptor))
 		{
-			return true;
-		}
-	}
-
-	for (UVcardDescriptorBase* descriptor : Descriptors)
-	{
-		if (IsValid(descriptor) && descriptor->GetDescriptorId() == descriptorId)
-		{
-			outDescriptor = descriptor;
 			return true;
 		}
 	}
@@ -33,23 +24,12 @@ bool UVcardDescriptorRegistryDataAsset::FindDescriptorById(FName descriptorId, U
 TArray<UVcardDescriptorBase*> UVcardDescriptorRegistryDataAsset::GetDescriptorList() const
 {
 	TArray<UVcardDescriptorBase*> descriptorList;
-	descriptorList.Reserve(DescriptorMap.Num() + Descriptors.Num());
+	descriptorList.Reserve(DescriptorByKey.Num());
 
-	TSet<UVcardDescriptorBase*> seenDescriptors;
-
-	for (const TPair<FName, TObjectPtr<UVcardDescriptorBase>>& descriptorPair : DescriptorMap)
+	for (const TPair<FName, TObjectPtr<UVcardDescriptorBase>>& descriptorPair : DescriptorByKey)
 	{
 		UVcardDescriptorBase* descriptor = descriptorPair.Value.Get();
 		if (IsValid(descriptor))
-		{
-			descriptorList.Add(descriptor);
-			seenDescriptors.Add(descriptor);
-		}
-	}
-
-	for (UVcardDescriptorBase* descriptor : Descriptors)
-	{
-		if (IsValid(descriptor) && !seenDescriptors.Contains(descriptor))
 		{
 			descriptorList.Add(descriptor);
 		}

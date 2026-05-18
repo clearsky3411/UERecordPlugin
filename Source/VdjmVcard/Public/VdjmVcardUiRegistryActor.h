@@ -7,8 +7,8 @@
 
 class UVcardDescriptorBase;
 class UVcardDescriptorRegistryDataAsset;
-class UVcardRootWidget;
 class UVcardWidgetBase;
+class UUserWidget;
 
 /**
  * World-level owner for V-card UI descriptor configuration.
@@ -36,14 +36,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Registry")
 	bool ApplyRegistryToWidget(UVcardWidgetBase* widget, UObject* contextObject);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Registry")
-	bool FindDescriptorById(FName descriptorId, UVcardDescriptorBase*& outDescriptor) const;
+	bool FindDescriptorByKey(FName descriptorKey, UVcardDescriptorBase*& outDescriptor) const;
 
 	UFUNCTION(BlueprintPure, Category = "Vcard|Registry")
 	UVcardDescriptorRegistryDataAsset* GetDescriptorRegistry() const { return DescriptorRegistry; }
 	UFUNCTION(BlueprintPure, Category = "Vcard|Registry")
-	UVcardRootWidget* GetRootWidget() const { return mRootWidget.Get(); }
+	UUserWidget* GetRootWidget() const { return mRootWidget.Get(); }
 	UFUNCTION(BlueprintPure, Category = "Vcard|Registry")
-	FName GetRootDescriptorId() const { return RootDescriptorId; }
+	FName GetRootDescriptorKey() const { return RootDescriptorKey; }
 
 protected:
 	virtual void BeginPlay() override;
@@ -52,10 +52,10 @@ protected:
 	TObjectPtr<UVcardDescriptorRegistryDataAsset> DescriptorRegistry;
 
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Registry|Root")
-	TSubclassOf<UVcardRootWidget> RootWidgetClass;
+	TSubclassOf<UUserWidget> RootWidgetClass;
 
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Registry|Root")
-	FName RootDescriptorId = NAME_None;
+	FName RootDescriptorKey = NAME_None;
 
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Registry|Root")
 	int32 PlayerIndex = 0;
@@ -74,5 +74,5 @@ protected:
 
 private:
 	UPROPERTY(Transient)
-	TObjectPtr<UVcardRootWidget> mRootWidget;
+	TObjectPtr<UUserWidget> mRootWidget;
 };
