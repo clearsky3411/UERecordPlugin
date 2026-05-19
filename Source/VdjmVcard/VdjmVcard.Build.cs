@@ -12,7 +12,8 @@ public class VdjmVcard : ModuleRules
                 "Core",
                 "CoreUObject",
                 "Engine",
-                "UMG"
+                "UMG",
+                "VdjmRecorder"
             }
         );
 
