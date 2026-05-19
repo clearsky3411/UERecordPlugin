@@ -2,6 +2,7 @@
 
 #include "Blueprint/UserWidget.h"
 #include "TimerManager.h"
+#include "VdjmVcardCacheSwapLifecycle.h"
 #include "VdjmWidgetMediaCardWidget.h"
 #include "VdjmWidgetMediaCarouselWidget.generated.h"
 
@@ -174,7 +175,7 @@ private:
  * - Directly manipulate a card media player; call card public APIs instead.
  */
 UCLASS(BlueprintType, Blueprintable)
-class VDJMWIDGETS_API UVdjmWidgetMediaCarouselWidget : public UUserWidget
+class VDJMWIDGETS_API UVdjmWidgetMediaCarouselWidget : public UUserWidget, public IVcardCacheSwapLifecycle
 {
 	GENERATED_BODY()
 
@@ -199,6 +200,8 @@ public:
 	bool StartActiveCardPreview(FString& outErrorReason);
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel")
 	void StopAllCardPreviews(bool bReleaseMediaResources);
+	virtual void OnCacheSwapActivated_Implementation(UUserWidget* targetHostWidget, FName targetSlotName, FName cacheEntryKey) override;
+	virtual void OnCacheSwapDeactivated_Implementation(UUserWidget* previousHostWidget, FName targetSlotName, FName cacheEntryKey, bool bReleaseResources) override;
 	UFUNCTION(BlueprintPure, Category = "VdjmWidgets|Media|Carousel")
 	FVdjmWidgetMediaCarouselInputPayload GetLastInputPayload() const;
 	UFUNCTION(BlueprintCallable, Category = "VdjmWidgets|Media|Carousel|Debug")

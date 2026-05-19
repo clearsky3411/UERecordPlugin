@@ -13,7 +13,8 @@ public class VdjmWidgets : ModuleRules
                 "CoreUObject",
                 "Engine",
                 "UMG",
-                "VdjmRecorder"
+                "VdjmRecorder",
+                "VdjmVcard"
             }
         );
 

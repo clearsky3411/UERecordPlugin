@@ -43,6 +43,7 @@ bool UVcardDescriptorBase::GenerateWidgetsIntoNamedSlots(
 
 	FVcardDescriptorApplyRequest request;
 	request.NamedSlotHostWidget = namedSlotHostWidget;
+	request.CacheOwnerWidget = namedSlotHostWidget;
 	request.PayloadData = payloadData;
 	request.bAllowCreate = true;
 

@@ -618,6 +618,23 @@ void UVdjmWidgetMediaCarouselWidget::StopAllCardPreviews(bool bReleaseMediaResou
 	}
 }
 
+void UVdjmWidgetMediaCarouselWidget::OnCacheSwapActivated_Implementation(
+	UUserWidget* targetHostWidget,
+	FName targetSlotName,
+	FName cacheEntryKey)
+{
+	RequestActivePreviewStart(TEXT("CacheSwapActivated"));
+}
+
+void UVdjmWidgetMediaCarouselWidget::OnCacheSwapDeactivated_Implementation(
+	UUserWidget* previousHostWidget,
+	FName targetSlotName,
+	FName cacheEntryKey,
+	bool bReleaseResources)
+{
+	StopAllCardPreviews(bReleaseResources);
+}
+
 FVdjmWidgetMediaCarouselInputPayload UVdjmWidgetMediaCarouselWidget::GetLastInputPayload() const
 {
 	return mInputController != nullptr

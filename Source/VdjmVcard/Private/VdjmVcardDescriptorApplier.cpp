@@ -7,6 +7,7 @@
 #include "VdjmVcardDescriptorBase.h"
 #include "VdjmVcardDescriptorReceiver.h"
 #include "VdjmVcardDescriptorRegistryDataAsset.h"
+#include "VdjmVcardDescriptorSlotCacheStore.h"
 
 bool UVcardDescriptorApplier::GenerateWidgetsIntoNamedSlotsFromVcardDescriptorDataAsset(
 	UUserWidget* namedSlotHostWidget,
@@ -44,7 +45,24 @@ bool UVcardDescriptorApplier::GenerateWidgetsIntoNamedSlotsFromVcardDescriptorDa
 		return false;
 	}
 
-	const bool bGenerated = descriptor->GenerateWidgetsIntoNamedSlots(namedSlotHostWidget, payloadData, outCreatedWidgets, outErrorReason);
+	FVcardDescriptorApplyRequest request;
+	request.NamedSlotHostWidget = namedSlotHostWidget;
+	request.CacheOwnerWidget = namedSlotHostWidget;
+	request.DescriptorKey = descriptorKey;
+	request.PayloadData = payloadData;
+	request.bAllowCreate = true;
+
+	FVcardDescriptorApplyResult result;
+	const bool bGenerated = descriptor->ApplyToWidget(request, result);
+	for (UUserWidget* createdWidget : result.CreatedWidgets)
+	{
+		if (IsValid(createdWidget))
+		{
+			outCreatedWidgets.Add(createdWidget);
+		}
+	}
+
+	outErrorReason = result.ErrorReason;
 	if (!bGenerated && outErrorReason.IsEmpty())
 	{
 		outErrorReason = FString::Printf(TEXT("Descriptor key '%s' failed without error reason."), *descriptorKey.ToString());
@@ -162,6 +180,12 @@ bool UVcardDescriptorApplier::AttachWidgetToNamedSlot(UUserWidget* hostWidget, F
 		return true;
 	}
 
+	if (openPolicy == EVcardDescriptorOpenPolicy::ECacheSwap)
+	{
+		outErrorReason = TEXT("ECacheSwap must be applied through ApplyWidgetAttachment.");
+		return false;
+	}
+
 	if (openPolicy == EVcardDescriptorOpenPolicy::EKeepIfSame)
 	{
 		if (UWidget* currentContent = namedSlot->GetContent())
@@ -200,6 +224,12 @@ bool UVcardDescriptorApplier::AttachWidgetToPanel(UUserWidget* hostWidget, FName
 	{
 		panelWidget->SetVisibility(ESlateVisibility::Collapsed);
 		return true;
+	}
+
+	if (openPolicy == EVcardDescriptorOpenPolicy::ECacheSwap)
+	{
+		outErrorReason = TEXT("ECacheSwap supports NamedSlot targets only.");
+		return false;
 	}
 
 	if (openPolicy == EVcardDescriptorOpenPolicy::EReplace)
@@ -257,6 +287,49 @@ bool UVcardDescriptorApplier::ApplyWidgetAttachment(const FVcardDescriptorApplyR
 	{
 		outErrorReason = TEXT("Apply request does not allow widget creation.");
 		return false;
+	}
+
+	if (normalizedAttachment.OpenPolicy == EVcardDescriptorOpenPolicy::ECacheSwap)
+	{
+		UVcardDescriptorSlotCacheStore* cacheStore = UVcardDescriptorSlotCacheStore::Get(request.NamedSlotHostWidget);
+		if (cacheStore == nullptr)
+		{
+			outErrorReason = TEXT("Cache swap store is unavailable.");
+			return false;
+		}
+
+		UUserWidget* cacheOwnerWidget = IsValid(request.CacheOwnerWidget)
+			? request.CacheOwnerWidget.Get()
+			: request.NamedSlotHostWidget.Get();
+		const FName cacheSlotKey = UVcardDescriptorSlotCacheStore::ResolveCacheSlotKey(normalizedAttachment);
+		const FName cacheEntryKey = UVcardDescriptorSlotCacheStore::ResolveCacheEntryKey(request, normalizedAttachment);
+		UUserWidget* cachedWidget = nullptr;
+		if (cacheStore->FindCachedWidget(cacheOwnerWidget, cacheSlotKey, cacheEntryKey, cachedWidget) && IsValid(cachedWidget))
+		{
+			outCreatedWidget = cachedWidget;
+		}
+		else if (!CreateUserWidgetForHost(request.NamedSlotHostWidget, normalizedAttachment.WidgetClass, outCreatedWidget, outErrorReason))
+		{
+			return false;
+		}
+
+		if (!cacheStore->ApplyCacheSwap(request, normalizedAttachment, outCreatedWidget, outCreatedWidget, outErrorReason))
+		{
+			return false;
+		}
+
+		if (normalizedAttachment.bAutoApplyPayload && outCreatedWidget->GetClass()->ImplementsInterface(UVcardDescriptorReceiver::StaticClass()))
+		{
+			UObject* payloadData = IsValid(normalizedAttachment.PayloadData) ? normalizedAttachment.PayloadData.Get() : request.PayloadData.Get();
+			IVcardDescriptorReceiver::Execute_ApplyVcardWidgetAttachment(outCreatedWidget, normalizedAttachment, payloadData);
+		}
+
+		UE_LOG(LogVdjmVcard, Verbose, TEXT("Vcard cache attachment applied Host=%s Target=%s Widget=%s"),
+			*GetNameSafe(request.NamedSlotHostWidget),
+			*normalizedAttachment.TargetSlotName.ToString(),
+			*GetNameSafe(outCreatedWidget));
+
+		return true;
 	}
 
 	if (!CreateUserWidgetForHost(request.NamedSlotHostWidget, normalizedAttachment.WidgetClass, outCreatedWidget, outErrorReason))
