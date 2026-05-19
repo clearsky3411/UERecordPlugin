@@ -18,6 +18,7 @@
 - [AppState / MediaPreview 노드](#appstate--mediapreview-노드)
 - [Debug / Composite / Jump 노드](#debug--composite--jump-노드)
 - [자주 쓰는 작성 패턴](#자주-쓰는-작성-패턴)
+- [WBP self-register 패턴](#wbp-self-register-패턴)
 - [문제 생겼을 때 빠른 점검](#문제-생겼을-때-빠른-점검)
 
 ## 목적
@@ -646,6 +647,29 @@ subgraph-recorder:
     ContextKey = recorder-ui
   StartRecordBridgeActorNode
 ```
+
+## WBP self-register 패턴
+Descriptor로 `NamedSlot`에 생성된 위젯은 독립 `UUserWidget` 인스턴스다. 이후 다른 subgraph에서 그 위젯을 직접 찾아야 한다면, 생성된 WBP의 `Construct` 또는 초기화 함수에서 `Register Record Flow Object`를 호출해 자신을 key에 등록한다.
+
+추천 호출은 다음과 같다.
+```text
+Register Record Flow Object:
+  WorldContextObject = Self
+  ObjectToRegister = Self
+  RuntimeSlotKey = creator-lobby
+  ContextKey = creator-lobby
+  bStoreRuntimeSlot = true
+  bRegisterContext = true
+  bStrongContext = false
+```
+
+의미는 다음과 같다.
+- `RuntimeSlotKey`는 현재/최근 flow session 안에서 빠르게 다시 찾기 위한 local key다.
+- `ContextKey`는 다른 subgraph나 다른 위젯에서도 찾기 위한 world-global key다.
+- `bStrongContext=false`는 UI 기본값으로 권장한다. UMG 부모 슬롯/패널이 수명을 소유하고, context는 찾아가기 위한 약참조만 둔다.
+- `bStrongContext=true`는 parent에서 빠져도 객체를 강제로 살리고 싶을 때만 쓴다.
+
+예를 들어 `root-stage-creator-lobby` descriptor가 `WBP_VcardCreatorLobby`를 `root.Stage`에 붙인다면, `WBP_VcardCreatorLobby`가 Construct에서 자기 자신을 `creator-lobby`로 등록한다. 그러면 다음 subgraph는 `RuntimeSlotKey=creator-lobby`, `ContextKey=creator-lobby`로 `ToolContents` 슬롯을 교체할 수 있다.
 
 ## 문제 생겼을 때 빠른 점검
 - `CreateWidgetAndRegisterContextNode`가 실패하면 `WidgetClass`, `RuntimeSlotKey`, `ContextKey`가 모두 채워져 있는지 먼저 본다.

@@ -38,6 +38,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Recorder|Controller", meta = (WorldContext = "worldContextObject"))
 	static bool ProcessPendingRecorderOptionRequests(UObject* worldContextObject, FString& outErrorReason);
 
+	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow|Runtime", meta = (WorldContext = "worldContextObject", DisplayName = "Register Record Flow Object", ToolTip = "Widget/Object가 자신을 현재 flow runtime slot 또는 world context에 등록할 때 쓰는 편의 함수입니다. WBP Construct에서 ObjectToRegister=Self로 호출하면 descriptor로 생성된 위젯도 key로 다시 찾을 수 있습니다."))
+	static bool RegisterRecordFlowObject(
+		UObject* worldContextObject,
+		UObject* objectToRegister,
+		FName runtimeSlotKey,
+		FName contextKey,
+		bool bStoreRuntimeSlot,
+		bool bRegisterContext,
+		bool bStrongContext,
+		FString& outErrorReason);
+
 	UFUNCTION(BlueprintCallable, Category = "Recorder|EventFlow", meta = (WorldContext = "worldContextObject"))
 	static bool EmitRecordFlowSignal(UObject* worldContextObject, FName signalTag);
 

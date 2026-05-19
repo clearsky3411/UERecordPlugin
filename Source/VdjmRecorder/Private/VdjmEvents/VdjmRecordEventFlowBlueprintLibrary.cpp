@@ -95,6 +95,88 @@ bool UVdjmRecordEventFlowBlueprintLibrary::ProcessPendingRecorderOptionRequests(
 	return recorderController->ProcessPendingOptionRequests(outErrorReason);
 }
 
+bool UVdjmRecordEventFlowBlueprintLibrary::RegisterRecordFlowObject(
+	UObject* worldContextObject,
+	UObject* objectToRegister,
+	FName runtimeSlotKey,
+	FName contextKey,
+	bool bStoreRuntimeSlot,
+	bool bRegisterContext,
+	bool bStrongContext,
+	FString& outErrorReason)
+{
+	outErrorReason.Reset();
+
+	if (objectToRegister == nullptr)
+	{
+		outErrorReason = TEXT("ObjectToRegister is None.");
+		return false;
+	}
+
+	if (!bStoreRuntimeSlot && !bRegisterContext)
+	{
+		outErrorReason = TEXT("No registration target was enabled.");
+		return false;
+	}
+
+	if (bStoreRuntimeSlot)
+	{
+		if (runtimeSlotKey.IsNone())
+		{
+			outErrorReason = TEXT("RuntimeSlotKey is None.");
+			return false;
+		}
+
+		UVdjmRecordEventManager* eventManager = GetRecordEventManager(worldContextObject);
+		if (eventManager == nullptr)
+		{
+			outErrorReason = TEXT("Record event manager is not available.");
+			return false;
+		}
+
+		if (!eventManager->SetRuntimeObjectSlot(runtimeSlotKey, objectToRegister))
+		{
+			outErrorReason = FString::Printf(
+				TEXT("Failed to store runtime slot. RuntimeSlotKey=%s Object=%s"),
+				*runtimeSlotKey.ToString(),
+				*GetNameSafe(objectToRegister));
+			return false;
+		}
+	}
+
+	if (bRegisterContext)
+	{
+		if (contextKey.IsNone())
+		{
+			outErrorReason = TEXT("ContextKey is None.");
+			return false;
+		}
+
+		UVdjmRecorderWorldContextSubsystem* worldContextSubsystem = UVdjmRecorderWorldContextSubsystem::Get(worldContextObject);
+		if (worldContextSubsystem == nullptr)
+		{
+			outErrorReason = TEXT("Recorder world context subsystem is not available.");
+			return false;
+		}
+
+		UClass* expectedClass = objectToRegister->GetClass();
+		const bool bRegistered = bStrongContext
+			? worldContextSubsystem->RegisterStrongObjectContext(contextKey, objectToRegister, expectedClass)
+			: worldContextSubsystem->RegisterWeakObjectContext(contextKey, objectToRegister, expectedClass);
+		if (!bRegistered)
+		{
+			outErrorReason = FString::Printf(
+				TEXT("Failed to register context. ContextKey=%s Object=%s Strong=%s"),
+				*contextKey.ToString(),
+				*GetNameSafe(objectToRegister),
+				bStrongContext ? TEXT("true") : TEXT("false"));
+			return false;
+		}
+	}
+
+	return true;
+}
+
 bool UVdjmRecordEventFlowBlueprintLibrary::EmitRecordFlowSignal(UObject* worldContextObject, FName signalTag)
 {
 	if (signalTag.IsNone())
