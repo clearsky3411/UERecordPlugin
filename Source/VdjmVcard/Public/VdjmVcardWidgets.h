@@ -222,55 +222,6 @@ protected:
 };
 
 /**
- * Draggable bottom sheet shell.
- *
- * Responsibility:
- * - Store open ratio/snap policy and attach header/content widgets from descriptors.
- *
- * Must not:
- * - Implement concrete background preset logic.
- */
-UCLASS(BlueprintType, Blueprintable, meta = (DeprecatedNode, DeprecationMessage = "Use UVcardToolOptContentWidget or a direct content widget under UVcardCreatorLobbyWidget.ToolContents."))
-class VDJMVCARD_API UVcardBackgroundBottomWidget : public UVcardWidgetBase
-{
-	GENERATED_BODY()
-
-public:
-	UFUNCTION(BlueprintCallable, Category = "Vcard|Bottom")
-	bool ApplyBottomSheetDescriptor(const FVcardBottomSheetDescriptor& bottomSheetDescriptor, FVcardDescriptorApplyResult& outResult);
-	UFUNCTION(BlueprintCallable, Category = "Vcard|Bottom")
-	void SetOpenRatio(float openRatio);
-	UFUNCTION(BlueprintCallable, Category = "Vcard|Bottom")
-	void ToggleOpenRatio();
-
-	UFUNCTION(BlueprintPure, Category = "Vcard|Bottom")
-	float GetOpenRatio() const { return mOpenRatio; }
-	UFUNCTION(BlueprintPure, Category = "Vcard|Bottom")
-	FName GetHeaderSlotName() const { return HeaderSlotName; }
-	UFUNCTION(BlueprintPure, Category = "Vcard|Bottom")
-	FName GetContentSlotName() const { return ContentSlotName; }
-
-protected:
-	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|Bottom")
-	void BP_OnOpenRatioChanged(float previousRatio, float newRatio);
-	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|Bottom")
-	void BP_OnBottomSheetDescriptorApplied(const FVcardBottomSheetDescriptor& bottomSheetDescriptor);
-
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Bottom")
-	FName HeaderSlotName = TEXT("Header");
-
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Bottom")
-	FName ContentSlotName = TEXT("Content");
-
-private:
-	UPROPERTY(Transient)
-	FVcardBottomSheetDescriptor mCurrentBottomSheetDescriptor;
-
-	UPROPERTY(Transient)
-	float mOpenRatio = 1.0f;
-};
-
-/**
  * Shared V-card top bar shell.
  *
  * Responsibility:
