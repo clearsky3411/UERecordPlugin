@@ -8,9 +8,56 @@
 #include "GameFramework/PlayerController.h"
 #include "InputCoreTypes.h"
 #include "TimerManager.h"
+#include "VdjmVcard.h"
 
 namespace
 {
+	const TCHAR* GetVcardBottomSheetDragRangeBasisText(EVcardBottomSheetDragRangeBasis dragRangeBasis)
+	{
+		switch (dragRangeBasis)
+		{
+		case EVcardBottomSheetDragRangeBasis::EViewportHeight:
+			return TEXT("ViewportHeight");
+		case EVcardBottomSheetDragRangeBasis::ESheetPanelHeight:
+			return TEXT("SheetPanelHeight");
+		case EVcardBottomSheetDragRangeBasis::ECustomPixels:
+			return TEXT("CustomPixels");
+		default:
+			return TEXT("Unknown");
+		}
+	}
+
+	const TCHAR* GetVcardBottomSheetMotionStateText(EVcardBottomSheetMotionState motionState)
+	{
+		switch (motionState)
+		{
+		case EVcardBottomSheetMotionState::EIdle:
+			return TEXT("Idle");
+		case EVcardBottomSheetMotionState::EPressTracking:
+			return TEXT("PressTracking");
+		case EVcardBottomSheetMotionState::EDragging:
+			return TEXT("Dragging");
+		case EVcardBottomSheetMotionState::EAnimating:
+			return TEXT("Animating");
+		default:
+			return TEXT("Unknown");
+		}
+	}
+
+	const TCHAR* GetVcardBottomSheetPointerSourceText(EVcardBottomSheetPointerSource pointerSource)
+	{
+		switch (pointerSource)
+		{
+		case EVcardBottomSheetPointerSource::ETouch:
+			return TEXT("Touch");
+		case EVcardBottomSheetPointerSource::EMouse:
+			return TEXT("Mouse");
+		case EVcardBottomSheetPointerSource::ENone:
+		default:
+			return TEXT("None");
+		}
+	}
+
 	bool IsVcardBottomSheetMouseButtonPressed(APlayerController* playerController)
 	{
 		const bool bPlayerControllerPressed = playerController != nullptr && playerController->IsInputKeyDown(EKeys::LeftMouseButton);
@@ -96,6 +143,22 @@ void UVcardBottomSheetWidget::NativeConstruct()
 	mOpenRatio = GetClampedOpenRatio(InitialOpenRatio);
 	mTargetOpenRatio = mOpenRatio;
 	ApplySheetTransform(mOpenRatio);
+
+	UE_LOG(
+		LogVdjmVcard,
+		Display,
+		TEXT("VcardBottomSheet Construct Widget=%s SheetPanel=%s DragHandle=%s Content=%s InitialOpen=%.3f Collapsed=%.3f Expanded=%.3f RangeBasis=%s RangePixels=%.1f TopY=%.1f TopNorm=%.3f"),
+		*GetNameSafe(this),
+		*GetNameSafe(SheetPanel.Get()),
+		*GetNameSafe(DragHandle.Get()),
+		*GetNameSafe(Content.Get()),
+		mOpenRatio,
+		CollapsedRatio,
+		ExpandedRatio,
+		GetVcardBottomSheetDragRangeBasisText(DragRangeBasis),
+		GetEffectiveDragRangePixels(),
+		GetSheetTopScreenY(),
+		GetSheetTopNormalized());
 }
 
 void UVcardBottomSheetWidget::NativeDestruct()
@@ -125,6 +188,17 @@ void UVcardBottomSheetWidget::HandleDragHandlePressed()
 	mPressStartOpenRatio = mOpenRatio;
 	SetMotionState(EVcardBottomSheetMotionState::EPressTracking);
 	StartMotionTimer();
+
+	UE_LOG(
+		LogVdjmVcard,
+		Display,
+		TEXT("VcardBottomSheet PressCandidate Widget=%s Source=%s Pos=%s Open=%.3f RangePixels=%.1f Threshold=%.1f"),
+		*GetNameSafe(this),
+		GetVcardBottomSheetPointerSourceText(mPointerSource),
+		*pointerPosition.ToString(),
+		mOpenRatio,
+		GetEffectiveDragRangePixels(),
+		DragStartThresholdPixels);
 }
 
 void UVcardBottomSheetWidget::HandleDragHandleReleased()
@@ -135,6 +209,16 @@ void UVcardBottomSheetWidget::HandleDragHandleReleased()
 		UpdatePointerDeltas(pointerPosition);
 	}
 
+	UE_LOG(
+		LogVdjmVcard,
+		Display,
+		TEXT("VcardBottomSheet ButtonReleased Widget=%s State=%s Pos=%s TotalDelta=%s Distance=%.1f Open=%.3f"),
+		*GetNameSafe(this),
+		GetVcardBottomSheetMotionStateText(mMotionState),
+		*pointerPosition.ToString(),
+		*mTotalPointerDelta.ToString(),
+		mTotalPointerDelta.Size(),
+		mOpenRatio);
 	FinishPointerInteraction(false);
 }
 
@@ -219,6 +303,17 @@ void UVcardBottomSheetWidget::HandleMotionTimer()
 		FVector2D pointerPosition;
 		if (!SampleTrackedPressedPointerScreenPosition(pointerPosition))
 		{
+			UE_LOG(
+				LogVdjmVcard,
+				Display,
+				TEXT("VcardBottomSheet PointerLostAutoRelease Widget=%s State=%s Source=%s LastPos=%s TotalDelta=%s Distance=%.1f Open=%.3f"),
+				*GetNameSafe(this),
+				GetVcardBottomSheetMotionStateText(mMotionState),
+				GetVcardBottomSheetPointerSourceText(mPointerSource),
+				*mLastPointerScreenPosition.ToString(),
+				*mTotalPointerDelta.ToString(),
+				mTotalPointerDelta.Size(),
+				mOpenRatio);
 			FinishPointerInteraction(false);
 		}
 		else
@@ -362,13 +457,32 @@ bool UVcardBottomSheetWidget::ShouldStartDrag() const
 
 void UVcardBottomSheetWidget::BeginSheetDrag()
 {
+	UE_LOG(
+		LogVdjmVcard,
+		Display,
+		TEXT("VcardBottomSheet DragBegin Widget=%s Source=%s TotalDelta=%s Distance=%.1f Threshold=%.1f PressOpen=%.3f"),
+		*GetNameSafe(this),
+		GetVcardBottomSheetPointerSourceText(mPointerSource),
+		*mTotalPointerDelta.ToString(),
+		mTotalPointerDelta.Size(),
+		DragStartThresholdPixels,
+		mPressStartOpenRatio);
 	SetMotionState(EVcardBottomSheetMotionState::EDragging);
 	BP_OnDragStarted(mOpenRatio);
 }
 
 void UVcardBottomSheetWidget::EndSheetDrag(bool bWasCancelled)
 {
-	(void)bWasCancelled;
+	UE_LOG(
+		LogVdjmVcard,
+		Display,
+		TEXT("VcardBottomSheet DragFinished Widget=%s Cancelled=%s TotalDelta=%s Distance=%.1f Open=%.3f SnapTarget=%.3f"),
+		*GetNameSafe(this),
+		bWasCancelled ? TEXT("true") : TEXT("false"),
+		*mTotalPointerDelta.ToString(),
+		mTotalPointerDelta.Size(),
+		mOpenRatio,
+		CalculateNearestSnapRatio(mOpenRatio));
 	BP_OnDragFinished(mOpenRatio);
 }
 
@@ -378,6 +492,13 @@ void UVcardBottomSheetWidget::FinishPointerInteraction(bool bWasCancelled)
 
 	if (mMotionState == EVcardBottomSheetMotionState::EDragging)
 	{
+		UE_LOG(
+			LogVdjmVcard,
+			Display,
+			TEXT("VcardBottomSheet ReleaseAsDrag Widget=%s Cancelled=%s Open=%.3f"),
+			*GetNameSafe(this),
+			bWasCancelled ? TEXT("true") : TEXT("false"),
+			mOpenRatio);
 		EndSheetDrag(bWasCancelled);
 		SnapToNearestRatio();
 		return;
@@ -388,6 +509,15 @@ void UVcardBottomSheetWidget::FinishPointerInteraction(bool bWasCancelled)
 		SetMotionState(EVcardBottomSheetMotionState::EIdle);
 		if (!bWasCancelled)
 		{
+			UE_LOG(
+				LogVdjmVcard,
+				Display,
+				TEXT("VcardBottomSheet ReleaseAsTap Widget=%s TotalDelta=%s Distance=%.1f Threshold=%.1f Open=%.3f"),
+				*GetNameSafe(this),
+				*mTotalPointerDelta.ToString(),
+				mTotalPointerDelta.Size(),
+				DragStartThresholdPixels,
+				mOpenRatio);
 			ToggleOpenRatio();
 		}
 		return;
@@ -505,6 +635,15 @@ void UVcardBottomSheetWidget::ApplyOpenRatio(float openRatio, bool bBroadcastCha
 
 	if (bBroadcastChange && !FMath::IsNearlyEqual(previousRatio, mOpenRatio))
 	{
+		UE_LOG(
+			LogVdjmVcard,
+			Display,
+			TEXT("VcardBottomSheet RatioChanged Widget=%s Previous=%.3f New=%.3f TranslationY=%.1f RangePixels=%.1f"),
+			*GetNameSafe(this),
+			previousRatio,
+			mOpenRatio,
+			CalculateSheetTranslationY(mOpenRatio),
+			GetEffectiveDragRangePixels());
 		OnOpenRatioChanged.Broadcast(previousRatio, mOpenRatio);
 		BP_OnOpenRatioChanged(previousRatio, mOpenRatio);
 	}
@@ -525,6 +664,14 @@ void UVcardBottomSheetWidget::SetMotionState(EVcardBottomSheetMotionState newSta
 		return;
 	}
 
+	UE_LOG(
+		LogVdjmVcard,
+		Display,
+		TEXT("VcardBottomSheet StateChanged Widget=%s Previous=%s New=%s Open=%.3f"),
+		*GetNameSafe(this),
+		GetVcardBottomSheetMotionStateText(mMotionState),
+		GetVcardBottomSheetMotionStateText(newState),
+		mOpenRatio);
 	mMotionState = newState;
 	OnMotionStateChanged.Broadcast(newState);
 	BP_OnMotionStateChanged(newState);
