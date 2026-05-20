@@ -64,6 +64,25 @@ namespace
 		const bool bSlatePressed = FSlateApplication::IsInitialized() && FSlateApplication::Get().GetPressedMouseButtons().Contains(EKeys::LeftMouseButton);
 		return bPlayerControllerPressed || bSlatePressed;
 	}
+
+	bool SampleVcardBottomSheetMousePosition(APlayerController* playerController, FVector2D& outScreenPosition)
+	{
+		if (FSlateApplication::IsInitialized())
+		{
+			outScreenPosition = FSlateApplication::Get().GetCursorPos();
+			return true;
+		}
+
+		float pointerX = 0.0f;
+		float pointerY = 0.0f;
+		if (playerController != nullptr && playerController->GetMousePosition(pointerX, pointerY))
+		{
+			outScreenPosition = FVector2D(pointerX, pointerY);
+			return true;
+		}
+
+		return false;
+	}
 }
 
 void UVcardBottomSheetWidget::SetOpenRatio(float openRatio)
@@ -372,6 +391,23 @@ bool UVcardBottomSheetWidget::SamplePointerScreenPosition(FVector2D& outScreenPo
 	float pointerX = 0.0f;
 	float pointerY = 0.0f;
 	bool bTouchPressed = false;
+	if (mPointerSource == EVcardBottomSheetPointerSource::ETouch)
+	{
+		playerController->GetInputTouchState(ETouchIndex::Touch1, pointerX, pointerY, bTouchPressed);
+		if (bTouchPressed)
+		{
+			outScreenPosition = FVector2D(pointerX, pointerY);
+			return true;
+		}
+
+		return false;
+	}
+
+	if (mPointerSource == EVcardBottomSheetPointerSource::EMouse)
+	{
+		return SampleVcardBottomSheetMousePosition(playerController, outScreenPosition);
+	}
+
 	playerController->GetInputTouchState(ETouchIndex::Touch1, pointerX, pointerY, bTouchPressed);
 	if (bTouchPressed)
 	{
@@ -379,13 +415,7 @@ bool UVcardBottomSheetWidget::SamplePointerScreenPosition(FVector2D& outScreenPo
 		return true;
 	}
 
-	if (playerController->GetMousePosition(pointerX, pointerY))
-	{
-		outScreenPosition = FVector2D(pointerX, pointerY);
-		return true;
-	}
-
-	return false;
+	return SampleVcardBottomSheetMousePosition(playerController, outScreenPosition);
 }
 
 bool UVcardBottomSheetWidget::SamplePressedPointerScreenPosition(FVector2D& outScreenPosition, EVcardBottomSheetPointerSource& outPointerSource) const
@@ -409,9 +439,8 @@ bool UVcardBottomSheetWidget::SamplePressedPointerScreenPosition(FVector2D& outS
 		return true;
 	}
 
-	if (IsVcardBottomSheetMouseButtonPressed(playerController) && playerController->GetMousePosition(pointerX, pointerY))
+	if (IsVcardBottomSheetMouseButtonPressed(playerController) && SampleVcardBottomSheetMousePosition(playerController, outScreenPosition))
 	{
-		outScreenPosition = FVector2D(pointerX, pointerY);
 		outPointerSource = EVcardBottomSheetPointerSource::EMouse;
 		return true;
 	}
@@ -589,16 +618,7 @@ float UVcardBottomSheetWidget::CalculateAnimatedOpenRatio(float deltaSeconds) co
 
 float UVcardBottomSheetWidget::CalculateSheetTranslationY(float openRatio) const
 {
-	float minRatio = MinOpenRatio;
-	float maxRatio = MaxOpenRatio;
-	if (minRatio > maxRatio)
-	{
-		Swap(minRatio, maxRatio);
-	}
-
-	const float ratioRange = FMath::Max(maxRatio - minRatio, KINDA_SMALL_NUMBER);
-	const float normalizedOpenRatio = FMath::Clamp((GetClampedOpenRatio(openRatio) - minRatio) / ratioRange, 0.0f, 1.0f);
-	return (1.0f - normalizedOpenRatio) * GetEffectiveDragRangePixels();
+	return (1.0f - FMath::Clamp(GetClampedOpenRatio(openRatio), 0.0f, 1.0f)) * GetEffectiveDragRangePixels();
 }
 
 float UVcardBottomSheetWidget::GetViewportHeightPixels() const
