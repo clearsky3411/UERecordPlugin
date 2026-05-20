@@ -6,6 +6,7 @@
 #include "Components/Image.h"
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
+#include "VdjmVcard.h"
 
 void UVcardSelectableGroupWidget::SetSelectableItems(const TArray<FVcardSelectableItemDescriptor>& itemDescriptors)
 {
@@ -130,12 +131,31 @@ bool UVcardSelectableGroupWidget::HandleSelectableChildClicked(UVcardSelectableI
 	BP_OnSelectableItemClicked(itemWidget, itemId);
 
 	const FVcardSelectableItemDescriptor itemDescriptor = itemWidget->GetItemDescriptor();
+	const bool bRouteHandled = RouteSelectableItemClicked(itemWidget, itemId, itemDescriptor);
+	if (bRouteHandled)
+	{
+		UE_LOG(LogVdjmVcard, Display, TEXT("VcardSelectableGroup click routed. Group=%s Item=%s ActionDescriptor=%s Signal=%s"),
+			*GetNameSafe(this),
+			*itemId.ToString(),
+			*itemDescriptor.ActionDescriptorKey.ToString(),
+			*itemDescriptor.ClickSignalTag.ToString());
+		return true;
+	}
+
 	if (bEmitSignalWhenClicked && !itemDescriptor.ClickSignalTag.IsNone())
 	{
 		RequestSignalForChild(itemWidget, itemDescriptor.ClickSignalTag);
 	}
 
 	return true;
+}
+
+bool UVcardSelectableGroupWidget::RouteSelectableItemClicked_Implementation(
+	UVcardSelectableItemWidget* itemWidget,
+	FName itemId,
+	const FVcardSelectableItemDescriptor& itemDescriptor)
+{
+	return false;
 }
 
 bool UVcardSelectableGroupWidget::HandleSelectableChildHoverChanged(UVcardSelectableItemWidget* itemWidget, bool bIsHovered)

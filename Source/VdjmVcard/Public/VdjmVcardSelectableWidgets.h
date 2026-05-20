@@ -181,6 +181,8 @@ protected:
 	void BP_OnSelectableChildrenRebuilt(const TArray<UVcardSelectableItemWidget*>& itemWidgets);
 	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|Selectable")
 	void BP_OnSelectableItemClicked(UVcardSelectableItemWidget* itemWidget, FName itemId);
+	UFUNCTION(BlueprintNativeEvent, Category = "Vcard|Selectable")
+	bool RouteSelectableItemClicked(UVcardSelectableItemWidget* itemWidget, FName itemId, const FVcardSelectableItemDescriptor& itemDescriptor);
 	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|Selectable")
 	void BP_OnSelectableItemHoverChanged(UVcardSelectableItemWidget* itemWidget, FName itemId, bool bIsHovered);
 	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|Selectable")
