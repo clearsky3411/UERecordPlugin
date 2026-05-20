@@ -12,6 +12,8 @@
 
 namespace
 {
+	constexpr int32 VcardBottomSheetInitialApplyMaxRetries = 12;
+
 	const TCHAR* GetVcardBottomSheetDragRangeBasisText(EVcardBottomSheetDragRangeBasis dragRangeBasis)
 	{
 		switch (dragRangeBasis)
@@ -153,22 +155,8 @@ void UVcardBottomSheetWidget::SnapToNearestRatio()
 
 void UVcardBottomSheetWidget::ApplyInitialOpenRatio()
 {
-	mbHasAnimationTarget = false;
-	mOpenRatio = GetClampedOpenRatio(InitialOpenRatio);
-	mTargetOpenRatio = mOpenRatio;
-	ApplySheetTransform(mOpenRatio);
-	RefreshBoundaryDirection(mMotionState);
-
-	UE_LOG(
-		LogVdjmVcard,
-		Display,
-		TEXT("VcardBottomSheet InitialApplied Widget=%s InitialRaw=%.3f AppliedOpen=%.3f TranslationY=%.1f RangePixels=%.1f Direction=%s"),
-		*GetNameSafe(this),
-		InitialOpenRatio,
-		mOpenRatio,
-		CalculateSheetTranslationY(mOpenRatio),
-		GetEffectiveDragRangePixels(),
-		GetVcardBottomSheetMoveDirectionText(mLastMoveDirection));
+	mInitialApplyRetryCount = 0;
+	TryApplyInitialOpenRatio(true);
 }
 
 float UVcardBottomSheetWidget::GetSheetTopScreenY() const
@@ -223,6 +211,7 @@ void UVcardBottomSheetWidget::NativeConstruct()
 void UVcardBottomSheetWidget::NativeDestruct()
 {
 	StopMotionTimer();
+	CancelInitialOpenRatioRetry();
 	UnbindDragHandle();
 
 	Super::NativeDestruct();
@@ -421,6 +410,95 @@ void UVcardBottomSheetWidget::HandleMotionTimer()
 	}
 
 	StopMotionTimerIfIdle();
+}
+
+void UVcardBottomSheetWidget::TryApplyInitialOpenRatio(bool bAllowRetry)
+{
+	mbHasAnimationTarget = false;
+	mOpenRatio = GetClampedOpenRatio(InitialOpenRatio);
+	mTargetOpenRatio = mOpenRatio;
+	ApplySheetTransform(mOpenRatio);
+	RefreshBoundaryDirection(mMotionState);
+
+	const float dragRangePixels = GetEffectiveDragRangePixels();
+	const float translationY = CalculateSheetTranslationY(mOpenRatio);
+	if (dragRangePixels <= KINDA_SMALL_NUMBER)
+	{
+		if (bAllowRetry && mInitialApplyRetryCount < VcardBottomSheetInitialApplyMaxRetries)
+		{
+			mbInitialApplyPending = true;
+			ScheduleInitialOpenRatioRetry();
+			UE_LOG(
+				LogVdjmVcard,
+				Display,
+				TEXT("VcardBottomSheet InitialApplyDeferred Widget=%s Retry=%d/%d InitialRaw=%.3f AppliedOpen=%.3f TranslationY=%.1f RangePixels=%.1f Direction=%s"),
+				*GetNameSafe(this),
+				mInitialApplyRetryCount,
+				VcardBottomSheetInitialApplyMaxRetries,
+				InitialOpenRatio,
+				mOpenRatio,
+				translationY,
+				dragRangePixels,
+				GetVcardBottomSheetMoveDirectionText(mLastMoveDirection));
+			return;
+		}
+
+		mbInitialApplyPending = false;
+		UE_LOG(
+			LogVdjmVcard,
+			Warning,
+			TEXT("VcardBottomSheet InitialApplyFailed Widget=%s Retry=%d/%d InitialRaw=%.3f AppliedOpen=%.3f TranslationY=%.1f RangePixels=%.1f Direction=%s"),
+			*GetNameSafe(this),
+			mInitialApplyRetryCount,
+			VcardBottomSheetInitialApplyMaxRetries,
+			InitialOpenRatio,
+			mOpenRatio,
+			translationY,
+			dragRangePixels,
+			GetVcardBottomSheetMoveDirectionText(mLastMoveDirection));
+		return;
+	}
+
+	mbInitialApplyPending = false;
+	CancelInitialOpenRatioRetry();
+	UE_LOG(
+		LogVdjmVcard,
+		Display,
+		TEXT("VcardBottomSheet InitialApplied Widget=%s Retry=%d InitialRaw=%.3f AppliedOpen=%.3f TranslationY=%.1f RangePixels=%.1f Direction=%s"),
+		*GetNameSafe(this),
+		mInitialApplyRetryCount,
+		InitialOpenRatio,
+		mOpenRatio,
+		translationY,
+		dragRangePixels,
+		GetVcardBottomSheetMoveDirectionText(mLastMoveDirection));
+}
+
+void UVcardBottomSheetWidget::ScheduleInitialOpenRatioRetry()
+{
+	UWorld* world = GetWorld();
+	if (world == nullptr || world->GetTimerManager().IsTimerActive(mInitialApplyRetryTimerHandle))
+	{
+		return;
+	}
+
+	world->GetTimerManager().SetTimer(
+		mInitialApplyRetryTimerHandle,
+		[this]()
+		{
+			++mInitialApplyRetryCount;
+			TryApplyInitialOpenRatio(true);
+		},
+		FMath::Max(TrackingIntervalSeconds, 0.001f),
+		false);
+}
+
+void UVcardBottomSheetWidget::CancelInitialOpenRatioRetry()
+{
+	if (UWorld* world = GetWorld())
+	{
+		world->GetTimerManager().ClearTimer(mInitialApplyRetryTimerHandle);
+	}
 }
 
 void UVcardBottomSheetWidget::AnimateToOpenRatioWithDirection(float openRatio, EVcardBottomSheetMoveDirection moveDirection)

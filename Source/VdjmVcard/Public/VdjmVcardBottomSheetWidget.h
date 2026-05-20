@@ -184,6 +184,9 @@ private:
 	void StopMotionTimer();
 	void HandleMotionTimer();
 
+	void TryApplyInitialOpenRatio(bool bAllowRetry);
+	void ScheduleInitialOpenRatioRetry();
+	void CancelInitialOpenRatioRetry();
 	void AnimateToOpenRatioWithDirection(float openRatio, EVcardBottomSheetMoveDirection moveDirection);
 	bool SamplePointerScreenPosition(FVector2D& outScreenPosition) const;
 	bool SamplePressedPointerScreenPosition(FVector2D& outScreenPosition, EVcardBottomSheetPointerSource& outPointerSource) const;
@@ -213,6 +216,7 @@ private:
 	void BroadcastSettled(EVcardBottomSheetMoveDirection direction, EVcardBottomSheetMotionState previousState, float finalRatio);
 
 	FTimerHandle mMotionTimerHandle;
+	FTimerHandle mInitialApplyRetryTimerHandle;
 	FVector2D mPressStartScreenPosition = FVector2D::ZeroVector;
 	FVector2D mLastPointerScreenPosition = FVector2D::ZeroVector;
 	FVector2D mCurrentPointerScreenPosition = FVector2D::ZeroVector;
@@ -222,9 +226,11 @@ private:
 	float mPressStartOpenRatio = 1.0f;
 	float mTargetOpenRatio = 1.0f;
 	float mLastMotionTimeSeconds = 0.0f;
+	int32 mInitialApplyRetryCount = 0;
 	bool mbDragHandleBound = false;
 	bool mbHasAnimationTarget = false;
 	bool mbButtonReleaseHinted = false;
+	bool mbInitialApplyPending = false;
 	EVcardBottomSheetPointerSource mPointerSource = EVcardBottomSheetPointerSource::ENone;
 	EVcardBottomSheetMoveDirection mLastMoveDirection = EVcardBottomSheetMoveDirection::ENone;
 	EVcardBottomSheetMotionState mMotionState = EVcardBottomSheetMotionState::EIdle;
