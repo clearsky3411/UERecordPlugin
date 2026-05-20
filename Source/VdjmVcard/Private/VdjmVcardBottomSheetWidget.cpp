@@ -58,6 +58,20 @@ namespace
 		}
 	}
 
+	const TCHAR* GetVcardBottomSheetMoveDirectionText(EVcardBottomSheetMoveDirection moveDirection)
+	{
+		switch (moveDirection)
+		{
+		case EVcardBottomSheetMoveDirection::EOpening:
+			return TEXT("Opening");
+		case EVcardBottomSheetMoveDirection::EClosing:
+			return TEXT("Closing");
+		case EVcardBottomSheetMoveDirection::ENone:
+		default:
+			return TEXT("None");
+		}
+	}
+
 	bool IsVcardBottomSheetMouseButtonPressed(APlayerController* playerController)
 	{
 		const bool bPlayerControllerPressed = playerController != nullptr && playerController->IsInputKeyDown(EKeys::LeftMouseButton);
@@ -93,7 +107,10 @@ void UVcardBottomSheetWidget::SetOpenRatio(float openRatio)
 void UVcardBottomSheetWidget::SetOpenRatioImmediate(float openRatio)
 {
 	mbHasAnimationTarget = false;
+	const float previousRatio = mOpenRatio;
 	ApplyOpenRatio(GetClampedOpenRatio(openRatio), true);
+	SetLastMoveDirection(CalculateOpenRatioMoveDirection(previousRatio, mOpenRatio), mMotionState);
+	RefreshBoundaryDirection(mMotionState);
 	if (mMotionState == EVcardBottomSheetMotionState::EAnimating)
 	{
 		SetMotionState(EVcardBottomSheetMotionState::EIdle);
@@ -103,34 +120,55 @@ void UVcardBottomSheetWidget::SetOpenRatioImmediate(float openRatio)
 
 void UVcardBottomSheetWidget::AnimateToOpenRatio(float openRatio)
 {
-	mTargetOpenRatio = GetClampedOpenRatio(openRatio);
-	mbHasAnimationTarget = true;
-	SetMotionState(EVcardBottomSheetMotionState::EAnimating);
-	StartMotionTimer();
+	AnimateToOpenRatioWithDirection(openRatio, CalculateOpenRatioMoveDirection(mOpenRatio, GetClampedOpenRatio(openRatio)));
 }
 
 void UVcardBottomSheetWidget::ToggleOpenRatio()
 {
-	const float minRatio = GetClampedOpenRatio(MinOpenRatio);
-	const float maxRatio = GetClampedOpenRatio(MaxOpenRatio);
-	const float midpointRatio = (minRatio + maxRatio) * 0.5f;
-	const float targetRatio = mOpenRatio >= midpointRatio ? minRatio : maxRatio;
-	AnimateToOpenRatio(targetRatio);
+	const float targetRatio = ResolveDirectedToggleTargetRatio();
+	AnimateToOpenRatioWithDirection(targetRatio, CalculateOpenRatioMoveDirection(mOpenRatio, targetRatio));
 }
 
 void UVcardBottomSheetWidget::OpenSheet()
 {
-	AnimateToOpenRatio(MaxOpenRatio);
+	AnimateToOpenRatioWithDirection(ExpandedRatio, EVcardBottomSheetMoveDirection::EOpening);
 }
 
 void UVcardBottomSheetWidget::CloseSheet()
 {
-	AnimateToOpenRatio(MinOpenRatio);
+	AnimateToOpenRatioWithDirection(CollapsedRatio, EVcardBottomSheetMoveDirection::EClosing);
 }
 
 void UVcardBottomSheetWidget::SnapToNearestRatio()
 {
-	AnimateToOpenRatio(CalculateNearestSnapRatio(mOpenRatio));
+	const float targetRatio = CalculateNearestSnapRatio(mOpenRatio);
+	EVcardBottomSheetMoveDirection moveDirection = mLastMoveDirection;
+	if (moveDirection == EVcardBottomSheetMoveDirection::ENone)
+	{
+		moveDirection = CalculateOpenRatioMoveDirection(mOpenRatio, targetRatio);
+	}
+
+	AnimateToOpenRatioWithDirection(targetRatio, moveDirection);
+}
+
+void UVcardBottomSheetWidget::ApplyInitialOpenRatio()
+{
+	mbHasAnimationTarget = false;
+	mOpenRatio = GetClampedOpenRatio(InitialOpenRatio);
+	mTargetOpenRatio = mOpenRatio;
+	ApplySheetTransform(mOpenRatio);
+	RefreshBoundaryDirection(mMotionState);
+
+	UE_LOG(
+		LogVdjmVcard,
+		Display,
+		TEXT("VcardBottomSheet InitialApplied Widget=%s InitialRaw=%.3f AppliedOpen=%.3f TranslationY=%.1f RangePixels=%.1f Direction=%s"),
+		*GetNameSafe(this),
+		InitialOpenRatio,
+		mOpenRatio,
+		CalculateSheetTranslationY(mOpenRatio),
+		GetEffectiveDragRangePixels(),
+		GetVcardBottomSheetMoveDirectionText(mLastMoveDirection));
 }
 
 float UVcardBottomSheetWidget::GetSheetTopScreenY() const
@@ -161,25 +199,25 @@ void UVcardBottomSheetWidget::NativeConstruct()
 	Super::NativeConstruct();
 
 	BindDragHandle();
-	mOpenRatio = GetClampedOpenRatio(InitialOpenRatio);
-	mTargetOpenRatio = mOpenRatio;
-	ApplySheetTransform(mOpenRatio);
+	ApplyInitialOpenRatio();
 
 	UE_LOG(
 		LogVdjmVcard,
 		Display,
-		TEXT("VcardBottomSheet Construct Widget=%s SheetPanel=%s DragHandle=%s Content=%s InitialOpen=%.3f Collapsed=%.3f Expanded=%.3f RangeBasis=%s RangePixels=%.1f TopY=%.1f TopNorm=%.3f"),
+		TEXT("VcardBottomSheet Construct Widget=%s SheetPanel=%s DragHandle=%s Content=%s InitialRaw=%.3f AppliedOpen=%.3f Collapsed=%.3f Expanded=%.3f RangeBasis=%s RangePixels=%.1f TopY=%.1f TopNorm=%.3f Direction=%s"),
 		*GetNameSafe(this),
 		*GetNameSafe(SheetPanel.Get()),
 		*GetNameSafe(DragHandle.Get()),
 		*GetNameSafe(Content.Get()),
+		InitialOpenRatio,
 		mOpenRatio,
 		CollapsedRatio,
 		ExpandedRatio,
 		GetVcardBottomSheetDragRangeBasisText(DragRangeBasis),
 		GetEffectiveDragRangePixels(),
 		GetSheetTopScreenY(),
-		GetSheetTopNormalized());
+		GetSheetTopNormalized(),
+		GetVcardBottomSheetMoveDirectionText(mLastMoveDirection));
 }
 
 void UVcardBottomSheetWidget::NativeDestruct()
@@ -360,6 +398,7 @@ void UVcardBottomSheetWidget::HandleMotionTimer()
 
 			if (mMotionState == EVcardBottomSheetMotionState::EDragging)
 			{
+				SetLastMoveDirection(CalculatePointerMoveDirection(), mMotionState);
 				ApplyOpenRatio(CalculateOpenRatioFromDrag(), true);
 			}
 		}
@@ -373,11 +412,29 @@ void UVcardBottomSheetWidget::HandleMotionTimer()
 		{
 			ApplyOpenRatio(mTargetOpenRatio, true);
 			mbHasAnimationTarget = false;
+			const EVcardBottomSheetMotionState previousState = mMotionState;
+			const EVcardBottomSheetMoveDirection settledDirection = mLastMoveDirection;
+			BroadcastSettled(settledDirection, previousState, mOpenRatio);
+			RefreshBoundaryDirection(previousState);
 			SetMotionState(EVcardBottomSheetMotionState::EIdle);
 		}
 	}
 
 	StopMotionTimerIfIdle();
+}
+
+void UVcardBottomSheetWidget::AnimateToOpenRatioWithDirection(float openRatio, EVcardBottomSheetMoveDirection moveDirection)
+{
+	mTargetOpenRatio = GetClampedOpenRatio(openRatio);
+	if (moveDirection == EVcardBottomSheetMoveDirection::ENone)
+	{
+		moveDirection = CalculateOpenRatioMoveDirection(mOpenRatio, mTargetOpenRatio);
+	}
+
+	SetLastMoveDirection(moveDirection, mMotionState);
+	mbHasAnimationTarget = true;
+	SetMotionState(EVcardBottomSheetMotionState::EAnimating);
+	StartMotionTimer();
 }
 
 bool UVcardBottomSheetWidget::SamplePointerScreenPosition(FVector2D& outScreenPosition) const
@@ -503,6 +560,7 @@ void UVcardBottomSheetWidget::BeginSheetDrag()
 		DragStartThresholdPixels,
 		mPressStartOpenRatio);
 	SetMotionState(EVcardBottomSheetMotionState::EDragging);
+	SetLastMoveDirection(CalculatePointerMoveDirection(), EVcardBottomSheetMotionState::EPressTracking);
 	BP_OnDragStarted(mOpenRatio);
 }
 
@@ -567,6 +625,37 @@ void UVcardBottomSheetWidget::SetPointerReleasedHint()
 	mbButtonReleaseHinted = true;
 }
 
+float UVcardBottomSheetWidget::ResolveDirectedToggleTargetRatio() const
+{
+	const float minRatio = GetClampedOpenRatio(MinOpenRatio);
+	const float maxRatio = GetClampedOpenRatio(MaxOpenRatio);
+	const float collapsedRatio = GetClampedOpenRatio(CollapsedRatio);
+	const float expandedRatio = GetClampedOpenRatio(ExpandedRatio);
+	const float boundaryTolerance = FMath::Max(AnimationCompleteTolerance, 0.002f);
+	if (mOpenRatio <= minRatio + boundaryTolerance || mOpenRatio <= collapsedRatio + boundaryTolerance)
+	{
+		return expandedRatio;
+	}
+
+	if (mOpenRatio >= maxRatio - boundaryTolerance || mOpenRatio >= expandedRatio - boundaryTolerance)
+	{
+		return collapsedRatio;
+	}
+
+	if (mLastMoveDirection == EVcardBottomSheetMoveDirection::EClosing)
+	{
+		return collapsedRatio;
+	}
+
+	if (mLastMoveDirection == EVcardBottomSheetMoveDirection::EOpening)
+	{
+		return expandedRatio;
+	}
+
+	const float midpointRatio = (collapsedRatio + expandedRatio) * 0.5f;
+	return mOpenRatio >= midpointRatio ? collapsedRatio : expandedRatio;
+}
+
 float UVcardBottomSheetWidget::CalculateOpenRatioFromDrag() const
 {
 	const float dragRangePixels = GetEffectiveDragRangePixels();
@@ -575,15 +664,7 @@ float UVcardBottomSheetWidget::CalculateOpenRatioFromDrag() const
 		return mPressStartOpenRatio;
 	}
 
-	float minRatio = MinOpenRatio;
-	float maxRatio = MaxOpenRatio;
-	if (minRatio > maxRatio)
-	{
-		Swap(minRatio, maxRatio);
-	}
-
-	const float ratioRange = FMath::Max(maxRatio - minRatio, KINDA_SMALL_NUMBER);
-	const float ratioDelta = (-mTotalPointerDelta.Y / dragRangePixels) * ratioRange;
+	const float ratioDelta = -mTotalPointerDelta.Y / dragRangePixels;
 	return GetClampedOpenRatio(mPressStartOpenRatio + ratioDelta);
 }
 
@@ -659,6 +740,36 @@ float UVcardBottomSheetWidget::GetClampedOpenRatio(float openRatio) const
 	return FMath::Clamp(openRatio, minRatio, maxRatio);
 }
 
+EVcardBottomSheetMoveDirection UVcardBottomSheetWidget::CalculatePointerMoveDirection() const
+{
+	if (mTotalPointerDelta.Y > KINDA_SMALL_NUMBER)
+	{
+		return EVcardBottomSheetMoveDirection::EClosing;
+	}
+
+	if (mTotalPointerDelta.Y < -KINDA_SMALL_NUMBER)
+	{
+		return EVcardBottomSheetMoveDirection::EOpening;
+	}
+
+	return EVcardBottomSheetMoveDirection::ENone;
+}
+
+EVcardBottomSheetMoveDirection UVcardBottomSheetWidget::CalculateOpenRatioMoveDirection(float previousRatio, float newRatio) const
+{
+	if (newRatio > previousRatio + KINDA_SMALL_NUMBER)
+	{
+		return EVcardBottomSheetMoveDirection::EOpening;
+	}
+
+	if (newRatio < previousRatio - KINDA_SMALL_NUMBER)
+	{
+		return EVcardBottomSheetMoveDirection::EClosing;
+	}
+
+	return EVcardBottomSheetMoveDirection::ENone;
+}
+
 void UVcardBottomSheetWidget::ApplyOpenRatio(float openRatio, bool bBroadcastChange)
 {
 	const float previousRatio = mOpenRatio;
@@ -707,4 +818,61 @@ void UVcardBottomSheetWidget::SetMotionState(EVcardBottomSheetMotionState newSta
 	mMotionState = newState;
 	OnMotionStateChanged.Broadcast(newState);
 	BP_OnMotionStateChanged(newState);
+}
+
+void UVcardBottomSheetWidget::SetLastMoveDirection(EVcardBottomSheetMoveDirection newDirection, EVcardBottomSheetMotionState previousState)
+{
+	if (newDirection == EVcardBottomSheetMoveDirection::ENone || mLastMoveDirection == newDirection)
+	{
+		return;
+	}
+
+	const EVcardBottomSheetMoveDirection previousDirection = mLastMoveDirection;
+	UE_LOG(
+		LogVdjmVcard,
+		Display,
+		TEXT("VcardBottomSheet DirectionChanged Widget=%s Previous=%s New=%s PreviousState=%s Open=%.3f"),
+		*GetNameSafe(this),
+		GetVcardBottomSheetMoveDirectionText(previousDirection),
+		GetVcardBottomSheetMoveDirectionText(newDirection),
+		GetVcardBottomSheetMotionStateText(previousState),
+		mOpenRatio);
+
+	mLastMoveDirection = newDirection;
+	OnMoveDirectionChanged.Broadcast(previousDirection, newDirection, previousState);
+	BP_OnMoveDirectionChanged(previousDirection, newDirection, previousState);
+}
+
+void UVcardBottomSheetWidget::RefreshBoundaryDirection(EVcardBottomSheetMotionState previousState)
+{
+	const float minRatio = GetClampedOpenRatio(MinOpenRatio);
+	const float maxRatio = GetClampedOpenRatio(MaxOpenRatio);
+	const float collapsedRatio = GetClampedOpenRatio(CollapsedRatio);
+	const float expandedRatio = GetClampedOpenRatio(ExpandedRatio);
+	const float boundaryTolerance = FMath::Max(AnimationCompleteTolerance, 0.002f);
+	if (mOpenRatio <= minRatio + boundaryTolerance || mOpenRatio <= collapsedRatio + boundaryTolerance)
+	{
+		SetLastMoveDirection(EVcardBottomSheetMoveDirection::EOpening, previousState);
+		return;
+	}
+
+	if (mOpenRatio >= maxRatio - boundaryTolerance || mOpenRatio >= expandedRatio - boundaryTolerance)
+	{
+		SetLastMoveDirection(EVcardBottomSheetMoveDirection::EClosing, previousState);
+	}
+}
+
+void UVcardBottomSheetWidget::BroadcastSettled(EVcardBottomSheetMoveDirection direction, EVcardBottomSheetMotionState previousState, float finalRatio)
+{
+	UE_LOG(
+		LogVdjmVcard,
+		Display,
+		TEXT("VcardBottomSheet Settled Widget=%s Direction=%s PreviousState=%s FinalOpen=%.3f TranslationY=%.1f"),
+		*GetNameSafe(this),
+		GetVcardBottomSheetMoveDirectionText(direction),
+		GetVcardBottomSheetMotionStateText(previousState),
+		finalRatio,
+		CalculateSheetTranslationY(finalRatio));
+	OnSettled.Broadcast(direction, previousState, finalRatio);
+	BP_OnSettled(direction, previousState, finalRatio);
 }

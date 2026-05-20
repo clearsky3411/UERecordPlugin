@@ -25,6 +25,14 @@ enum class EVcardBottomSheetDragRangeBasis : uint8
 	ECustomPixels UMETA(DisplayName = "Custom Pixels")
 };
 
+UENUM(BlueprintType)
+enum class EVcardBottomSheetMoveDirection : uint8
+{
+	ENone UMETA(DisplayName = "None"),
+	EOpening UMETA(DisplayName = "Opening"),
+	EClosing UMETA(DisplayName = "Closing")
+};
+
 enum class EVcardBottomSheetPointerSource : uint8
 {
 	ENone,
@@ -34,6 +42,8 @@ enum class EVcardBottomSheetPointerSource : uint8
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVcardBottomSheetOpenRatioChanged, float, PreviousRatio, float, NewRatio);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVcardBottomSheetMotionStateChanged, EVcardBottomSheetMotionState, NewState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVcardBottomSheetMoveDirectionChanged, EVcardBottomSheetMoveDirection, PreviousDirection, EVcardBottomSheetMoveDirection, NewDirection, EVcardBottomSheetMotionState, PreviousState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVcardBottomSheetSettled, EVcardBottomSheetMoveDirection, Direction, EVcardBottomSheetMotionState, PreviousState, float, FinalRatio);
 
 /**
  * Draggable bottom sheet container for CreatorLobby.ToolContents.
@@ -66,6 +76,8 @@ public:
 	void CloseSheet();
 	UFUNCTION(BlueprintCallable, Category = "Vcard|BottomSheet")
 	void SnapToNearestRatio();
+	UFUNCTION(BlueprintCallable, Category = "Vcard|BottomSheet")
+	void ApplyInitialOpenRatio();
 
 	UFUNCTION(BlueprintPure, Category = "Vcard|BottomSheet")
 	float GetOpenRatio() const { return mOpenRatio; }
@@ -79,12 +91,20 @@ public:
 	FName GetContentSlotName() const { return ContentSlotName; }
 	UFUNCTION(BlueprintPure, Category = "Vcard|BottomSheet")
 	EVcardBottomSheetMotionState GetMotionState() const { return mMotionState; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|BottomSheet")
+	EVcardBottomSheetMoveDirection GetLastMoveDirection() const { return mLastMoveDirection; }
 
 	UPROPERTY(BlueprintAssignable, Category = "Vcard|BottomSheet")
 	FVcardBottomSheetOpenRatioChanged OnOpenRatioChanged;
 
 	UPROPERTY(BlueprintAssignable, Category = "Vcard|BottomSheet")
 	FVcardBottomSheetMotionStateChanged OnMotionStateChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "Vcard|BottomSheet")
+	FVcardBottomSheetMoveDirectionChanged OnMoveDirectionChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "Vcard|BottomSheet")
+	FVcardBottomSheetSettled OnSettled;
 
 protected:
 	virtual void NativeConstruct() override;
@@ -98,6 +118,10 @@ protected:
 	void BP_OnDragStarted(float openRatio);
 	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|BottomSheet")
 	void BP_OnDragFinished(float openRatio);
+	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|BottomSheet")
+	void BP_OnMoveDirectionChanged(EVcardBottomSheetMoveDirection previousDirection, EVcardBottomSheetMoveDirection newDirection, EVcardBottomSheetMotionState previousState);
+	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|BottomSheet")
+	void BP_OnSettled(EVcardBottomSheetMoveDirection direction, EVcardBottomSheetMotionState previousState, float finalRatio);
 
 	UFUNCTION()
 	void HandleDragHandlePressed();
@@ -160,6 +184,7 @@ private:
 	void StopMotionTimer();
 	void HandleMotionTimer();
 
+	void AnimateToOpenRatioWithDirection(float openRatio, EVcardBottomSheetMoveDirection moveDirection);
 	bool SamplePointerScreenPosition(FVector2D& outScreenPosition) const;
 	bool SamplePressedPointerScreenPosition(FVector2D& outScreenPosition, EVcardBottomSheetPointerSource& outPointerSource) const;
 	bool IsTrackedPointerPressed() const;
@@ -170,6 +195,7 @@ private:
 	void FinishPointerInteraction(bool bWasCancelled);
 	void SetPointerReleasedHint();
 
+	float ResolveDirectedToggleTargetRatio() const;
 	float CalculateOpenRatioFromDrag() const;
 	float CalculateNearestSnapRatio(float openRatio) const;
 	float CalculateAnimatedOpenRatio(float deltaSeconds) const;
@@ -177,9 +203,14 @@ private:
 	float GetViewportHeightPixels() const;
 	float GetEffectiveDragRangePixels() const;
 	float GetClampedOpenRatio(float openRatio) const;
+	EVcardBottomSheetMoveDirection CalculatePointerMoveDirection() const;
+	EVcardBottomSheetMoveDirection CalculateOpenRatioMoveDirection(float previousRatio, float newRatio) const;
 	void ApplyOpenRatio(float openRatio, bool bBroadcastChange);
 	void ApplySheetTransform(float openRatio);
 	void SetMotionState(EVcardBottomSheetMotionState newState);
+	void SetLastMoveDirection(EVcardBottomSheetMoveDirection newDirection, EVcardBottomSheetMotionState previousState);
+	void RefreshBoundaryDirection(EVcardBottomSheetMotionState previousState);
+	void BroadcastSettled(EVcardBottomSheetMoveDirection direction, EVcardBottomSheetMotionState previousState, float finalRatio);
 
 	FTimerHandle mMotionTimerHandle;
 	FVector2D mPressStartScreenPosition = FVector2D::ZeroVector;
@@ -195,5 +226,6 @@ private:
 	bool mbHasAnimationTarget = false;
 	bool mbButtonReleaseHinted = false;
 	EVcardBottomSheetPointerSource mPointerSource = EVcardBottomSheetPointerSource::ENone;
+	EVcardBottomSheetMoveDirection mLastMoveDirection = EVcardBottomSheetMoveDirection::ENone;
 	EVcardBottomSheetMotionState mMotionState = EVcardBottomSheetMotionState::EIdle;
 };
