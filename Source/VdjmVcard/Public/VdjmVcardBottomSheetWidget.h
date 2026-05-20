@@ -126,13 +126,13 @@ protected:
 	float MaxOpenRatio = 1.0f;
 
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Ratio", meta = (ClampMin = "0", ClampMax = "1", ToolTip = "Target ratio when the sheet is collapsed."))
-	float CollapsedRatio = 0.18f;
+	float CollapsedRatio = 0.0f;
 
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Ratio", meta = (ClampMin = "0", ClampMax = "1", ToolTip = "Target ratio when the sheet is expanded."))
 	float ExpandedRatio = 1.0f;
 
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Ratio", meta = (ToolTip = "Release targets. Drag release snaps to the nearest ratio."))
-	TArray<float> SnapRatios = { 0.18f, 1.0f };
+	TArray<float> SnapRatios = { 0.0f, 1.0f };
 
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Input", meta = (ClampMin = "0"))
 	float DragStartThresholdPixels = 10.0f;
@@ -162,12 +162,13 @@ private:
 
 	bool SamplePointerScreenPosition(FVector2D& outScreenPosition) const;
 	bool SamplePressedPointerScreenPosition(FVector2D& outScreenPosition, EVcardBottomSheetPointerSource& outPointerSource) const;
-	bool SampleTrackedPressedPointerScreenPosition(FVector2D& outScreenPosition) const;
+	bool IsTrackedPointerPressed() const;
 	void UpdatePointerDeltas(const FVector2D& screenPosition);
 	bool ShouldStartDrag() const;
 	void BeginSheetDrag();
 	void EndSheetDrag(bool bWasCancelled);
 	void FinishPointerInteraction(bool bWasCancelled);
+	void SetPointerReleasedHint();
 
 	float CalculateOpenRatioFromDrag() const;
 	float CalculateNearestSnapRatio(float openRatio) const;
@@ -192,6 +193,7 @@ private:
 	float mLastMotionTimeSeconds = 0.0f;
 	bool mbDragHandleBound = false;
 	bool mbHasAnimationTarget = false;
+	bool mbButtonReleaseHinted = false;
 	EVcardBottomSheetPointerSource mPointerSource = EVcardBottomSheetPointerSource::ENone;
 	EVcardBottomSheetMotionState mMotionState = EVcardBottomSheetMotionState::EIdle;
 };

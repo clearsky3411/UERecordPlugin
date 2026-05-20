@@ -92,19 +92,21 @@ void UVcardBottomSheetWidget::AnimateToOpenRatio(float openRatio)
 
 void UVcardBottomSheetWidget::ToggleOpenRatio()
 {
-	const float midpointRatio = (CollapsedRatio + ExpandedRatio) * 0.5f;
-	const float targetRatio = mOpenRatio >= midpointRatio ? CollapsedRatio : ExpandedRatio;
+	const float minRatio = GetClampedOpenRatio(MinOpenRatio);
+	const float maxRatio = GetClampedOpenRatio(MaxOpenRatio);
+	const float midpointRatio = (minRatio + maxRatio) * 0.5f;
+	const float targetRatio = mOpenRatio >= midpointRatio ? minRatio : maxRatio;
 	AnimateToOpenRatio(targetRatio);
 }
 
 void UVcardBottomSheetWidget::OpenSheet()
 {
-	AnimateToOpenRatio(ExpandedRatio);
+	AnimateToOpenRatio(MaxOpenRatio);
 }
 
 void UVcardBottomSheetWidget::CloseSheet()
 {
-	AnimateToOpenRatio(CollapsedRatio);
+	AnimateToOpenRatio(MinOpenRatio);
 }
 
 void UVcardBottomSheetWidget::SnapToNearestRatio()
@@ -179,6 +181,7 @@ void UVcardBottomSheetWidget::HandleDragHandlePressed()
 	}
 
 	mbHasAnimationTarget = false;
+	mbButtonReleaseHinted = false;
 	mPointerSource = pointerSource;
 	mPressStartScreenPosition = pointerPosition;
 	mLastPointerScreenPosition = pointerPosition;
@@ -206,7 +209,7 @@ void UVcardBottomSheetWidget::HandleDragHandleReleased()
 	FVector2D pointerPosition;
 	if (SamplePointerScreenPosition(pointerPosition))
 	{
-		UpdatePointerDeltas(pointerPosition);
+		mCurrentPointerScreenPosition = pointerPosition;
 	}
 
 	UE_LOG(
@@ -219,7 +222,7 @@ void UVcardBottomSheetWidget::HandleDragHandleReleased()
 		*mTotalPointerDelta.ToString(),
 		mTotalPointerDelta.Size(),
 		mOpenRatio);
-	FinishPointerInteraction(false);
+	SetPointerReleasedHint();
 }
 
 void UVcardBottomSheetWidget::BindDragHandle()
@@ -301,24 +304,36 @@ void UVcardBottomSheetWidget::HandleMotionTimer()
 		mMotionState == EVcardBottomSheetMotionState::EDragging)
 	{
 		FVector2D pointerPosition;
-		if (!SampleTrackedPressedPointerScreenPosition(pointerPosition))
+		const bool bPointerPressed = IsTrackedPointerPressed();
+		const bool bHasPointerPosition = SamplePointerScreenPosition(pointerPosition);
+		if (bHasPointerPosition)
+		{
+			UpdatePointerDeltas(pointerPosition);
+		}
+
+		if (!bPointerPressed)
 		{
 			UE_LOG(
 				LogVdjmVcard,
 				Display,
-				TEXT("VcardBottomSheet PointerLostAutoRelease Widget=%s State=%s Source=%s LastPos=%s TotalDelta=%s Distance=%.1f Open=%.3f"),
+				TEXT("VcardBottomSheet ReleaseDetectedByTimer Widget=%s State=%s Source=%s ReleaseHint=%s LastPos=%s TotalDelta=%s Distance=%.1f Open=%.3f"),
 				*GetNameSafe(this),
 				GetVcardBottomSheetMotionStateText(mMotionState),
 				GetVcardBottomSheetPointerSourceText(mPointerSource),
+				mbButtonReleaseHinted ? TEXT("true") : TEXT("false"),
 				*mLastPointerScreenPosition.ToString(),
 				*mTotalPointerDelta.ToString(),
 				mTotalPointerDelta.Size(),
 				mOpenRatio);
+			if (mMotionState == EVcardBottomSheetMotionState::EPressTracking && ShouldStartDrag())
+			{
+				BeginSheetDrag();
+				ApplyOpenRatio(CalculateOpenRatioFromDrag(), true);
+			}
 			FinishPointerInteraction(false);
 		}
-		else
+		else if (bHasPointerPosition)
 		{
-			UpdatePointerDeltas(pointerPosition);
 			if (mMotionState == EVcardBottomSheetMotionState::EPressTracking && ShouldStartDrag())
 			{
 				BeginSheetDrag();
@@ -404,7 +419,7 @@ bool UVcardBottomSheetWidget::SamplePressedPointerScreenPosition(FVector2D& outS
 	return false;
 }
 
-bool UVcardBottomSheetWidget::SampleTrackedPressedPointerScreenPosition(FVector2D& outScreenPosition) const
+bool UVcardBottomSheetWidget::IsTrackedPointerPressed() const
 {
 	APlayerController* playerController = GetOwningPlayer();
 	if (playerController == nullptr)
@@ -419,25 +434,16 @@ bool UVcardBottomSheetWidget::SampleTrackedPressedPointerScreenPosition(FVector2
 	{
 	case EVcardBottomSheetPointerSource::ETouch:
 		playerController->GetInputTouchState(ETouchIndex::Touch1, pointerX, pointerY, bTouchPressed);
-		if (bTouchPressed)
-		{
-			outScreenPosition = FVector2D(pointerX, pointerY);
-			return true;
-		}
-		return false;
+		return bTouchPressed;
 
 	case EVcardBottomSheetPointerSource::EMouse:
-		if (IsVcardBottomSheetMouseButtonPressed(playerController) && playerController->GetMousePosition(pointerX, pointerY))
-		{
-			outScreenPosition = FVector2D(pointerX, pointerY);
-			return true;
-		}
-		return false;
+		return IsVcardBottomSheetMouseButtonPressed(playerController);
 
 	default:
 	{
 		EVcardBottomSheetPointerSource pointerSource = EVcardBottomSheetPointerSource::ENone;
-		return SamplePressedPointerScreenPosition(outScreenPosition, pointerSource);
+		FVector2D pointerPosition;
+		return SamplePressedPointerScreenPosition(pointerPosition, pointerSource);
 	}
 	}
 }
@@ -489,6 +495,7 @@ void UVcardBottomSheetWidget::EndSheetDrag(bool bWasCancelled)
 void UVcardBottomSheetWidget::FinishPointerInteraction(bool bWasCancelled)
 {
 	mPointerSource = EVcardBottomSheetPointerSource::ENone;
+	mbButtonReleaseHinted = false;
 
 	if (mMotionState == EVcardBottomSheetMotionState::EDragging)
 	{
@@ -524,6 +531,11 @@ void UVcardBottomSheetWidget::FinishPointerInteraction(bool bWasCancelled)
 	}
 
 	StopMotionTimerIfIdle();
+}
+
+void UVcardBottomSheetWidget::SetPointerReleasedHint()
+{
+	mbButtonReleaseHinted = true;
 }
 
 float UVcardBottomSheetWidget::CalculateOpenRatioFromDrag() const
