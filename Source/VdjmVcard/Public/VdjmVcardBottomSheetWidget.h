@@ -17,6 +17,21 @@ enum class EVcardBottomSheetMotionState : uint8
 	EAnimating UMETA(DisplayName = "Animating")
 };
 
+UENUM(BlueprintType)
+enum class EVcardBottomSheetDragRangeBasis : uint8
+{
+	EViewportHeight UMETA(DisplayName = "Viewport Height"),
+	ESheetPanelHeight UMETA(DisplayName = "Sheet Panel Height"),
+	ECustomPixels UMETA(DisplayName = "Custom Pixels")
+};
+
+enum class EVcardBottomSheetPointerSource : uint8
+{
+	ENone,
+	ETouch,
+	EMouse
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVcardBottomSheetOpenRatioChanged, float, PreviousRatio, float, NewRatio);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FVcardBottomSheetMotionStateChanged, EVcardBottomSheetMotionState, NewState);
 
@@ -59,6 +74,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Vcard|BottomSheet")
 	float GetSheetTopNormalized() const;
 	UFUNCTION(BlueprintPure, Category = "Vcard|BottomSheet")
+	float GetDragRangePixels() const { return GetEffectiveDragRangePixels(); }
+	UFUNCTION(BlueprintPure, Category = "Vcard|BottomSheet")
 	FName GetContentSlotName() const { return ContentSlotName; }
 	UFUNCTION(BlueprintPure, Category = "Vcard|BottomSheet")
 	EVcardBottomSheetMotionState GetMotionState() const { return mMotionState; }
@@ -99,22 +116,22 @@ protected:
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet")
 	FName ContentSlotName = TEXT("Content");
 
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Ratio", meta = (ClampMin = "0", ClampMax = "1"))
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Ratio", meta = (ClampMin = "0", ClampMax = "1", ToolTip = "Initial open amount. 1 is fully open, 0 is moved down by the selected drag range."))
 	float InitialOpenRatio = 1.0f;
 
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Ratio", meta = (ClampMin = "0", ClampMax = "1"))
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Ratio", meta = (ClampMin = "0", ClampMax = "1", ToolTip = "Lowest allowed open amount."))
 	float MinOpenRatio = 0.0f;
 
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Ratio", meta = (ClampMin = "0", ClampMax = "1"))
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Ratio", meta = (ClampMin = "0", ClampMax = "1", ToolTip = "Highest allowed open amount."))
 	float MaxOpenRatio = 1.0f;
 
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Ratio", meta = (ClampMin = "0", ClampMax = "1"))
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Ratio", meta = (ClampMin = "0", ClampMax = "1", ToolTip = "Target ratio when the sheet is collapsed."))
 	float CollapsedRatio = 0.18f;
 
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Ratio", meta = (ClampMin = "0", ClampMax = "1"))
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Ratio", meta = (ClampMin = "0", ClampMax = "1", ToolTip = "Target ratio when the sheet is expanded."))
 	float ExpandedRatio = 1.0f;
 
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Ratio")
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Ratio", meta = (ToolTip = "Release targets. Drag release snaps to the nearest ratio."))
 	TArray<float> SnapRatios = { 0.18f, 1.0f };
 
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Input", meta = (ClampMin = "0"))
@@ -129,7 +146,10 @@ protected:
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Motion", meta = (ClampMin = "0"))
 	float AnimationCompleteTolerance = 0.002f;
 
-	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Motion", meta = (ClampMin = "0"))
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Motion")
+	EVcardBottomSheetDragRangeBasis DragRangeBasis = EVcardBottomSheetDragRangeBasis::EViewportHeight;
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|BottomSheet|Motion", meta = (ClampMin = "0", ToolTip = "Used only when DragRangeBasis is Custom Pixels."))
 	float DragRangePixelsOverride = 0.0f;
 
 private:
@@ -141,15 +161,19 @@ private:
 	void HandleMotionTimer();
 
 	bool SamplePointerScreenPosition(FVector2D& outScreenPosition) const;
+	bool SamplePressedPointerScreenPosition(FVector2D& outScreenPosition, EVcardBottomSheetPointerSource& outPointerSource) const;
+	bool SampleTrackedPressedPointerScreenPosition(FVector2D& outScreenPosition) const;
 	void UpdatePointerDeltas(const FVector2D& screenPosition);
 	bool ShouldStartDrag() const;
 	void BeginSheetDrag();
 	void EndSheetDrag(bool bWasCancelled);
+	void FinishPointerInteraction(bool bWasCancelled);
 
 	float CalculateOpenRatioFromDrag() const;
 	float CalculateNearestSnapRatio(float openRatio) const;
 	float CalculateAnimatedOpenRatio(float deltaSeconds) const;
 	float CalculateSheetTranslationY(float openRatio) const;
+	float GetViewportHeightPixels() const;
 	float GetEffectiveDragRangePixels() const;
 	float GetClampedOpenRatio(float openRatio) const;
 	void ApplyOpenRatio(float openRatio, bool bBroadcastChange);
@@ -168,5 +192,6 @@ private:
 	float mLastMotionTimeSeconds = 0.0f;
 	bool mbDragHandleBound = false;
 	bool mbHasAnimationTarget = false;
+	EVcardBottomSheetPointerSource mPointerSource = EVcardBottomSheetPointerSource::ENone;
 	EVcardBottomSheetMotionState mMotionState = EVcardBottomSheetMotionState::EIdle;
 };
