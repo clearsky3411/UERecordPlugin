@@ -171,6 +171,7 @@ FVdjmRecordEventResult UVcardEventApplyDescriptorNode::ExecuteEvent_Implementati
 	request.CacheOwnerWidget = lookupResult.Widget;
 	request.FallbackTargetSlotName = FallbackTargetSlotName;
 	request.DescriptorKey = DescriptorKey;
+	request.DescriptorRegistryDataAsset = DescriptorRegistryDataAsset;
 	request.PayloadData = PayloadData;
 	request.bAllowCreate = true;
 
