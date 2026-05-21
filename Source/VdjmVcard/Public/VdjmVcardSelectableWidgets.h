@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Input/Reply.h"
+#include "VdjmVcardDescriptorBase.h"
 #include "VdjmVcardWidgetBase.h"
 #include "VdjmVcardSelectableWidgets.generated.h"
 
@@ -117,6 +118,68 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVcardSelectableItemHoverDelegate
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVcardSelectableSignalRequestDelegate, FName, SignalTag, UVcardSelectableItemWidget*, ItemWidget);
 
 /**
+ * Registry descriptor for a selectable group.
+ *
+ * Responsibility:
+ * - Store reusable selectable item definitions behind a registry key.
+ * - Optionally override group behavior such as exclusive selection and signal emission.
+ *
+ * Must not:
+ * - Store runtime widget state.
+ * - Decide where the group is placed. The host WBP owns layout.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
+class VDJMVCARD_API UVcardSelectableGroupDescriptor : public UVcardDescriptorBase
+{
+	GENERATED_BODY()
+
+public:
+	UVcardSelectableGroupDescriptor();
+
+	UFUNCTION(BlueprintPure, Category = "Vcard|Selectable|Descriptor")
+	TArray<FVcardSelectableItemDescriptor> GetItemDescriptors() const { return ItemDescriptors; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Selectable|Descriptor")
+	TSubclassOf<UVcardSelectableItemWidget> GetDefaultItemWidgetClass() const { return DefaultItemWidgetClass; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Selectable|Descriptor")
+	bool ShouldOverrideDefaultItemWidgetClass() const { return bOverrideDefaultItemWidgetClass; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Selectable|Descriptor")
+	bool ShouldOverrideGroupBehavior() const { return bOverrideGroupBehavior; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Selectable|Descriptor")
+	bool ShouldUseExclusiveClick() const { return bExclusiveClick; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Selectable|Descriptor")
+	bool ShouldToggleClickedWhenNotExclusive() const { return bToggleClickedWhenNotExclusive; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Selectable|Descriptor")
+	bool ShouldEmitSignalWhenClicked() const { return bEmitSignalWhenClicked; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Selectable|Descriptor")
+	bool ShouldEmitSignalWhenHovered() const { return bEmitSignalWhenHovered; }
+
+protected:
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Selectable|Descriptor", meta = (ToolTip = "이 group descriptor가 제공하는 원본 item 목록입니다. Group widget은 ResolveSelectableItemDescriptors를 거쳐 최종 목록을 적용합니다."))
+	TArray<FVcardSelectableItemDescriptor> ItemDescriptors;
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Selectable|Descriptor", meta = (ToolTip = "true면 group widget의 DefaultItemWidgetClass를 이 값으로 덮어씁니다."))
+	bool bOverrideDefaultItemWidgetClass = false;
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Selectable|Descriptor", meta = (EditCondition = "bOverrideDefaultItemWidgetClass"))
+	TSubclassOf<UVcardSelectableItemWidget> DefaultItemWidgetClass;
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Selectable|Descriptor", meta = (ToolTip = "true면 group widget의 클릭/시그널 정책을 아래 값으로 덮어씁니다."))
+	bool bOverrideGroupBehavior = false;
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Selectable|Descriptor", meta = (EditCondition = "bOverrideGroupBehavior"))
+	bool bExclusiveClick = true;
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Selectable|Descriptor", meta = (EditCondition = "bOverrideGroupBehavior"))
+	bool bToggleClickedWhenNotExclusive = true;
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Selectable|Descriptor", meta = (EditCondition = "bOverrideGroupBehavior"))
+	bool bEmitSignalWhenClicked = true;
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Selectable|Descriptor", meta = (EditCondition = "bOverrideGroupBehavior"))
+	bool bEmitSignalWhenHovered = false;
+};
+
+/**
  * Parent group for selectable item widgets.
  *
  * Responsibility:
@@ -134,6 +197,8 @@ class VDJMVCARD_API UVcardSelectableGroupWidget : public UVcardWidgetBase
 	GENERATED_BODY()
 
 public:
+	virtual void ApplyVcardWidgetAttachment_Implementation(const FVcardWidgetAttachDescriptor& attachmentDescriptor, UObject* payloadData) override;
+
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Selectable")
 	void SetSelectableItems(const TArray<FVcardSelectableItemDescriptor>& itemDescriptors);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Selectable")
@@ -152,9 +217,19 @@ public:
 	bool HandleSelectableChildHoverChanged(UVcardSelectableItemWidget* itemWidget, bool bIsHovered);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Selectable")
 	bool RequestSignalForChild(UVcardSelectableItemWidget* itemWidget, FName signalTag);
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Selectable|Descriptor")
+	bool ApplySelectableGroupDescriptor(UVcardSelectableGroupDescriptor* groupDescriptor, UObject* payloadData, bool bForceApply, FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Selectable|Descriptor")
+	bool TryApplySelectableGroupDescriptorFromRegistry(UObject* payloadData, bool bForceApply, FString& outErrorReason);
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Selectable|Descriptor")
+	bool TryApplySelectableGroupDescriptorFromPayload(UObject* payloadData, bool bForceApply, FString& outErrorReason);
 
 	UFUNCTION(BlueprintPure, Category = "Vcard|Selectable")
 	TArray<FVcardSelectableItemDescriptor> GetSelectableItemDescriptors() const { return ItemDescriptors; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Selectable|Descriptor")
+	FName GetSelectableGroupDescriptorKey() const { return SelectableGroupDescriptorKey; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Selectable|Descriptor")
+	UVcardSelectableGroupDescriptor* GetLastAppliedSelectableGroupDescriptor() const { return mLastAppliedSelectableGroupDescriptor.Get(); }
 	UFUNCTION(BlueprintPure, Category = "Vcard|Selectable")
 	TArray<UVcardSelectableItemWidget*> GetSelectableChildren() const;
 	UFUNCTION(BlueprintPure, Category = "Vcard|Selectable")
@@ -183,6 +258,10 @@ protected:
 	void BP_OnSelectableItemClicked(UVcardSelectableItemWidget* itemWidget, FName itemId);
 	UFUNCTION(BlueprintNativeEvent, Category = "Vcard|Selectable")
 	bool RouteSelectableItemClicked(UVcardSelectableItemWidget* itemWidget, FName itemId, const FVcardSelectableItemDescriptor& itemDescriptor);
+	UFUNCTION(BlueprintNativeEvent, Category = "Vcard|Selectable|Descriptor")
+	void ResolveSelectableItemDescriptors(const TArray<FVcardSelectableItemDescriptor>& sourceItemDescriptors, UObject* payloadData, TArray<FVcardSelectableItemDescriptor>& outResolvedItemDescriptors);
+	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|Selectable|Descriptor")
+	void BP_OnSelectableGroupDescriptorApplied(UVcardSelectableGroupDescriptor* groupDescriptor, const TArray<FVcardSelectableItemDescriptor>& resolvedItemDescriptors);
 	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|Selectable")
 	void BP_OnSelectableItemHoverChanged(UVcardSelectableItemWidget* itemWidget, FName itemId, bool bIsHovered);
 	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|Selectable")
@@ -193,6 +272,9 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Selectable")
 	TArray<FVcardSelectableItemDescriptor> ItemDescriptors;
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Selectable|Descriptor", meta = (ToolTip = "Construct 때 registry에서 가져올 selectable group descriptor key입니다. 비워두면 기존 ItemDescriptors를 그대로 사용합니다."))
+	FName SelectableGroupDescriptorKey = NAME_None;
 
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Selectable")
 	TSubclassOf<UVcardSelectableItemWidget> DefaultItemWidgetClass;
@@ -212,6 +294,15 @@ protected:
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Selectable")
 	bool bRebuildOnConstruct = true;
 
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Selectable|Descriptor")
+	bool bTryApplySelectableGroupDescriptorOnConstruct = false;
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Selectable|Descriptor")
+	bool bTryApplySelectableGroupDescriptorFromPayload = true;
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Selectable|Descriptor")
+	bool bApplySelectableGroupDescriptorOnlyOnce = true;
+
 private:
 	bool CreateSelectableChild(const FVcardSelectableItemDescriptor& itemDescriptor, UVcardSelectableItemWidget*& outItemWidget, FString& outErrorReason);
 	void ApplyClickFeedback(UVcardSelectableItemWidget* clickedItemWidget);
@@ -219,6 +310,15 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<TWeakObjectPtr<UVcardSelectableItemWidget>> mItemWidgets;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UVcardSelectableGroupDescriptor> mLastAppliedSelectableGroupDescriptor;
+
+	UPROPERTY(Transient)
+	FName mLastAppliedSelectableGroupDescriptorKey = NAME_None;
+
+	UPROPERTY(Transient)
+	bool mbSelectableGroupDescriptorApplied = false;
 };
 
 /**

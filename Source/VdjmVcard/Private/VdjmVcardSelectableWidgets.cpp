@@ -7,6 +7,27 @@
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
 #include "VdjmVcard.h"
+#include "VdjmVcardDescriptorRegistryDataAsset.h"
+
+UVcardSelectableGroupDescriptor::UVcardSelectableGroupDescriptor()
+{
+	DebugName = TEXT("vcard-selectable-group");
+}
+
+void UVcardSelectableGroupWidget::ApplyVcardWidgetAttachment_Implementation(
+	const FVcardWidgetAttachDescriptor& attachmentDescriptor,
+	UObject* payloadData)
+{
+	Super::ApplyVcardWidgetAttachment_Implementation(attachmentDescriptor, payloadData);
+
+	if (!bTryApplySelectableGroupDescriptorFromPayload)
+	{
+		return;
+	}
+
+	FString errorReason;
+	TryApplySelectableGroupDescriptorFromPayload(payloadData, false, errorReason);
+}
 
 void UVcardSelectableGroupWidget::SetSelectableItems(const TArray<FVcardSelectableItemDescriptor>& itemDescriptors)
 {
@@ -192,6 +213,119 @@ bool UVcardSelectableGroupWidget::RequestSignalForChild(UVcardSelectableItemWidg
 	return true;
 }
 
+bool UVcardSelectableGroupWidget::ApplySelectableGroupDescriptor(
+	UVcardSelectableGroupDescriptor* groupDescriptor,
+	UObject* payloadData,
+	bool bForceApply,
+	FString& outErrorReason)
+{
+	outErrorReason.Reset();
+
+	if (!IsValid(groupDescriptor))
+	{
+		outErrorReason = TEXT("Selectable group descriptor is invalid.");
+		return false;
+	}
+
+	if (!bForceApply
+		&& bApplySelectableGroupDescriptorOnlyOnce
+		&& mbSelectableGroupDescriptorApplied
+		&& mLastAppliedSelectableGroupDescriptor.Get() == groupDescriptor)
+	{
+		UE_LOG(LogVdjmVcard, Verbose, TEXT("VcardSelectableGroup descriptor already applied. Group=%s Descriptor=%s Key=%s"),
+			*GetNameSafe(this),
+			*GetNameSafe(groupDescriptor),
+			*mLastAppliedSelectableGroupDescriptorKey.ToString());
+		return true;
+	}
+
+	if (groupDescriptor->ShouldOverrideDefaultItemWidgetClass() && *groupDescriptor->GetDefaultItemWidgetClass())
+	{
+		DefaultItemWidgetClass = groupDescriptor->GetDefaultItemWidgetClass();
+	}
+
+	if (groupDescriptor->ShouldOverrideGroupBehavior())
+	{
+		bExclusiveClick = groupDescriptor->ShouldUseExclusiveClick();
+		bToggleClickedWhenNotExclusive = groupDescriptor->ShouldToggleClickedWhenNotExclusive();
+		bEmitSignalWhenClicked = groupDescriptor->ShouldEmitSignalWhenClicked();
+		bEmitSignalWhenHovered = groupDescriptor->ShouldEmitSignalWhenHovered();
+	}
+
+	TArray<FVcardSelectableItemDescriptor> resolvedItemDescriptors;
+	ResolveSelectableItemDescriptors(groupDescriptor->GetItemDescriptors(), payloadData, resolvedItemDescriptors);
+	SetSelectableItems(resolvedItemDescriptors);
+
+	mLastAppliedSelectableGroupDescriptor = groupDescriptor;
+	mLastAppliedSelectableGroupDescriptorKey = SelectableGroupDescriptorKey;
+	mbSelectableGroupDescriptorApplied = true;
+
+	BP_OnSelectableGroupDescriptorApplied(groupDescriptor, resolvedItemDescriptors);
+
+	UE_LOG(LogVdjmVcard, Display, TEXT("VcardSelectableGroup descriptor applied. Group=%s Descriptor=%s Key=%s ItemCount=%d"),
+		*GetNameSafe(this),
+		*GetNameSafe(groupDescriptor),
+		*mLastAppliedSelectableGroupDescriptorKey.ToString(),
+		resolvedItemDescriptors.Num());
+	return true;
+}
+
+bool UVcardSelectableGroupWidget::TryApplySelectableGroupDescriptorFromRegistry(
+	UObject* payloadData,
+	bool bForceApply,
+	FString& outErrorReason)
+{
+	outErrorReason.Reset();
+
+	if (SelectableGroupDescriptorKey.IsNone())
+	{
+		outErrorReason = TEXT("Selectable group descriptor key is None.");
+		return false;
+	}
+
+	FString registryErrorReason;
+	if (!EnsureDescriptorRegistry(registryErrorReason))
+	{
+		outErrorReason = registryErrorReason;
+		return false;
+	}
+
+	UVcardDescriptorBase* descriptor = nullptr;
+	if (!GetDescriptorRegistry()->FindDescriptorByKey(SelectableGroupDescriptorKey, descriptor) || !IsValid(descriptor))
+	{
+		outErrorReason = FString::Printf(TEXT("Selectable group descriptor key '%s' was not found."), *SelectableGroupDescriptorKey.ToString());
+		return false;
+	}
+
+	UVcardSelectableGroupDescriptor* groupDescriptor = Cast<UVcardSelectableGroupDescriptor>(descriptor);
+	if (!IsValid(groupDescriptor))
+	{
+		outErrorReason = FString::Printf(TEXT("Descriptor key '%s' is not a selectable group descriptor. Class=%s"),
+			*SelectableGroupDescriptorKey.ToString(),
+			*GetNameSafe(descriptor->GetClass()));
+		return false;
+	}
+
+	return ApplySelectableGroupDescriptor(groupDescriptor, payloadData, bForceApply, outErrorReason);
+}
+
+bool UVcardSelectableGroupWidget::TryApplySelectableGroupDescriptorFromPayload(
+	UObject* payloadData,
+	bool bForceApply,
+	FString& outErrorReason)
+{
+	outErrorReason.Reset();
+
+	UVcardSelectableGroupDescriptor* groupDescriptor = Cast<UVcardSelectableGroupDescriptor>(payloadData);
+	if (!IsValid(groupDescriptor))
+	{
+		outErrorReason = TEXT("Payload is not a selectable group descriptor.");
+		return false;
+	}
+
+	return ApplySelectableGroupDescriptor(groupDescriptor, payloadData, bForceApply, outErrorReason);
+}
+
 TArray<UVcardSelectableItemWidget*> UVcardSelectableGroupWidget::GetSelectableChildren() const
 {
 	TArray<UVcardSelectableItemWidget*> itemWidgets;
@@ -241,10 +375,27 @@ void UVcardSelectableGroupWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	if (bRebuildOnConstruct)
+	bool bAppliedDescriptor = false;
+	if (bTryApplySelectableGroupDescriptorOnConstruct)
 	{
 		FString errorReason;
-		RefreshSelectableItems(errorReason);
+		bAppliedDescriptor = TryApplySelectableGroupDescriptorFromRegistry(GetLastPayloadData(), false, errorReason);
+		if (!bAppliedDescriptor && !SelectableGroupDescriptorKey.IsNone())
+		{
+			UE_LOG(LogVdjmVcard, Warning, TEXT("VcardSelectableGroup construct descriptor apply failed. Group=%s Key=%s Reason=%s"),
+				*GetNameSafe(this),
+				*SelectableGroupDescriptorKey.ToString(),
+				*errorReason);
+		}
+	}
+
+	if (bRebuildOnConstruct)
+	{
+		if (!bAppliedDescriptor)
+		{
+			FString errorReason;
+			RefreshSelectableItems(errorReason);
+		}
 	}
 }
 
@@ -349,6 +500,14 @@ bool UVcardSelectableGroupWidget::ContainsSelectableChild(UVcardSelectableItemWi
 	}
 
 	return false;
+}
+
+void UVcardSelectableGroupWidget::ResolveSelectableItemDescriptors_Implementation(
+	const TArray<FVcardSelectableItemDescriptor>& sourceItemDescriptors,
+	UObject* payloadData,
+	TArray<FVcardSelectableItemDescriptor>& outResolvedItemDescriptors)
+{
+	outResolvedItemDescriptors = sourceItemDescriptors;
 }
 
 void UVcardSelectableItemWidget::SetSelectableGroup(UVcardSelectableGroupWidget* groupWidget)
