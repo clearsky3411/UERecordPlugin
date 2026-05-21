@@ -182,6 +182,32 @@ bool UVcardDescriptorSlotCacheStore::ApplyCacheSwap(
 	UWidget* currentContent = namedSlot->GetContent();
 	UUserWidget* currentUserWidget = Cast<UUserWidget>(currentContent);
 	UUserWidget* previousActiveWidget = IsValid(record->ActiveWidget) ? record->ActiveWidget.Get() : currentUserWidget;
+	const bool bAlreadyActive =
+		currentContent == contentWidget &&
+		previousActiveWidget == contentWidget &&
+		record->ActiveCacheEntryKey == cacheEntryKey;
+
+	if (bAlreadyActive)
+	{
+		record->LastHostWidget = request.NamedSlotHostWidget;
+		record->LastTargetSlotName = attachmentDescriptor.TargetSlotName;
+		StoreWidgetEntry(*record, cacheEntryKey, contentWidget, request, attachmentDescriptor);
+		namedSlot->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+
+		outAppliedWidget = contentWidget;
+		UE_LOG(
+			LogVdjmVcard,
+			Log,
+			TEXT("Vcard cache swap already active Owner=%s Host=%s Slot=%s CacheSlot=%s Entry=%s Widget=%s"),
+			*GetNameSafe(cacheOwnerWidget),
+			*GetNameSafe(request.NamedSlotHostWidget),
+			*attachmentDescriptor.TargetSlotName.ToString(),
+			*cacheSlotKey.ToString(),
+			*cacheEntryKey.ToString(),
+			*GetNameSafe(contentWidget));
+		return true;
+	}
+
 	const bool bSwitchingWidget = previousActiveWidget != nullptr && previousActiveWidget != contentWidget;
 
 	if (bSwitchingWidget)
