@@ -149,6 +149,8 @@ bool UVcardWidgetBase::ApplyDescriptorInternal(FName fallbackTargetSlotName, FNa
 	FVcardDescriptorApplyRequest request;
 	request.NamedSlotHostWidget = this;
 	request.FallbackTargetSlotName = fallbackTargetSlotName;
+	request.DescriptorKey = descriptorKey;
+	request.DescriptorRegistryDataAsset = mDescriptorRegistry.Get();
 	request.PayloadData = payloadData;
 	request.bAllowCreate = true;
 	return descriptor->ApplyToWidget(request, outResult);

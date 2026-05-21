@@ -9,6 +9,49 @@
 #include "VdjmVcardDescriptorRegistryDataAsset.h"
 #include "VdjmVcardDescriptorSlotCacheStore.h"
 
+namespace
+{
+	bool ResolveVcardAttachmentPayload(
+		const FVcardDescriptorApplyRequest& request,
+		const FVcardWidgetAttachDescriptor& attachmentDescriptor,
+		UObject*& outPayloadData,
+		FString& outErrorReason)
+	{
+		outPayloadData = nullptr;
+		outErrorReason.Reset();
+
+		if (IsValid(attachmentDescriptor.PayloadData))
+		{
+			outPayloadData = attachmentDescriptor.PayloadData.Get();
+			return true;
+		}
+
+		if (!attachmentDescriptor.PayloadDescriptorKey.IsNone())
+		{
+			if (!IsValid(request.DescriptorRegistryDataAsset))
+			{
+				outErrorReason = FString::Printf(TEXT("Payload descriptor key '%s' requires a descriptor registry."),
+					*attachmentDescriptor.PayloadDescriptorKey.ToString());
+				return false;
+			}
+
+			UVcardDescriptorBase* payloadDescriptor = nullptr;
+			if (!request.DescriptorRegistryDataAsset->FindDescriptorByKey(attachmentDescriptor.PayloadDescriptorKey, payloadDescriptor) || !IsValid(payloadDescriptor))
+			{
+				outErrorReason = FString::Printf(TEXT("Payload descriptor key '%s' was not found."),
+					*attachmentDescriptor.PayloadDescriptorKey.ToString());
+				return false;
+			}
+
+			outPayloadData = payloadDescriptor;
+			return true;
+		}
+
+		outPayloadData = request.PayloadData.Get();
+		return true;
+	}
+}
+
 bool UVcardDescriptorApplier::GenerateWidgetsIntoNamedSlotsFromVcardDescriptorDataAsset(
 	UUserWidget* namedSlotHostWidget,
 	UVcardDescriptorRegistryDataAsset* descriptorRegistryDataAsset,
@@ -49,6 +92,7 @@ bool UVcardDescriptorApplier::GenerateWidgetsIntoNamedSlotsFromVcardDescriptorDa
 	request.NamedSlotHostWidget = namedSlotHostWidget;
 	request.CacheOwnerWidget = namedSlotHostWidget;
 	request.DescriptorKey = descriptorKey;
+	request.DescriptorRegistryDataAsset = descriptorRegistryDataAsset;
 	request.PayloadData = payloadData;
 	request.bAllowCreate = true;
 
@@ -320,7 +364,14 @@ bool UVcardDescriptorApplier::ApplyWidgetAttachment(const FVcardDescriptorApplyR
 
 		if (normalizedAttachment.bAutoApplyPayload && outCreatedWidget->GetClass()->ImplementsInterface(UVcardDescriptorReceiver::StaticClass()))
 		{
-			UObject* payloadData = IsValid(normalizedAttachment.PayloadData) ? normalizedAttachment.PayloadData.Get() : request.PayloadData.Get();
+			UObject* payloadData = nullptr;
+			FString payloadErrorReason;
+			if (!ResolveVcardAttachmentPayload(request, normalizedAttachment, payloadData, payloadErrorReason))
+			{
+				outErrorReason = payloadErrorReason;
+				return false;
+			}
+
 			IVcardDescriptorReceiver::Execute_ApplyVcardWidgetAttachment(outCreatedWidget, normalizedAttachment, payloadData);
 		}
 
@@ -351,7 +402,14 @@ bool UVcardDescriptorApplier::ApplyWidgetAttachment(const FVcardDescriptorApplyR
 
 	if (normalizedAttachment.bAutoApplyPayload && outCreatedWidget->GetClass()->ImplementsInterface(UVcardDescriptorReceiver::StaticClass()))
 	{
-		UObject* payloadData = IsValid(normalizedAttachment.PayloadData) ? normalizedAttachment.PayloadData.Get() : request.PayloadData.Get();
+		UObject* payloadData = nullptr;
+		FString payloadErrorReason;
+		if (!ResolveVcardAttachmentPayload(request, normalizedAttachment, payloadData, payloadErrorReason))
+		{
+			outErrorReason = payloadErrorReason;
+			return false;
+		}
+
 		IVcardDescriptorReceiver::Execute_ApplyVcardWidgetAttachment(outCreatedWidget, normalizedAttachment, payloadData);
 	}
 

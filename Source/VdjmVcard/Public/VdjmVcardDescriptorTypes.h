@@ -5,6 +5,7 @@
 #include "VdjmVcardDescriptorTypes.generated.h"
 
 class UVcardDescriptorBase;
+class UVcardDescriptorRegistryDataAsset;
 
 UENUM(BlueprintType)
 enum class EVcardDescriptorOpenPolicy : uint8
@@ -33,6 +34,9 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "현재 실행 중인 descriptor key입니다. ECacheSwap에서 CacheEntryKey가 비었을 때 재사용 key 후보로 사용합니다."))
 	FName DescriptorKey = NAME_None;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "attachment의 PayloadDescriptorKey를 실제 UObject payload로 해석할 때 사용할 descriptor registry입니다. 일반 사용에서는 descriptor applier가 자동으로 채웁니다."))
+	TObjectPtr<UVcardDescriptorRegistryDataAsset> DescriptorRegistryDataAsset;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "생성된 위젯에 전달할 런타임 payload입니다. attachment의 PayloadData가 비어 있으면 이 값을 전달합니다."))
 	TObjectPtr<UObject> PayloadData;
@@ -83,6 +87,9 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "이 attachment 전용 payload입니다. 비어 있으면 descriptor 호출 시 전달된 payload를 사용합니다."))
 	TObjectPtr<UObject> PayloadData;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "PayloadData가 비어 있을 때 registry에서 이 key의 descriptor를 찾아 생성된 위젯에 payload로 전달합니다. 같은 위젯 클래스를 서로 다른 데이터 구성으로 재사용할 때 사용합니다."))
+	FName PayloadDescriptorKey = NAME_None;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Descriptor")
 	FSoftObjectPath PayloadPath;
