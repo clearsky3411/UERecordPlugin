@@ -4,7 +4,72 @@
 #include "Components/Image.h"
 #include "Components/TileView.h"
 #include "Materials/MaterialInterface.h"
+#include "Engine/Texture2D.h"
 #include "VdjmVcard.h"
+
+void UVcardTileItemDataState::SetAssetTextureSource(TSoftObjectPtr<UTexture2D> sourceTexture, TSoftObjectPtr<UTexture2D> thumbnailTexture)
+{
+	ImageSourceType = EVcardTileImageSourceType::EAssetTexture;
+	SourceTexture = sourceTexture;
+	ThumbnailTexture = thumbnailTexture;
+	LocalSourceImagePath.Reset();
+	ClearLoadedImages();
+}
+
+void UVcardTileItemDataState::SetLocalImageFileSource(const FString& localSourceImagePath)
+{
+	ImageSourceType = EVcardTileImageSourceType::ELocalImageFile;
+	LocalSourceImagePath = localSourceImagePath;
+	SourceTexture.Reset();
+	ThumbnailTexture.Reset();
+	ClearLoadedImages();
+}
+
+void UVcardTileItemDataState::SetImageLoadState(
+	EVcardTileImageLoadRequestType requestType,
+	EVcardTileImageLoadState loadState,
+	const FString& errorReason)
+{
+	LastLoadError = errorReason;
+
+	if (requestType == EVcardTileImageLoadRequestType::EThumbnailOnly || requestType == EVcardTileImageLoadRequestType::EThumbnailAndSource)
+	{
+		ThumbnailLoadState = loadState;
+	}
+
+	if (requestType == EVcardTileImageLoadRequestType::ESourceOnly || requestType == EVcardTileImageLoadRequestType::EThumbnailAndSource)
+	{
+		SourceLoadState = loadState;
+	}
+
+	BroadcastImageLoadStateChanged(requestType, loadState);
+}
+
+void UVcardTileItemDataState::SetLoadedThumbnail(UTexture2D* loadedThumbnail)
+{
+	LoadedThumbnail = loadedThumbnail;
+	LastLoadError.Reset();
+	ThumbnailLoadState = IsValid(loadedThumbnail) ? EVcardTileImageLoadState::ELoaded : EVcardTileImageLoadState::EUnloaded;
+	BroadcastImageLoadStateChanged(EVcardTileImageLoadRequestType::EThumbnailOnly, ThumbnailLoadState);
+}
+
+void UVcardTileItemDataState::SetLoadedSourceImage(UTexture2D* loadedSourceImage)
+{
+	LoadedSourceImage = loadedSourceImage;
+	LastLoadError.Reset();
+	SourceLoadState = IsValid(loadedSourceImage) ? EVcardTileImageLoadState::ELoaded : EVcardTileImageLoadState::EUnloaded;
+	BroadcastImageLoadStateChanged(EVcardTileImageLoadRequestType::ESourceOnly, SourceLoadState);
+}
+
+void UVcardTileItemDataState::ClearLoadedImages()
+{
+	LoadedThumbnail = nullptr;
+	LoadedSourceImage = nullptr;
+	LastLoadError.Reset();
+	ThumbnailLoadState = EVcardTileImageLoadState::EUnloaded;
+	SourceLoadState = EVcardTileImageLoadState::EUnloaded;
+	BroadcastImageLoadStateChanged(EVcardTileImageLoadRequestType::EThumbnailAndSource, EVcardTileImageLoadState::EUnloaded);
+}
 
 void UVcardTileItemDataState::SetRuntimeHovered(bool bIsHovered)
 {
@@ -14,6 +79,12 @@ void UVcardTileItemDataState::SetRuntimeHovered(bool bIsHovered)
 void UVcardTileItemDataState::SetRuntimeSelected(bool bIsSelected)
 {
 	mbRuntimeSelected = bIsSelected;
+}
+
+void UVcardTileItemDataState::BroadcastImageLoadStateChanged(EVcardTileImageLoadRequestType requestType, EVcardTileImageLoadState loadState)
+{
+	OnImageLoadStateChanged.Broadcast(this, requestType, loadState);
+	BP_OnImageLoadStateChanged(requestType, loadState);
 }
 
 void UVcardTileViewWidget::SetTileItems(const TArray<UVcardTileItemDataState*>& itemDataStates)
@@ -295,7 +366,8 @@ bool UVcardTileViewWidget::ContainsTileItem(UVcardTileItemDataState* itemDataSta
 
 void UVcardTileEntryWidget::SetTileItemDataState(UVcardTileItemDataState* itemDataState)
 {
-	mItemDataState = itemDataState;
+	UnbindTileItemState();
+	BindTileItemState(itemDataState);
 	mbEntryHovered = IsValid(itemDataState) && itemDataState->IsRuntimeHovered();
 	mbEntrySelected = IsValid(itemDataState) && itemDataState->IsRuntimeSelected();
 
@@ -379,7 +451,7 @@ void UVcardTileEntryWidget::NativeOnEntryReleased()
 
 	SetEntryHovered(false);
 	mbEntrySelected = false;
-	mItemDataState.Reset();
+	UnbindTileItemState();
 	RefreshVisualState();
 }
 
@@ -395,6 +467,19 @@ void UVcardTileEntryWidget::NativeOnMouseLeave(const FPointerEvent& inMouseEvent
 	SetEntryHovered(false);
 }
 
+void UVcardTileEntryWidget::HandleTileItemImageLoadStateChanged(
+	UVcardTileItemDataState* itemDataState,
+	EVcardTileImageLoadRequestType requestType,
+	EVcardTileImageLoadState loadState)
+{
+	if (itemDataState != mItemDataState.Get())
+	{
+		return;
+	}
+
+	BP_OnTileImageLoadStateChanged(itemDataState, requestType, loadState);
+}
+
 void UVcardTileEntryWidget::SetOptionalLayerVisible(UWidget* layerWidget, bool bVisible) const
 {
 	if (!IsValid(layerWidget))
@@ -403,4 +488,23 @@ void UVcardTileEntryWidget::SetOptionalLayerVisible(UWidget* layerWidget, bool b
 	}
 
 	layerWidget->SetVisibility(bVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+}
+
+void UVcardTileEntryWidget::BindTileItemState(UVcardTileItemDataState* itemDataState)
+{
+	mItemDataState = itemDataState;
+	if (IsValid(itemDataState))
+	{
+		itemDataState->OnImageLoadStateChanged.AddDynamic(this, &UVcardTileEntryWidget::HandleTileItemImageLoadStateChanged);
+	}
+}
+
+void UVcardTileEntryWidget::UnbindTileItemState()
+{
+	if (UVcardTileItemDataState* itemDataState = mItemDataState.Get())
+	{
+		itemDataState->OnImageLoadStateChanged.RemoveAll(this);
+	}
+
+	mItemDataState.Reset();
 }

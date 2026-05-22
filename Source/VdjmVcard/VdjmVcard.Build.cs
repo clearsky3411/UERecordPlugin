@@ -20,7 +20,9 @@ public class VdjmVcard : ModuleRules
         PrivateDependencyModuleNames.AddRange(
             new string[]
             {
+                "ImageWrapper",
                 "InputCore",
+                "RenderCore",
                 "Slate",
                 "SlateCore"
             }

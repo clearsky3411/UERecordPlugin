@@ -9,14 +9,42 @@
 class UBorder;
 class UImage;
 class UMaterialInterface;
+class UTexture2D;
 class UTileView;
 class UWidget;
 class UVcardDescriptorBase;
 class UVcardTileItemDataState;
 
+UENUM(BlueprintType)
+enum class EVcardTileImageSourceType : uint8
+{
+	ENone UMETA(DisplayName = "None"),
+	EAssetTexture UMETA(DisplayName = "Asset Texture"),
+	ELocalImageFile UMETA(DisplayName = "Local Image File")
+};
+
+UENUM(BlueprintType)
+enum class EVcardTileImageLoadRequestType : uint8
+{
+	EThumbnailOnly UMETA(DisplayName = "Thumbnail Only"),
+	ESourceOnly UMETA(DisplayName = "Source Only"),
+	EThumbnailAndSource UMETA(DisplayName = "Thumbnail And Source")
+};
+
+UENUM(BlueprintType)
+enum class EVcardTileImageLoadState : uint8
+{
+	EUnloaded UMETA(DisplayName = "Unloaded"),
+	EQueued UMETA(DisplayName = "Queued"),
+	ELoading UMETA(DisplayName = "Loading"),
+	ELoaded UMETA(DisplayName = "Loaded"),
+	EFailed UMETA(DisplayName = "Failed")
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVcardTileItemDelegate, UVcardTileItemDataState*, ItemDataState, FName, ItemId);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVcardTileItemHoverDelegate, UVcardTileItemDataState*, ItemDataState, FName, ItemId, bool, bIsHovered);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVcardTileSignalRequestDelegate, FName, SignalTag, UVcardTileItemDataState*, ItemDataState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVcardTileImageLoadStateDelegate, UVcardTileItemDataState*, ItemDataState, EVcardTileImageLoadRequestType, RequestType, EVcardTileImageLoadState, LoadState);
 
 /**
  * TileView item data state.
@@ -35,11 +63,41 @@ class VDJMVCARD_API UVcardTileItemDataState : public UObject
 	GENERATED_BODY()
 
 public:
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Tile|Image")
+	void SetAssetTextureSource(TSoftObjectPtr<UTexture2D> sourceTexture, TSoftObjectPtr<UTexture2D> thumbnailTexture);
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Tile|Image")
+	void SetLocalImageFileSource(const FString& localSourceImagePath);
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Tile|Image")
+	void SetImageLoadState(EVcardTileImageLoadRequestType requestType, EVcardTileImageLoadState loadState, const FString& errorReason);
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Tile|Image")
+	void SetLoadedThumbnail(UTexture2D* loadedThumbnail);
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Tile|Image")
+	void SetLoadedSourceImage(UTexture2D* loadedSourceImage);
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Tile|Image")
+	void ClearLoadedImages();
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Tile")
 	void SetRuntimeHovered(bool bIsHovered);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Tile")
 	void SetRuntimeSelected(bool bIsSelected);
 
+	UFUNCTION(BlueprintPure, Category = "Vcard|Tile|Image")
+	EVcardTileImageSourceType GetImageSourceType() const { return ImageSourceType; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Tile|Image")
+	TSoftObjectPtr<UTexture2D> GetSourceTexture() const { return SourceTexture; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Tile|Image")
+	TSoftObjectPtr<UTexture2D> GetThumbnailTexture() const { return ThumbnailTexture; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Tile|Image")
+	FString GetLocalSourceImagePath() const { return LocalSourceImagePath; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Tile|Image")
+	UTexture2D* GetLoadedThumbnail() const { return LoadedThumbnail; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Tile|Image")
+	UTexture2D* GetLoadedSourceImage() const { return LoadedSourceImage; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Tile|Image")
+	EVcardTileImageLoadState GetThumbnailLoadState() const { return ThumbnailLoadState; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Tile|Image")
+	EVcardTileImageLoadState GetSourceLoadState() const { return SourceLoadState; }
+	UFUNCTION(BlueprintPure, Category = "Vcard|Tile|Image")
+	FString GetLastLoadError() const { return LastLoadError; }
 	UFUNCTION(BlueprintPure, Category = "Vcard|Tile")
 	FName GetItemId() const { return ItemId; }
 	UFUNCTION(BlueprintPure, Category = "Vcard|Tile")
@@ -106,7 +164,43 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Tile|Visual")
 	FLinearColor SelectedTint = FLinearColor(1.0f, 0.18f, 0.52f, 1.0f);
 
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Tile|Image")
+	EVcardTileImageSourceType ImageSourceType = EVcardTileImageSourceType::ENone;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Tile|Image")
+	TSoftObjectPtr<UTexture2D> SourceTexture;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Tile|Image")
+	TSoftObjectPtr<UTexture2D> ThumbnailTexture;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Tile|Image")
+	FString LocalSourceImagePath;
+
+	UPROPERTY(BlueprintAssignable, Category = "Vcard|Tile|Image")
+	FVcardTileImageLoadStateDelegate OnImageLoadStateChanged;
+
+protected:
+	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|Tile|Image")
+	void BP_OnImageLoadStateChanged(EVcardTileImageLoadRequestType requestType, EVcardTileImageLoadState loadState);
+
 private:
+	void BroadcastImageLoadStateChanged(EVcardTileImageLoadRequestType requestType, EVcardTileImageLoadState loadState);
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTexture2D> LoadedThumbnail = nullptr;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTexture2D> LoadedSourceImage = nullptr;
+
+	UPROPERTY(Transient)
+	FString LastLoadError;
+
+	UPROPERTY(Transient)
+	EVcardTileImageLoadState ThumbnailLoadState = EVcardTileImageLoadState::EUnloaded;
+
+	UPROPERTY(Transient)
+	EVcardTileImageLoadState SourceLoadState = EVcardTileImageLoadState::EUnloaded;
+
 	UPROPERTY(Transient)
 	bool mbRuntimeHovered = false;
 
@@ -243,6 +337,8 @@ protected:
 	void BP_OnTileItemDataStateChanged(UVcardTileItemDataState* itemDataState);
 	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|TileEntry")
 	void BP_OnTileVisualStateChanged(UVcardTileItemDataState* itemDataState, bool bIsHovered, bool bIsSelected);
+	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|TileEntry")
+	void BP_OnTileImageLoadStateChanged(UVcardTileItemDataState* itemDataState, EVcardTileImageLoadRequestType requestType, EVcardTileImageLoadState loadState);
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Vcard|TileEntry")
 	TObjectPtr<UWidget> HoverBorderLayer;
@@ -266,7 +362,12 @@ protected:
 	bool bHideHoverLayerWhenSelected = false;
 
 private:
+	UFUNCTION()
+	void HandleTileItemImageLoadStateChanged(UVcardTileItemDataState* itemDataState, EVcardTileImageLoadRequestType requestType, EVcardTileImageLoadState loadState);
+
 	void SetOptionalLayerVisible(UWidget* layerWidget, bool bVisible) const;
+	void BindTileItemState(UVcardTileItemDataState* itemDataState);
+	void UnbindTileItemState();
 
 	UPROPERTY(Transient)
 	TWeakObjectPtr<UVcardTileItemDataState> mItemDataState;
