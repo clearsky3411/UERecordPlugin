@@ -132,6 +132,33 @@ protected:
 };
 
 /**
+ * Descriptor that creates widgets from child descriptors without attaching them.
+ *
+ * Responsibility:
+ * - Run child descriptors with ECreateOnly so a receiver widget can arrange the generated widgets.
+ *
+ * Must not:
+ * - Attach generated widgets by itself. A group/panel widget owns the final arrangement rule.
+ */
+UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
+class VDJMVCARD_API UVcardWidgetFactoryGroupDescriptor : public UVcardDescriptorBase
+{
+	GENERATED_BODY()
+
+public:
+	UVcardWidgetFactoryGroupDescriptor();
+
+	UFUNCTION(BlueprintPure, Category = "Vcard|Descriptor")
+	TArray<UVcardDescriptorBase*> GetFactoryDescriptorList() const;
+
+protected:
+	virtual bool ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult) override;
+
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Instanced, Category = "Vcard|Descriptor", meta = (ToolTip = "순서대로 실행할 생성용 descriptor입니다. 이 descriptor 안에서는 child가 ECreateOnly로 실행되어 생성 위젯만 반환합니다."))
+	TArray<TObjectPtr<UVcardDescriptorBase>> FactoryDescriptors;
+};
+
+/**
  * Root descriptor for bootstrapping the V-card root widget.
  *
  * Responsibility:

@@ -229,6 +229,93 @@ bool UVcardCompositeDescriptor::ApplyToWidgetInternal(const FVcardDescriptorAppl
 	return bAnySuccess;
 }
 
+UVcardWidgetFactoryGroupDescriptor::UVcardWidgetFactoryGroupDescriptor()
+{
+	DebugName = TEXT("vcard-widget-factory-group");
+}
+
+TArray<UVcardDescriptorBase*> UVcardWidgetFactoryGroupDescriptor::GetFactoryDescriptorList() const
+{
+	TArray<UVcardDescriptorBase*> factoryDescriptorList;
+	factoryDescriptorList.Reserve(FactoryDescriptors.Num());
+
+	for (UVcardDescriptorBase* factoryDescriptor : FactoryDescriptors)
+	{
+		if (IsValid(factoryDescriptor))
+		{
+			factoryDescriptorList.Add(factoryDescriptor);
+		}
+	}
+
+	return factoryDescriptorList;
+}
+
+bool UVcardWidgetFactoryGroupDescriptor::ApplyToWidgetInternal(const FVcardDescriptorApplyRequest& request, FVcardDescriptorApplyResult& outResult)
+{
+	if (FactoryDescriptors.Num() == 0)
+	{
+		UE_LOG(LogVdjmVcard, Verbose, TEXT("Vcard factory group descriptor no-op DebugName=%s Host=%s"),
+			*DebugName.ToString(),
+			*GetNameSafe(request.NamedSlotHostWidget));
+		return true;
+	}
+
+	bool bAnySuccess = false;
+	FVcardDescriptorApplyRequest factoryRequest = request;
+	factoryRequest.AttachmentMode = EVcardDescriptorAttachmentMode::ECreateOnly;
+
+	for (int32 factoryIndex = 0; factoryIndex < FactoryDescriptors.Num(); ++factoryIndex)
+	{
+		UVcardDescriptorBase* factoryDescriptor = FactoryDescriptors[factoryIndex];
+		if (!IsValid(factoryDescriptor) || factoryDescriptor == this)
+		{
+			outResult.ErrorReason = FString::Printf(TEXT("Factory child descriptor is invalid. Descriptor=%s Index=%d"),
+				*DebugName.ToString(),
+				factoryIndex);
+			UE_LOG(LogVdjmVcard, Warning, TEXT("Vcard factory child skipped Descriptor=%s Index=%d Reason=%s"),
+				*DebugName.ToString(),
+				factoryIndex,
+				*outResult.ErrorReason);
+
+			if (bStopOnFirstFailure)
+			{
+				return false;
+			}
+
+			continue;
+		}
+
+		FVcardDescriptorApplyResult childResult;
+		const bool bApplied = factoryDescriptor->ApplyToWidget(factoryRequest, childResult);
+		if (bApplied)
+		{
+			bAnySuccess = true;
+			for (UUserWidget* createdWidget : childResult.CreatedWidgets)
+			{
+				if (IsValid(createdWidget))
+				{
+					outResult.CreatedWidgets.Add(createdWidget);
+				}
+			}
+			continue;
+		}
+
+		outResult.ErrorReason = childResult.ErrorReason;
+		UE_LOG(LogVdjmVcard, Warning, TEXT("Vcard factory child failed Descriptor=%s Index=%d Child=%s Reason=%s"),
+			*DebugName.ToString(),
+			factoryIndex,
+			*GetNameSafe(factoryDescriptor),
+			*outResult.ErrorReason);
+
+		if (bStopOnFirstFailure)
+		{
+			return false;
+		}
+	}
+
+	return bAnySuccess;
+}
+
 UVcardRootDescriptor::UVcardRootDescriptor()
 {
 	DebugName = TEXT("vcard-root");

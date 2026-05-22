@@ -17,6 +17,13 @@ enum class EVcardDescriptorOpenPolicy : uint8
 	ECacheSwap
 };
 
+UENUM(BlueprintType)
+enum class EVcardDescriptorAttachmentMode : uint8
+{
+	ECreateAndAttach,
+	ECreateOnly
+};
+
 USTRUCT(BlueprintType)
 struct VDJMVCARD_API FVcardDescriptorApplyRequest
 {
@@ -40,6 +47,9 @@ public:
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "생성된 위젯에 전달할 런타임 payload입니다. attachment의 PayloadData가 비어 있으면 이 값을 전달합니다."))
 	TObjectPtr<UObject> PayloadData;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "기본값은 기존 동작인 생성 후 즉시 attach입니다. Factory/group 계열만 ECreateOnly로 바꿔 생성 결과 위젯에 개입합니다."))
+	EVcardDescriptorAttachmentMode AttachmentMode = EVcardDescriptorAttachmentMode::ECreateAndAttach;
 
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Descriptor", meta = (ToolTip = "false면 descriptor가 위젯을 생성하지 않습니다. 일반적으로 true로 둡니다."))
 	bool bAllowCreate = true;

@@ -321,7 +321,8 @@ bool UVcardDescriptorApplier::ApplyWidgetAttachment(const FVcardDescriptorApplyR
 		normalizedAttachment.TargetSlotName = request.FallbackTargetSlotName;
 	}
 
-	if (normalizedAttachment.TargetSlotName.IsNone())
+	const bool bCreateOnly = request.AttachmentMode == EVcardDescriptorAttachmentMode::ECreateOnly;
+	if (!bCreateOnly && normalizedAttachment.TargetSlotName.IsNone())
 	{
 		outErrorReason = TEXT("Attachment has no target slot name.");
 		return false;
@@ -331,6 +332,40 @@ bool UVcardDescriptorApplier::ApplyWidgetAttachment(const FVcardDescriptorApplyR
 	{
 		outErrorReason = TEXT("Apply request does not allow widget creation.");
 		return false;
+	}
+
+	if (bCreateOnly)
+	{
+		if (normalizedAttachment.OpenPolicy == EVcardDescriptorOpenPolicy::ECacheSwap)
+		{
+			outErrorReason = TEXT("ECacheSwap cannot be used with ECreateOnly.");
+			return false;
+		}
+
+		if (!CreateUserWidgetForHost(request.NamedSlotHostWidget, normalizedAttachment.WidgetClass, outCreatedWidget, outErrorReason))
+		{
+			return false;
+		}
+
+		if (normalizedAttachment.bAutoApplyPayload && outCreatedWidget->GetClass()->ImplementsInterface(UVcardDescriptorReceiver::StaticClass()))
+		{
+			UObject* payloadData = nullptr;
+			FString payloadErrorReason;
+			if (!ResolveVcardAttachmentPayload(request, normalizedAttachment, payloadData, payloadErrorReason))
+			{
+				outErrorReason = payloadErrorReason;
+				return false;
+			}
+
+			IVcardDescriptorReceiver::Execute_ApplyVcardWidgetAttachment(outCreatedWidget, normalizedAttachment, payloadData);
+		}
+
+		UE_LOG(LogVdjmVcard, Verbose, TEXT("Vcard create-only attachment applied Host=%s Target=%s Widget=%s"),
+			*GetNameSafe(request.NamedSlotHostWidget),
+			*normalizedAttachment.TargetSlotName.ToString(),
+			*GetNameSafe(outCreatedWidget));
+
+		return true;
 	}
 
 	if (normalizedAttachment.OpenPolicy == EVcardDescriptorOpenPolicy::ECacheSwap)
