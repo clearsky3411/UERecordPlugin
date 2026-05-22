@@ -109,6 +109,34 @@ public:
 	bool bEnabled = true;
 };
 
+USTRUCT(BlueprintType)
+struct VDJMVCARD_API FVcardPresetCatalogChunk
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Preset|Chunk")
+	FName ChunkKey = NAME_None;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Preset|Chunk")
+	FText DisplayName;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Preset|Chunk")
+	FName GroupKey = NAME_None;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Preset|Chunk")
+	EVcardPresetAssetKind PrimaryKind = EVcardPresetAssetKind::ENone;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Preset|Chunk")
+	FName PrimaryAssetSlotKey = NAME_None;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Preset|Chunk")
+	bool bEnabled = true;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Vcard|Preset|Chunk")
+	TArray<FVcardPresetItemData> PresetItems;
+};
+
 /**
  * Runtime payload copied from a preset catalog item.
  *
@@ -169,13 +197,23 @@ class VDJMVCARD_API UVcardPresetCatalogDataAsset : public UDataAsset
 
 public:
 	UFUNCTION(BlueprintPure, Category = "Vcard|Preset")
-	TArray<FVcardPresetItemData> GetPresetItems() const { return PresetItems; }
+	TArray<FVcardPresetItemData> GetPresetItems() const;
+	UFUNCTION(BlueprintPure, Category = "Vcard|Preset")
+	TArray<FVcardPresetCatalogChunk> GetPresetChunks() const { return PresetChunks; }
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Preset")
 	TArray<FName> GetGroupKeys() const;
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Preset")
 	bool FindPresetItemById(FName itemId, FVcardPresetItemData& outPresetItemData) const;
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Preset")
+	bool FindChunkByKey(FName chunkKey, FVcardPresetCatalogChunk& outChunk) const;
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Preset")
 	void GetPresetItemsByGroup(FName groupKey, TArray<FVcardPresetItemData>& outPresetItems) const;
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Preset")
+	void ReplaceChunkItems(FName chunkKey, FText displayName, FName groupKey, EVcardPresetAssetKind primaryKind, FName primaryAssetSlotKey, const TArray<FVcardPresetItemData>& presetItems);
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Preset")
+	void AppendChunkItems(FName chunkKey, FText displayName, FName groupKey, EVcardPresetAssetKind primaryKind, FName primaryAssetSlotKey, const TArray<FVcardPresetItemData>& presetItems);
+	UFUNCTION(BlueprintCallable, Category = "Vcard|Preset")
+	bool ClearChunk(FName chunkKey);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Preset")
 	bool CreateTileItemDataStates(UObject* outer, TArray<UVcardTileItemDataState*>& outItemDataStates, FString& outErrorReason) const;
 	UFUNCTION(BlueprintCallable, Category = "Vcard|Preset")
@@ -185,8 +223,12 @@ protected:
 	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Preset")
 	TArray<FVcardPresetItemData> PresetItems;
 
+	UPROPERTY(BlueprintReadOnly, EditAnywhere, Category = "Vcard|Preset")
+	TArray<FVcardPresetCatalogChunk> PresetChunks;
+
 private:
-	UVcardTileItemDataState* CreateTileItemDataState(UObject* outer, const FVcardPresetItemData& presetItemData) const;
+	int32 FindChunkIndexByKey(FName chunkKey) const;
+	UVcardTileItemDataState* CreateTileItemDataState(UObject* outer, const FVcardPresetItemData& presetItemData, int32 itemIndex) const;
 	TSoftObjectPtr<UTexture2D> ResolveTileSourceTexture(const FVcardPresetItemData& presetItemData) const;
 	bool ResolveLocalImagePath(const FVcardPresetItemData& presetItemData, FString& outLocalImagePath) const;
 	FSoftObjectPath ResolvePrimaryAssetPath(const FVcardPresetItemData& presetItemData) const;

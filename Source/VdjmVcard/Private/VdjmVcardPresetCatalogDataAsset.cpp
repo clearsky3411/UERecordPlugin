@@ -90,6 +90,35 @@ bool UVcardPresetItemRuntimeData::GetPrimaryAssetRef(FVcardPresetAssetRef& outAs
 	return false;
 }
 
+TArray<FVcardPresetItemData> UVcardPresetCatalogDataAsset::GetPresetItems() const
+{
+	TArray<FVcardPresetItemData> allPresetItems = PresetItems;
+	for (const FVcardPresetCatalogChunk& presetChunk : PresetChunks)
+	{
+		for (FVcardPresetItemData presetItemData : presetChunk.PresetItems)
+		{
+			if (presetItemData.GroupKey.IsNone())
+			{
+				presetItemData.GroupKey = presetChunk.GroupKey;
+			}
+
+			if (presetItemData.PrimaryKind == EVcardPresetAssetKind::ENone)
+			{
+				presetItemData.PrimaryKind = presetChunk.PrimaryKind;
+			}
+
+			if (presetItemData.PrimaryAssetSlotKey.IsNone())
+			{
+				presetItemData.PrimaryAssetSlotKey = presetChunk.PrimaryAssetSlotKey;
+			}
+
+			allPresetItems.Add(presetItemData);
+		}
+	}
+
+	return allPresetItems;
+}
+
 TArray<FName> UVcardPresetCatalogDataAsset::GetGroupKeys() const
 {
 	TArray<FName> groupKeys;
@@ -98,6 +127,22 @@ TArray<FName> UVcardPresetCatalogDataAsset::GetGroupKeys() const
 		if (!presetItemData.GroupKey.IsNone())
 		{
 			groupKeys.AddUnique(presetItemData.GroupKey);
+		}
+	}
+
+	for (const FVcardPresetCatalogChunk& presetChunk : PresetChunks)
+	{
+		if (!presetChunk.GroupKey.IsNone())
+		{
+			groupKeys.AddUnique(presetChunk.GroupKey);
+		}
+
+		for (const FVcardPresetItemData& presetItemData : presetChunk.PresetItems)
+		{
+			if (!presetItemData.GroupKey.IsNone())
+			{
+				groupKeys.AddUnique(presetItemData.GroupKey);
+			}
 		}
 	}
 
@@ -120,7 +165,31 @@ bool UVcardPresetCatalogDataAsset::FindPresetItemById(FName itemId, FVcardPreset
 		}
 	}
 
+	for (const FVcardPresetCatalogChunk& presetChunk : PresetChunks)
+	{
+		for (const FVcardPresetItemData& presetItemData : presetChunk.PresetItems)
+		{
+			if (presetItemData.ItemId == itemId)
+			{
+				outPresetItemData = presetItemData;
+				return true;
+			}
+		}
+	}
+
 	return false;
+}
+
+bool UVcardPresetCatalogDataAsset::FindChunkByKey(FName chunkKey, FVcardPresetCatalogChunk& outChunk) const
+{
+	const int32 chunkIndex = FindChunkIndexByKey(chunkKey);
+	if (chunkIndex == INDEX_NONE)
+	{
+		return false;
+	}
+
+	outChunk = PresetChunks[chunkIndex];
+	return true;
 }
 
 void UVcardPresetCatalogDataAsset::GetPresetItemsByGroup(FName groupKey, TArray<FVcardPresetItemData>& outPresetItems) const
@@ -133,6 +202,122 @@ void UVcardPresetCatalogDataAsset::GetPresetItemsByGroup(FName groupKey, TArray<
 			outPresetItems.Add(presetItemData);
 		}
 	}
+
+	for (const FVcardPresetCatalogChunk& presetChunk : PresetChunks)
+	{
+		if (!presetChunk.bEnabled)
+		{
+			continue;
+		}
+
+		for (FVcardPresetItemData presetItemData : presetChunk.PresetItems)
+		{
+			if (!presetItemData.bEnabled)
+			{
+				continue;
+			}
+
+			if (presetItemData.GroupKey.IsNone())
+			{
+				presetItemData.GroupKey = presetChunk.GroupKey;
+			}
+
+			if (DoesGroupMatch(groupKey, presetItemData.GroupKey))
+			{
+				outPresetItems.Add(presetItemData);
+			}
+		}
+	}
+}
+
+void UVcardPresetCatalogDataAsset::ReplaceChunkItems(
+	FName chunkKey,
+	FText displayName,
+	FName groupKey,
+	EVcardPresetAssetKind primaryKind,
+	FName primaryAssetSlotKey,
+	const TArray<FVcardPresetItemData>& presetItems)
+{
+	if (chunkKey.IsNone())
+	{
+		return;
+	}
+
+	const int32 chunkIndex = FindChunkIndexByKey(chunkKey);
+	FVcardPresetCatalogChunk* presetChunk = nullptr;
+	if (chunkIndex == INDEX_NONE)
+	{
+		presetChunk = &PresetChunks.AddDefaulted_GetRef();
+		presetChunk->ChunkKey = chunkKey;
+	}
+	else
+	{
+		presetChunk = &PresetChunks[chunkIndex];
+	}
+
+	presetChunk->DisplayName = displayName;
+	presetChunk->GroupKey = groupKey;
+	presetChunk->PrimaryKind = primaryKind;
+	presetChunk->PrimaryAssetSlotKey = primaryAssetSlotKey;
+	presetChunk->PresetItems = presetItems;
+	presetChunk->bEnabled = true;
+}
+
+void UVcardPresetCatalogDataAsset::AppendChunkItems(
+	FName chunkKey,
+	FText displayName,
+	FName groupKey,
+	EVcardPresetAssetKind primaryKind,
+	FName primaryAssetSlotKey,
+	const TArray<FVcardPresetItemData>& presetItems)
+{
+	if (chunkKey.IsNone())
+	{
+		return;
+	}
+
+	const int32 chunkIndex = FindChunkIndexByKey(chunkKey);
+	FVcardPresetCatalogChunk* presetChunk = nullptr;
+	if (chunkIndex == INDEX_NONE)
+	{
+		presetChunk = &PresetChunks.AddDefaulted_GetRef();
+		presetChunk->ChunkKey = chunkKey;
+	}
+	else
+	{
+		presetChunk = &PresetChunks[chunkIndex];
+	}
+
+	presetChunk->DisplayName = displayName;
+	presetChunk->GroupKey = groupKey;
+	presetChunk->PrimaryKind = primaryKind;
+	presetChunk->PrimaryAssetSlotKey = primaryAssetSlotKey;
+	presetChunk->bEnabled = true;
+
+	for (const FVcardPresetItemData& presetItemData : presetItems)
+	{
+		const bool bAlreadyExists = presetChunk->PresetItems.ContainsByPredicate([&presetItemData](const FVcardPresetItemData& candidate)
+		{
+			return !presetItemData.ItemId.IsNone() && candidate.ItemId == presetItemData.ItemId;
+		});
+
+		if (!bAlreadyExists)
+		{
+			presetChunk->PresetItems.Add(presetItemData);
+		}
+	}
+}
+
+bool UVcardPresetCatalogDataAsset::ClearChunk(FName chunkKey)
+{
+	const int32 chunkIndex = FindChunkIndexByKey(chunkKey);
+	if (chunkIndex == INDEX_NONE)
+	{
+		return false;
+	}
+
+	PresetChunks.RemoveAt(chunkIndex);
+	return true;
 }
 
 bool UVcardPresetCatalogDataAsset::CreateTileItemDataStates(
@@ -153,17 +338,67 @@ bool UVcardPresetCatalogDataAsset::CreateTileItemDataStatesByGroup(
 	outErrorReason.Reset();
 
 	UObject* resolvedOuter = IsValid(outer) ? outer : const_cast<UVcardPresetCatalogDataAsset*>(this);
+	int32 itemIndex = 0;
 	for (const FVcardPresetItemData& presetItemData : PresetItems)
 	{
 		if (!presetItemData.bEnabled || !DoesGroupMatch(groupKey, presetItemData.GroupKey))
 		{
+			++itemIndex;
 			continue;
 		}
 
-		UVcardTileItemDataState* itemDataState = CreateTileItemDataState(resolvedOuter, presetItemData);
+		UVcardTileItemDataState* itemDataState = CreateTileItemDataState(resolvedOuter, presetItemData, itemIndex);
 		if (IsValid(itemDataState))
 		{
 			outItemDataStates.Add(itemDataState);
+		}
+
+		++itemIndex;
+	}
+
+	for (const FVcardPresetCatalogChunk& presetChunk : PresetChunks)
+	{
+		if (!presetChunk.bEnabled)
+		{
+			continue;
+		}
+
+		for (FVcardPresetItemData presetItemData : presetChunk.PresetItems)
+		{
+			if (!presetItemData.bEnabled)
+			{
+				++itemIndex;
+				continue;
+			}
+
+			if (presetItemData.GroupKey.IsNone())
+			{
+				presetItemData.GroupKey = presetChunk.GroupKey;
+			}
+
+			if (presetItemData.PrimaryKind == EVcardPresetAssetKind::ENone)
+			{
+				presetItemData.PrimaryKind = presetChunk.PrimaryKind;
+			}
+
+			if (presetItemData.PrimaryAssetSlotKey.IsNone())
+			{
+				presetItemData.PrimaryAssetSlotKey = presetChunk.PrimaryAssetSlotKey;
+			}
+
+			if (!DoesGroupMatch(groupKey, presetItemData.GroupKey))
+			{
+				++itemIndex;
+				continue;
+			}
+
+			UVcardTileItemDataState* itemDataState = CreateTileItemDataState(resolvedOuter, presetItemData, itemIndex);
+			if (IsValid(itemDataState))
+			{
+				outItemDataStates.Add(itemDataState);
+			}
+
+			++itemIndex;
 		}
 	}
 
@@ -178,9 +413,23 @@ bool UVcardPresetCatalogDataAsset::CreateTileItemDataStatesByGroup(
 	return true;
 }
 
+int32 UVcardPresetCatalogDataAsset::FindChunkIndexByKey(FName chunkKey) const
+{
+	if (chunkKey.IsNone())
+	{
+		return INDEX_NONE;
+	}
+
+	return PresetChunks.IndexOfByPredicate([chunkKey](const FVcardPresetCatalogChunk& presetChunk)
+	{
+		return presetChunk.ChunkKey == chunkKey;
+	});
+}
+
 UVcardTileItemDataState* UVcardPresetCatalogDataAsset::CreateTileItemDataState(
 	UObject* outer,
-	const FVcardPresetItemData& presetItemData) const
+	const FVcardPresetItemData& presetItemData,
+	int32 itemIndex) const
 {
 	if (!presetItemData.bEnabled)
 	{
@@ -193,11 +442,6 @@ UVcardTileItemDataState* UVcardPresetCatalogDataAsset::CreateTileItemDataState(
 	{
 		return nullptr;
 	}
-
-	const int32 itemIndex = PresetItems.IndexOfByPredicate([&presetItemData](const FVcardPresetItemData& candidate)
-	{
-		return &candidate == &presetItemData;
-	});
 
 	itemDataState->ItemId = ResolveFallbackItemId(presetItemData, itemIndex);
 	itemDataState->DisplayName = presetItemData.DisplayName;

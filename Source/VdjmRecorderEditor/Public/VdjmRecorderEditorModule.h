@@ -19,6 +19,9 @@ private:
 	void RegisterAssetRegistryTab();
 	void UnregisterAssetRegistryTab();
 	TSharedRef<class SDockTab> SpawnAssetRegistryTab(const class FSpawnTabArgs& args);
+	void RegisterVcardPresetCatalogTab();
+	void UnregisterVcardPresetCatalogTab();
+	TSharedRef<class SDockTab> SpawnVcardPresetCatalogTab(const class FSpawnTabArgs& args);
 
 	TArray<TSharedPtr<IAssetTypeActions>> RegisteredAssetTypeActions;
 };

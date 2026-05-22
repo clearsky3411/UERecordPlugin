@@ -19,7 +19,9 @@ public class VdjmRecorderEditor : ModuleRules
             new string[]
             {
                 "ApplicationCore",
+                "AssetRegistry",
                 "AssetTools",
+                "ContentBrowser",
                 "CoreUObject",
                 "EditorFramework",
                 "Engine",
@@ -28,7 +30,8 @@ public class VdjmRecorderEditor : ModuleRules
                 "Slate",
                 "SlateCore",
                 "ToolMenus",
-                "UnrealEd"
+                "UnrealEd",
+                "VdjmVcard"
             }
         );
     }

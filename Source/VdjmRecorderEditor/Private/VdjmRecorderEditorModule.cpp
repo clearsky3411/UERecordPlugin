@@ -3,6 +3,7 @@
 #include "AssetToolsModule.h"
 #include "IAssetTools.h"
 #include "SVdjmAssetRegistryPanel.h"
+#include "SVdjmVcardPresetCatalogPanel.h"
 #include "ToolMenus.h"
 #include "VdjmRecordEventFlowDataAssetActions.h"
 #include "Widgets/Docking/SDockTab.h"
@@ -12,18 +13,21 @@
 namespace
 {
 	const FName VdjmAssetRegistryTabId(TEXT("VdjmAssetRegistry"));
+	const FName VdjmVcardPresetCatalogTabId(TEXT("VdjmVcardPresetCatalog"));
 }
 
 void FVdjmRecorderEditorModule::StartupModule()
 {
 	RegisterAssetTypeActions();
 	RegisterAssetRegistryTab();
+	RegisterVcardPresetCatalogTab();
 	UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FVdjmRecorderEditorModule::RegisterMenus));
 }
 
 void FVdjmRecorderEditorModule::ShutdownModule()
 {
 	UnregisterMenus();
+	UnregisterVcardPresetCatalogTab();
 	UnregisterAssetRegistryTab();
 	UnregisterAssetTypeActions();
 }
@@ -72,6 +76,16 @@ void FVdjmRecorderEditorModule::RegisterMenus()
 		{
 			FGlobalTabmanager::Get()->TryInvokeTab(VdjmAssetRegistryTabId);
 		})));
+
+	section.AddMenuEntry(
+		TEXT("OpenVdjmVcardPresetCatalog"),
+		LOCTEXT("OpenVdjmVcardPresetCatalog", "Vcard Preset Catalog"),
+		LOCTEXT("OpenVdjmVcardPresetCatalogTooltip", "Open the Vcard preset catalog batch scanner."),
+		FSlateIcon(),
+		FUIAction(FExecuteAction::CreateLambda([]()
+		{
+			FGlobalTabmanager::Get()->TryInvokeTab(VdjmVcardPresetCatalogTabId);
+		})));
 }
 
 void FVdjmRecorderEditorModule::UnregisterMenus()
@@ -105,6 +119,31 @@ TSharedRef<SDockTab> FVdjmRecorderEditorModule::SpawnAssetRegistryTab(const FSpa
 		.Label(LOCTEXT("VdjmAssetRegistryTabLabel", "Vdjm Asset Registry"))
 		[
 			SNew(SVdjmAssetRegistryPanel)
+		];
+}
+
+void FVdjmRecorderEditorModule::RegisterVcardPresetCatalogTab()
+{
+	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
+		VdjmVcardPresetCatalogTabId,
+		FOnSpawnTab::CreateRaw(this, &FVdjmRecorderEditorModule::SpawnVcardPresetCatalogTab))
+		.SetDisplayName(LOCTEXT("VdjmVcardPresetCatalogTab", "Vcard Preset Catalog"))
+		.SetTooltipText(LOCTEXT("VdjmVcardPresetCatalogTabTooltip", "Scan folders and batch-fill Vcard preset catalog chunks."))
+		.SetMenuType(ETabSpawnerMenuType::Hidden);
+}
+
+void FVdjmRecorderEditorModule::UnregisterVcardPresetCatalogTab()
+{
+	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(VdjmVcardPresetCatalogTabId);
+}
+
+TSharedRef<SDockTab> FVdjmRecorderEditorModule::SpawnVcardPresetCatalogTab(const FSpawnTabArgs& args)
+{
+	return SNew(SDockTab)
+		.TabRole(ETabRole::NomadTab)
+		.Label(LOCTEXT("VdjmVcardPresetCatalogTabLabel", "Vcard Preset Catalog"))
+		[
+			SNew(SVdjmVcardPresetCatalogPanel)
 		];
 }
 
