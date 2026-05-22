@@ -6,28 +6,28 @@
 #include "Materials/MaterialInterface.h"
 #include "VdjmVcard.h"
 
-void UVcardTileItemDescriptor::SetRuntimeHovered(bool bIsHovered)
+void UVcardTileItemDataState::SetRuntimeHovered(bool bIsHovered)
 {
 	mbRuntimeHovered = bIsHovered;
 }
 
-void UVcardTileItemDescriptor::SetRuntimeSelected(bool bIsSelected)
+void UVcardTileItemDataState::SetRuntimeSelected(bool bIsSelected)
 {
 	mbRuntimeSelected = bIsSelected;
 }
 
-void UVcardTileViewWidget::SetTileItems(const TArray<UVcardTileItemDescriptor*>& itemDescriptors)
+void UVcardTileViewWidget::SetTileItems(const TArray<UVcardTileItemDataState*>& itemDataStates)
 {
-	mItemDescriptors.Reset();
-	mItemDescriptors.Reserve(itemDescriptors.Num());
+	mItemDataStates.Reset();
+	mItemDataStates.Reserve(itemDataStates.Num());
 
-	for (UVcardTileItemDescriptor* itemDescriptor : itemDescriptors)
+	for (UVcardTileItemDataState* itemDataState : itemDataStates)
 	{
-		if (IsValid(itemDescriptor))
+		if (IsValid(itemDataState))
 		{
-			itemDescriptor->SetRuntimeHovered(false);
-			itemDescriptor->SetRuntimeSelected(false);
-			mItemDescriptors.Add(itemDescriptor);
+			itemDataState->SetRuntimeHovered(false);
+			itemDataState->SetRuntimeSelected(false);
+			mItemDataStates.Add(itemDataState);
 		}
 	}
 
@@ -41,16 +41,16 @@ void UVcardTileViewWidget::SetTileItems(const TArray<UVcardTileItemDescriptor*>&
 	BP_OnTileItemsChanged(GetTileItems());
 }
 
-void UVcardTileViewWidget::AddTileItem(UVcardTileItemDescriptor* itemDescriptor)
+void UVcardTileViewWidget::AddTileItem(UVcardTileItemDataState* itemDataState)
 {
-	if (!IsValid(itemDescriptor) || ContainsTileItem(itemDescriptor))
+	if (!IsValid(itemDataState) || ContainsTileItem(itemDataState))
 	{
 		return;
 	}
 
-	itemDescriptor->SetRuntimeHovered(false);
-	itemDescriptor->SetRuntimeSelected(false);
-	mItemDescriptors.Add(itemDescriptor);
+	itemDataState->SetRuntimeHovered(false);
+	itemDataState->SetRuntimeSelected(false);
+	mItemDataStates.Add(itemDataState);
 
 	FString errorReason;
 	RefreshTileView(errorReason);
@@ -59,16 +59,16 @@ void UVcardTileViewWidget::AddTileItem(UVcardTileItemDescriptor* itemDescriptor)
 
 void UVcardTileViewWidget::ClearTileItems()
 {
-	for (UVcardTileItemDescriptor* itemDescriptor : mItemDescriptors)
+	for (UVcardTileItemDataState* itemDataState : mItemDataStates)
 	{
-		if (IsValid(itemDescriptor))
+		if (IsValid(itemDataState))
 		{
-			itemDescriptor->SetRuntimeHovered(false);
-			itemDescriptor->SetRuntimeSelected(false);
+			itemDataState->SetRuntimeHovered(false);
+			itemDataState->SetRuntimeSelected(false);
 		}
 	}
 
-	mItemDescriptors.Reset();
+	mItemDataStates.Reset();
 	mSelectedItem.Reset();
 
 	if (IsValid(TileView))
@@ -90,12 +90,12 @@ bool UVcardTileViewWidget::RefreshTileView(FString& outErrorReason)
 	}
 
 	TArray<UObject*> listItems;
-	listItems.Reserve(mItemDescriptors.Num());
-	for (UVcardTileItemDescriptor* itemDescriptor : mItemDescriptors)
+	listItems.Reserve(mItemDataStates.Num());
+	for (UVcardTileItemDataState* itemDataState : mItemDataStates)
 	{
-		if (IsValid(itemDescriptor))
+		if (IsValid(itemDataState))
 		{
-			listItems.Add(itemDescriptor);
+			listItems.Add(itemDataState);
 		}
 	}
 
@@ -114,27 +114,27 @@ bool UVcardTileViewWidget::RefreshTileView(FString& outErrorReason)
 	return true;
 }
 
-bool UVcardTileViewWidget::SelectTileItem(UVcardTileItemDescriptor* itemDescriptor, bool bEmitSignalRequest)
+bool UVcardTileViewWidget::SelectTileItem(UVcardTileItemDataState* itemDataState, bool bEmitSignalRequest)
 {
-	if (!IsValid(itemDescriptor) || !ContainsTileItem(itemDescriptor))
+	if (!IsValid(itemDataState) || !ContainsTileItem(itemDataState))
 	{
 		return false;
 	}
 
-	mSelectedItem = itemDescriptor;
-	UpdateRuntimeSelection(itemDescriptor);
+	mSelectedItem = itemDataState;
+	UpdateRuntimeSelection(itemDataState);
 
 	if (IsValid(TileView))
 	{
-		TileView->SetSelectedItem(itemDescriptor);
+		TileView->SetSelectedItem(itemDataState);
 	}
 
-	OnTileItemSelected.Broadcast(itemDescriptor, itemDescriptor->GetItemId());
-	BP_OnTileItemSelected(itemDescriptor, itemDescriptor->GetItemId());
+	OnTileItemSelected.Broadcast(itemDataState, itemDataState->GetItemId());
+	BP_OnTileItemSelected(itemDataState, itemDataState->GetItemId());
 
-	if (bEmitSignalRequest && bEmitSignalWhenTileClicked && !itemDescriptor->GetSelectSignalTag().IsNone())
+	if (bEmitSignalRequest && bEmitSignalWhenTileClicked && !itemDataState->GetSelectSignalTag().IsNone())
 	{
-		RequestSignalForItem(itemDescriptor, itemDescriptor->GetSelectSignalTag());
+		RequestSignalForItem(itemDataState, itemDataState->GetSelectSignalTag());
 	}
 
 	return true;
@@ -142,43 +142,43 @@ bool UVcardTileViewWidget::SelectTileItem(UVcardTileItemDescriptor* itemDescript
 
 bool UVcardTileViewWidget::SelectTileItemById(FName itemId, bool bEmitSignalRequest)
 {
-	for (UVcardTileItemDescriptor* itemDescriptor : mItemDescriptors)
+	for (UVcardTileItemDataState* itemDataState : mItemDataStates)
 	{
-		if (IsValid(itemDescriptor) && itemDescriptor->GetItemId() == itemId)
+		if (IsValid(itemDataState) && itemDataState->GetItemId() == itemId)
 		{
-			return SelectTileItem(itemDescriptor, bEmitSignalRequest);
+			return SelectTileItem(itemDataState, bEmitSignalRequest);
 		}
 	}
 
 	return false;
 }
 
-bool UVcardTileViewWidget::RequestSignalForItem(UVcardTileItemDescriptor* itemDescriptor, FName signalTag)
+bool UVcardTileViewWidget::RequestSignalForItem(UVcardTileItemDataState* itemDataState, FName signalTag)
 {
-	if (!IsValid(itemDescriptor) || signalTag.IsNone())
+	if (!IsValid(itemDataState) || signalTag.IsNone())
 	{
 		return false;
 	}
 
-	OnTileSignalRequested.Broadcast(signalTag, itemDescriptor);
-	BP_OnTileSignalRequested(signalTag, itemDescriptor);
+	OnTileSignalRequested.Broadcast(signalTag, itemDataState);
+	BP_OnTileSignalRequested(signalTag, itemDataState);
 	return true;
 }
 
-TArray<UVcardTileItemDescriptor*> UVcardTileViewWidget::GetTileItems() const
+TArray<UVcardTileItemDataState*> UVcardTileViewWidget::GetTileItems() const
 {
-	TArray<UVcardTileItemDescriptor*> itemDescriptors;
-	itemDescriptors.Reserve(mItemDescriptors.Num());
+	TArray<UVcardTileItemDataState*> itemDataStates;
+	itemDataStates.Reserve(mItemDataStates.Num());
 
-	for (UVcardTileItemDescriptor* itemDescriptor : mItemDescriptors)
+	for (UVcardTileItemDataState* itemDataState : mItemDataStates)
 	{
-		if (IsValid(itemDescriptor))
+		if (IsValid(itemDataState))
 		{
-			itemDescriptors.Add(itemDescriptor);
+			itemDataStates.Add(itemDataState);
 		}
 	}
 
-	return itemDescriptors;
+	return itemDataStates;
 }
 
 void UVcardTileViewWidget::NativeConstruct()
@@ -227,17 +227,17 @@ void UVcardTileViewWidget::UnbindTileViewEvents()
 
 void UVcardTileViewWidget::HandleTileItemClicked(UObject* itemObject)
 {
-	UVcardTileItemDescriptor* itemDescriptor = Cast<UVcardTileItemDescriptor>(itemObject);
-	SelectTileItem(itemDescriptor, true);
+	UVcardTileItemDataState* itemDataState = Cast<UVcardTileItemDataState>(itemObject);
+	SelectTileItem(itemDataState, true);
 }
 
 void UVcardTileViewWidget::HandleTileItemSelectionChanged(UObject* itemObject)
 {
-	UVcardTileItemDescriptor* itemDescriptor = Cast<UVcardTileItemDescriptor>(itemObject);
-	if (IsValid(itemDescriptor) && ContainsTileItem(itemDescriptor))
+	UVcardTileItemDataState* itemDataState = Cast<UVcardTileItemDataState>(itemObject);
+	if (IsValid(itemDataState) && ContainsTileItem(itemDataState))
 	{
-		mSelectedItem = itemDescriptor;
-		UpdateRuntimeSelection(itemDescriptor);
+		mSelectedItem = itemDataState;
+		UpdateRuntimeSelection(itemDataState);
 	}
 	else
 	{
@@ -248,43 +248,43 @@ void UVcardTileViewWidget::HandleTileItemSelectionChanged(UObject* itemObject)
 
 void UVcardTileViewWidget::HandleTileItemHoveredChanged(UObject* itemObject, bool bIsHovered)
 {
-	UVcardTileItemDescriptor* itemDescriptor = Cast<UVcardTileItemDescriptor>(itemObject);
-	if (!IsValid(itemDescriptor))
+	UVcardTileItemDataState* itemDataState = Cast<UVcardTileItemDataState>(itemObject);
+	if (!IsValid(itemDataState))
 	{
 		return;
 	}
 
-	itemDescriptor->SetRuntimeHovered(bIsHovered);
-	OnTileItemHoveredChanged.Broadcast(itemDescriptor, itemDescriptor->GetItemId(), bIsHovered);
-	BP_OnTileItemHoveredChanged(itemDescriptor, itemDescriptor->GetItemId(), bIsHovered);
+	itemDataState->SetRuntimeHovered(bIsHovered);
+	OnTileItemHoveredChanged.Broadcast(itemDataState, itemDataState->GetItemId(), bIsHovered);
+	BP_OnTileItemHoveredChanged(itemDataState, itemDataState->GetItemId(), bIsHovered);
 
-	if (bIsHovered && bEmitSignalWhenTileHovered && !itemDescriptor->GetHoverSignalTag().IsNone())
+	if (bIsHovered && bEmitSignalWhenTileHovered && !itemDataState->GetHoverSignalTag().IsNone())
 	{
-		RequestSignalForItem(itemDescriptor, itemDescriptor->GetHoverSignalTag());
+		RequestSignalForItem(itemDataState, itemDataState->GetHoverSignalTag());
 	}
 }
 
-void UVcardTileViewWidget::UpdateRuntimeSelection(UVcardTileItemDescriptor* selectedItem)
+void UVcardTileViewWidget::UpdateRuntimeSelection(UVcardTileItemDataState* selectedItem)
 {
-	for (UVcardTileItemDescriptor* itemDescriptor : mItemDescriptors)
+	for (UVcardTileItemDataState* itemDataState : mItemDataStates)
 	{
-		if (IsValid(itemDescriptor))
+		if (IsValid(itemDataState))
 		{
-			itemDescriptor->SetRuntimeSelected(itemDescriptor == selectedItem);
+			itemDataState->SetRuntimeSelected(itemDataState == selectedItem);
 		}
 	}
 }
 
-bool UVcardTileViewWidget::ContainsTileItem(UVcardTileItemDescriptor* itemDescriptor) const
+bool UVcardTileViewWidget::ContainsTileItem(UVcardTileItemDataState* itemDataState) const
 {
-	if (!IsValid(itemDescriptor))
+	if (!IsValid(itemDataState))
 	{
 		return false;
 	}
 
-	for (UVcardTileItemDescriptor* candidate : mItemDescriptors)
+	for (UVcardTileItemDataState* candidate : mItemDataStates)
 	{
-		if (candidate == itemDescriptor)
+		if (candidate == itemDataState)
 		{
 			return true;
 		}
@@ -293,13 +293,13 @@ bool UVcardTileViewWidget::ContainsTileItem(UVcardTileItemDescriptor* itemDescri
 	return false;
 }
 
-void UVcardTileEntryWidget::SetTileItemDescriptor(UVcardTileItemDescriptor* itemDescriptor)
+void UVcardTileEntryWidget::SetTileItemDataState(UVcardTileItemDataState* itemDataState)
 {
-	mItemDescriptor = itemDescriptor;
-	mbEntryHovered = IsValid(itemDescriptor) && itemDescriptor->IsRuntimeHovered();
-	mbEntrySelected = IsValid(itemDescriptor) && itemDescriptor->IsRuntimeSelected();
+	mItemDataState = itemDataState;
+	mbEntryHovered = IsValid(itemDataState) && itemDataState->IsRuntimeHovered();
+	mbEntrySelected = IsValid(itemDataState) && itemDataState->IsRuntimeSelected();
 
-	BP_OnTileItemDescriptorChanged(itemDescriptor);
+	BP_OnTileItemDataStateChanged(itemDataState);
 	RefreshVisualState();
 }
 
@@ -307,9 +307,9 @@ void UVcardTileEntryWidget::SetEntryHovered(bool bIsHovered)
 {
 	mbEntryHovered = bIsHovered;
 
-	if (UVcardTileItemDescriptor* itemDescriptor = mItemDescriptor.Get())
+	if (UVcardTileItemDataState* itemDataState = mItemDataState.Get())
 	{
-		itemDescriptor->SetRuntimeHovered(bIsHovered);
+		itemDataState->SetRuntimeHovered(bIsHovered);
 	}
 
 	RefreshVisualState();
@@ -317,27 +317,27 @@ void UVcardTileEntryWidget::SetEntryHovered(bool bIsHovered)
 
 void UVcardTileEntryWidget::RefreshVisualState()
 {
-	UVcardTileItemDescriptor* itemDescriptor = mItemDescriptor.Get();
-	const bool bSelected = mbEntrySelected || (IsValid(itemDescriptor) && itemDescriptor->IsRuntimeSelected());
-	const bool bHovered = mbEntryHovered || (IsValid(itemDescriptor) && itemDescriptor->IsRuntimeHovered());
+	UVcardTileItemDataState* itemDataState = mItemDataState.Get();
+	const bool bSelected = mbEntrySelected || (IsValid(itemDataState) && itemDataState->IsRuntimeSelected());
+	const bool bHovered = mbEntryHovered || (IsValid(itemDataState) && itemDataState->IsRuntimeHovered());
 	const bool bShowHover = bHovered && (!bSelected || !bHideHoverLayerWhenSelected);
 
 	SetOptionalLayerVisible(HoverBorderLayer, bShowHover);
 	SetOptionalLayerVisible(SelectedBorderLayer, bSelected);
 
 	FLinearColor targetTint = FLinearColor::White;
-	if (IsValid(itemDescriptor))
+	if (IsValid(itemDataState))
 	{
-		targetTint = bSelected ? itemDescriptor->SelectedTint : (bHovered ? itemDescriptor->HoverTint : itemDescriptor->NormalTint);
+		targetTint = bSelected ? itemDataState->SelectedTint : (bHovered ? itemDataState->HoverTint : itemDataState->NormalTint);
 
-		if (IsValid(Image_HoverBorderMaterial) && IsValid(itemDescriptor->HoverBorderMaterial))
+		if (IsValid(Image_HoverBorderMaterial) && IsValid(itemDataState->HoverBorderMaterial))
 		{
-			Image_HoverBorderMaterial->SetBrushFromMaterial(itemDescriptor->HoverBorderMaterial);
+			Image_HoverBorderMaterial->SetBrushFromMaterial(itemDataState->HoverBorderMaterial);
 		}
 
-		if (IsValid(Image_SelectedBorderMaterial) && IsValid(itemDescriptor->SelectedBorderMaterial))
+		if (IsValid(Image_SelectedBorderMaterial) && IsValid(itemDataState->SelectedBorderMaterial))
 		{
-			Image_SelectedBorderMaterial->SetBrushFromMaterial(itemDescriptor->SelectedBorderMaterial);
+			Image_SelectedBorderMaterial->SetBrushFromMaterial(itemDataState->SelectedBorderMaterial);
 		}
 	}
 
@@ -351,13 +351,13 @@ void UVcardTileEntryWidget::RefreshVisualState()
 		Border_Tint->SetBrushColor(targetTint);
 	}
 
-	BP_OnTileVisualStateChanged(itemDescriptor, bHovered, bSelected);
+	BP_OnTileVisualStateChanged(itemDataState, bHovered, bSelected);
 }
 
 void UVcardTileEntryWidget::NativeOnListItemObjectSet(UObject* listItemObject)
 {
 	IUserObjectListEntry::NativeOnListItemObjectSet(listItemObject);
-	SetTileItemDescriptor(Cast<UVcardTileItemDescriptor>(listItemObject));
+	SetTileItemDataState(Cast<UVcardTileItemDataState>(listItemObject));
 }
 
 void UVcardTileEntryWidget::NativeOnItemSelectionChanged(bool bIsSelected)
@@ -365,9 +365,9 @@ void UVcardTileEntryWidget::NativeOnItemSelectionChanged(bool bIsSelected)
 	IUserObjectListEntry::NativeOnItemSelectionChanged(bIsSelected);
 
 	mbEntrySelected = bIsSelected;
-	if (UVcardTileItemDescriptor* itemDescriptor = mItemDescriptor.Get())
+	if (UVcardTileItemDataState* itemDataState = mItemDataState.Get())
 	{
-		itemDescriptor->SetRuntimeSelected(bIsSelected);
+		itemDataState->SetRuntimeSelected(bIsSelected);
 	}
 
 	RefreshVisualState();
@@ -379,7 +379,7 @@ void UVcardTileEntryWidget::NativeOnEntryReleased()
 
 	SetEntryHovered(false);
 	mbEntrySelected = false;
-	mItemDescriptor.Reset();
+	mItemDataState.Reset();
 	RefreshVisualState();
 }
 

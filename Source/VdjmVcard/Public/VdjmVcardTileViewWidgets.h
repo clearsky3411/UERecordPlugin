@@ -12,14 +12,14 @@ class UMaterialInterface;
 class UTileView;
 class UWidget;
 class UVcardDescriptorBase;
-class UVcardTileItemDescriptor;
+class UVcardTileItemDataState;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVcardTileItemDelegate, UVcardTileItemDescriptor*, ItemDescriptor, FName, ItemId);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVcardTileItemHoverDelegate, UVcardTileItemDescriptor*, ItemDescriptor, FName, ItemId, bool, bIsHovered);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVcardTileSignalRequestDelegate, FName, SignalTag, UVcardTileItemDescriptor*, ItemDescriptor);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVcardTileItemDelegate, UVcardTileItemDataState*, ItemDataState, FName, ItemId);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FVcardTileItemHoverDelegate, UVcardTileItemDataState*, ItemDataState, FName, ItemId, bool, bIsHovered);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVcardTileSignalRequestDelegate, FName, SignalTag, UVcardTileItemDataState*, ItemDataState);
 
 /**
- * TileView item descriptor.
+ * TileView item data state.
  *
  * Responsibility:
  * - Represent one selectable tile item as UObject data for UTileView.
@@ -30,7 +30,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FVcardTileSignalRequestDelegate, FN
  * - Own entry widgets; UTileView virtualizes and reuses entries.
  */
 UCLASS(BlueprintType, Blueprintable, EditInlineNew, DefaultToInstanced)
-class VDJMVCARD_API UVcardTileItemDescriptor : public UObject
+class VDJMVCARD_API UVcardTileItemDataState : public UObject
 {
 	GENERATED_BODY()
 
@@ -115,10 +115,10 @@ private:
 };
 
 /**
- * TileView owner for V-card selectable item descriptors.
+ * TileView owner for V-card selectable item data states.
  *
  * Responsibility:
- * - Own the item descriptor list and UTileView selection state.
+ * - Own the item data state list and UTileView selection state.
  * - Broadcast selection/hover/signal requests for external flow binding.
  *
  * Must not:
@@ -132,24 +132,24 @@ class VDJMVCARD_API UVcardTileViewWidget : public UVcardWidgetBase
 
 public:
 	UFUNCTION(BlueprintCallable, Category = "Vcard|TileView")
-	void SetTileItems(const TArray<UVcardTileItemDescriptor*>& itemDescriptors);
+	void SetTileItems(const TArray<UVcardTileItemDataState*>& itemDataStates);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|TileView")
-	void AddTileItem(UVcardTileItemDescriptor* itemDescriptor);
+	void AddTileItem(UVcardTileItemDataState* itemDataState);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|TileView")
 	void ClearTileItems();
 	UFUNCTION(BlueprintCallable, Category = "Vcard|TileView")
 	bool RefreshTileView(FString& outErrorReason);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|TileView")
-	bool SelectTileItem(UVcardTileItemDescriptor* itemDescriptor, bool bEmitSignalRequest = true);
+	bool SelectTileItem(UVcardTileItemDataState* itemDataState, bool bEmitSignalRequest = true);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|TileView")
 	bool SelectTileItemById(FName itemId, bool bEmitSignalRequest = true);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|TileView")
-	bool RequestSignalForItem(UVcardTileItemDescriptor* itemDescriptor, FName signalTag);
+	bool RequestSignalForItem(UVcardTileItemDataState* itemDataState, FName signalTag);
 
 	UFUNCTION(BlueprintPure, Category = "Vcard|TileView")
-	TArray<UVcardTileItemDescriptor*> GetTileItems() const;
+	TArray<UVcardTileItemDataState*> GetTileItems() const;
 	UFUNCTION(BlueprintPure, Category = "Vcard|TileView")
-	UVcardTileItemDescriptor* GetSelectedTileItem() const { return mSelectedItem.Get(); }
+	UVcardTileItemDataState* GetSelectedTileItem() const { return mSelectedItem.Get(); }
 	UFUNCTION(BlueprintPure, Category = "Vcard|TileView")
 	UTileView* GetTileView() const { return TileView; }
 
@@ -167,13 +167,13 @@ protected:
 	virtual void NativeDestruct() override;
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|TileView")
-	void BP_OnTileItemsChanged(const TArray<UVcardTileItemDescriptor*>& itemDescriptors);
+	void BP_OnTileItemsChanged(const TArray<UVcardTileItemDataState*>& itemDataStates);
 	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|TileView")
-	void BP_OnTileItemSelected(UVcardTileItemDescriptor* itemDescriptor, FName itemId);
+	void BP_OnTileItemSelected(UVcardTileItemDataState* itemDataState, FName itemId);
 	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|TileView")
-	void BP_OnTileItemHoveredChanged(UVcardTileItemDescriptor* itemDescriptor, FName itemId, bool bIsHovered);
+	void BP_OnTileItemHoveredChanged(UVcardTileItemDataState* itemDataState, FName itemId, bool bIsHovered);
 	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|TileView")
-	void BP_OnTileSignalRequested(FName signalTag, UVcardTileItemDescriptor* itemDescriptor);
+	void BP_OnTileSignalRequested(FName signalTag, UVcardTileItemDataState* itemDataState);
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Vcard|TileView")
 	TObjectPtr<UTileView> TileView;
@@ -190,20 +190,20 @@ private:
 	void HandleTileItemClicked(UObject* itemObject);
 	void HandleTileItemSelectionChanged(UObject* itemObject);
 	void HandleTileItemHoveredChanged(UObject* itemObject, bool bIsHovered);
-	void UpdateRuntimeSelection(UVcardTileItemDescriptor* selectedItem);
-	bool ContainsTileItem(UVcardTileItemDescriptor* itemDescriptor) const;
+	void UpdateRuntimeSelection(UVcardTileItemDataState* selectedItem);
+	bool ContainsTileItem(UVcardTileItemDataState* itemDataState) const;
 
 	UPROPERTY(Transient)
-	TArray<TObjectPtr<UVcardTileItemDescriptor>> mItemDescriptors;
+	TArray<TObjectPtr<UVcardTileItemDataState>> mItemDataStates;
 
 	UPROPERTY(Transient)
-	TWeakObjectPtr<UVcardTileItemDescriptor> mSelectedItem;
+	TWeakObjectPtr<UVcardTileItemDataState> mSelectedItem;
 
 	bool mbTileViewEventsBound = false;
 };
 
 /**
- * TileView entry widget for UVcardTileItemDescriptor.
+ * TileView entry widget for UVcardTileItemDataState.
  *
  * Responsibility:
  * - Reflect hover and selection state in optional layers/materials/tints.
@@ -219,14 +219,14 @@ class VDJMVCARD_API UVcardTileEntryWidget : public UVcardWidgetBase, public IUse
 
 public:
 	UFUNCTION(BlueprintCallable, Category = "Vcard|TileEntry")
-	void SetTileItemDescriptor(UVcardTileItemDescriptor* itemDescriptor);
+	void SetTileItemDataState(UVcardTileItemDataState* itemDataState);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|TileEntry")
 	void SetEntryHovered(bool bIsHovered);
 	UFUNCTION(BlueprintCallable, Category = "Vcard|TileEntry")
 	void RefreshVisualState();
 
 	UFUNCTION(BlueprintPure, Category = "Vcard|TileEntry")
-	UVcardTileItemDescriptor* GetTileItemDescriptor() const { return mItemDescriptor.Get(); }
+	UVcardTileItemDataState* GetTileItemDataState() const { return mItemDataState.Get(); }
 	UFUNCTION(BlueprintPure, Category = "Vcard|TileEntry")
 	bool IsEntryHovered() const { return mbEntryHovered; }
 	UFUNCTION(BlueprintPure, Category = "Vcard|TileEntry")
@@ -240,9 +240,9 @@ protected:
 	virtual void NativeOnMouseLeave(const FPointerEvent& inMouseEvent) override;
 
 	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|TileEntry")
-	void BP_OnTileItemDescriptorChanged(UVcardTileItemDescriptor* itemDescriptor);
+	void BP_OnTileItemDataStateChanged(UVcardTileItemDataState* itemDataState);
 	UFUNCTION(BlueprintImplementableEvent, Category = "Vcard|TileEntry")
-	void BP_OnTileVisualStateChanged(UVcardTileItemDescriptor* itemDescriptor, bool bIsHovered, bool bIsSelected);
+	void BP_OnTileVisualStateChanged(UVcardTileItemDataState* itemDataState, bool bIsHovered, bool bIsSelected);
 
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "Vcard|TileEntry")
 	TObjectPtr<UWidget> HoverBorderLayer;
@@ -269,7 +269,7 @@ private:
 	void SetOptionalLayerVisible(UWidget* layerWidget, bool bVisible) const;
 
 	UPROPERTY(Transient)
-	TWeakObjectPtr<UVcardTileItemDescriptor> mItemDescriptor;
+	TWeakObjectPtr<UVcardTileItemDataState> mItemDataState;
 
 	bool mbEntryHovered = false;
 	bool mbEntrySelected = false;
